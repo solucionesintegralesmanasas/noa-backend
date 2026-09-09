@@ -1,0 +1,34 @@
+# Dependencias instaladas localmente
+/vendor/
+/node_modules/
+
+# Configuración local y credenciales
+/.env
+/.env.backup
+/.env.production
+/auth.json
+
+# Archivos generados por Laravel, Vite y pruebas
+/.phpunit.result.cache
+/bootstrap/cache/*.php
+/public/build/
+/public/hot
+/public/storage
+/storage/*.key
+
+# Registros de depuración de gestores de paquetes
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Configuración local de herramientas e IDE
+/.fleet/
+/.idea/
+/.vscode/
+/.phpactor.json
+/.phpunit.cache/
+
+# Archivos propios del sistema operativo
+.DS_Store
+Thumbs.db
