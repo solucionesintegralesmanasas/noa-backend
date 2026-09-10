@@ -429,6 +429,13 @@ class RoleSeeder extends Seeder
             'vehicle_inspections.create',
 
             'fuec.index',
+            'fuec.profile',
+
+            'control_sheets.index',
+            'control_sheets.create',
+
+            'service_delivery_control_sheets.index',
+            'service_delivery_control_sheets.create',
         ], 'and', false)->get();
 
         // 1. Asignar TODOS los permisos al SUPERADMIN
