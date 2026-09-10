@@ -283,6 +283,26 @@ class VehicleInspectionService extends BaseService
     }
 
     /**
+     * Verifica si existe una inspección para un vehículo en una fecha dada.
+     * Se usa para exigir una sola inspección al día antes de iniciar un servicio.
+     *
+     * @return Model|null Inspección encontrada o null.
+     */
+    public function existsInspectionForDate(string $vehicleUuid, string $date, ?string $companyUuid = null): ?Model
+    {
+        $query = VehicleInspection::query()
+            ->where('vehicle_uuid', $vehicleUuid)
+            ->whereDate('inspection_date', $date)
+            ->orderBy('created_at', 'desc');
+
+        if ($companyUuid) {
+            $query->where('company_uuid', $companyUuid);
+        }
+
+        return $query->first(['id', 'uuid', 'company_uuid', 'vehicle_uuid', 'driver_uuid', 'inspection_date', 'inspector_name', 'mileage']);
+    }
+
+    /**
      * Método getTotalMileage.
      */
     public function getTotalMileage(?string $companyUuid = null, ?string $thirdPartyUuid = null, ?string $vehicleUuid = null): float

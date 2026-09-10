@@ -76,7 +76,19 @@ class VehicleService extends BaseService
             $this->applyCompanyFilter($query, $companyUuid);
         }
 
-        if ($thirdPartyUuid) {
+        $user = Auth::user();
+        if ($user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR')) {
+            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
+                ?? $user->companies()->first()?->pivot?->third_party_uuid
+                ?? $user->third_party_uuid;
+
+            if ($driverThirdPartyUuid) {
+                $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
+                $query->whereIn('uuid', $allowedUuids);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -147,45 +159,20 @@ class VehicleService extends BaseService
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
-        } else {
-            // Seguridad: Si no hay companyUuid, asegurar el aislamiento estricto por tercero si es AFILIADO o CONDUCTOR
-            if ($user && ($user->hasRole('AFILIADO') || $user->hasRole('CONDUCTOR'))) {
-                $tUuid = request()->attributes->get('current_third_party_uuid');
-                if (! $tUuid) {
-                    $companyUser = $user->companies()->first();
-                    $tUuid = $companyUser?->pivot?->third_party_uuid;
-                }
-
-                $affiliateUuid = request()->attributes->get('current_affiliate_uuid');
-                if (! $affiliateUuid && $user->hasRole('CONDUCTOR') && $tUuid) {
-                    $affiliate = \App\Models\OwnerDriver::withoutGlobalScopes()->whereIn(
-                        'driver_license_uuid',
-                        \App\Models\DriverLicense::withoutGlobalScopes()
-                            ->where('third_party_uuid', $tUuid)
-                            ->whereIn('status', ['VIGENTE', 'ACTIVA'])
-                            ->pluck('uuid')
-                    )->first();
-                    if ($affiliate) {
-                        $affiliateUuid = $affiliate->third_party_uuid;
-                    }
-                }
-
-                $finalThirdPartyUuid = $affiliateUuid ?? $tUuid;
-
-                if ($finalThirdPartyUuid) {
-                    $query->where(function ($q) use ($finalThirdPartyUuid) {
-                        $q->where('third_party_uuid', $finalThirdPartyUuid)
-                            ->orWhereHas('owners', function ($ownerQuery) use ($finalThirdPartyUuid) {
-                                $ownerQuery->where('third_party_uuid', $finalThirdPartyUuid);
-                            });
-                    });
-                } else {
-                    $query->whereRaw('1 = 0');
-                }
-            }
         }
 
-        if ($thirdPartyUuid) {
+        if ($user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR')) {
+            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
+                ?? $user->companies()->first()?->pivot?->third_party_uuid
+                ?? $user->third_party_uuid;
+
+            if ($driverThirdPartyUuid) {
+                $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
+                $query->whereIn('uuid', $allowedUuids);
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -194,12 +181,46 @@ class VehicleService extends BaseService
             });
         }
 
-        \Illuminate\Support\Facades\Log::info('SQL Query:', [
-            'sql' => $query->toSql(),
-            'bindings' => $query->getBindings()
-        ]);
-
         return $query->get(['uuid', 'company_uuid', 'vehicle_license_plate', 'vehicle_class_uuid']);
+    }
+
+    /**
+     * Obtiene los UUIDs de los vehículos asignados estrictamente a un conductor:
+     * 1. Vehículos donde esté vinculado directamente en Proyectos existentes
+     *    (project_driver_vehicles para este conductor, incluyendo historial ante cambio de vehículo).
+     * 2. Vehículos donde exista un extracto de contrato (FUEC) donde figure como conductor.
+     *
+     * @return array<int, string>
+     */
+    public function getVehicleUuidsForConductor(string $driverThirdPartyUuid): array
+    {
+        // 1. Vehículos vinculados directamente a este conductor en Proyectos existentes
+        // Incluye tanto la asignación activa como el historial ante cambios de vehículo del conductor
+        $projectVehicleUuids = \App\Models\ProjectDriverVehicle::withoutGlobalScopes()
+            ->where('third_party_uuid', $driverThirdPartyUuid)
+            ->whereHas('project')
+            ->pluck('vehicle_uuid')
+            ->filter()
+            ->unique()
+            ->toArray();
+
+        // 2. Vehículos donde el conductor figura en extractos de contrato (FUEC)
+        $fuecVehicleUuids = \App\Models\Fuec::withoutGlobalScopes()
+            ->where(function ($q) use ($driverThirdPartyUuid) {
+                $q->where('main_conductor_uuid', $driverThirdPartyUuid)
+                    ->orWhere('secondary_conductor_uuid', $driverThirdPartyUuid)
+                    ->orWhere('tertiary_conductor_uuid', $driverThirdPartyUuid);
+            })
+            ->whereNotNull('vehicle_uuid')
+            ->pluck('vehicle_uuid')
+            ->filter()
+            ->unique()
+            ->toArray();
+
+        return array_values(array_unique(array_filter(array_merge(
+            $projectVehicleUuids,
+            $fuecVehicleUuids
+        ))));
     }
 
     /**

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Services\ServiceDeliveryControlSheet;
 
+use App\Models\Project;
 use App\Models\ServiceDeliveryControlSheet;
+use App\Models\ServiceDeliveryControlSheetRoute;
 use App\Models\Signature;
 use App\Services\BaseService;
 use App\Services\Signature\SignatureService;
@@ -18,14 +20,13 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Servicio para la gestión de hojas de control de entrega de servicios.
+ * Soporta: proyecto base, N recorridos por planilla, multi-día padre/hijos,
+ * vehículo interno (directo) y vehículo externo/subcontratado de plataforma.
  *
- * @author   Darwin Montes
- *
- * @version  V 1.0.0
- *
- * @since    V 1.0.0
- *
- * @created  2026-06-19
+ * @author Darwin Montes
+ * @version V 1.1.0
+ * @since V 1.1.0
+ * @created 2026-06-19
  */
 class ServiceDeliveryControlSheetService extends BaseService
 {
@@ -51,10 +52,12 @@ class ServiceDeliveryControlSheetService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $projectUuid = null
     ): LengthAwarePaginator {
         $query = $this->query()
             ->whereNull('parent_uuid')
+            ->with(['project', 'routes', 'children'])
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => function ($q) {
                 $q->where('is_active', true);
@@ -62,6 +65,10 @@ class ServiceDeliveryControlSheetService extends BaseService
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
+        }
+
+        if ($projectUuid) {
+            $query->where('project_uuid', $projectUuid);
         }
 
         if (! empty($search) && ! empty($this->searchableFields)) {
@@ -73,6 +80,8 @@ class ServiceDeliveryControlSheetService extends BaseService
                         $q->orWhere($field, 'like', "%{$search}%");
                     }
                 }
+                // Buscar también por nombre de proyecto
+                $q->orWhereHas('project', fn ($pq) => $pq->where('project_name', 'like', "%{$search}%"));
             });
         }
 
@@ -80,6 +89,7 @@ class ServiceDeliveryControlSheetService extends BaseService
 
         $paginator->getCollection()->transform(function ($item) {
             $item->setAttribute('control_status', $this->resolveControlStatus($item));
+            $item->setAttribute('routes_total', $item->routes ? $item->routes->count() : 0);
 
             return $item;
         });
@@ -91,18 +101,10 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         return $this->query()
             ->whereNull('parent_uuid')
-            ->with('children')
+            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl'])
             ->get();
     }
 
-    /**
-     * Calcula el estado de control de una hoja de control de servicio.
-     *
-     * Para servicios multi-día el estado considera las planillas diarias:
-     * - ABIERTA: todas las planillas diarias están abiertas.
-     * - PARCIAL: algunas planillas diarias están abiertas y otras cerradas.
-     * - CERRADA: todas las planillas diarias (y el servicio) están cerradas.
-     */
     private function resolveControlStatus(Model $record): string
     {
         $total = (int) ($record->children_total ?? 0);
@@ -112,7 +114,6 @@ class ServiceDeliveryControlSheetService extends BaseService
             if ($open === 0) {
                 return 'CERRADA';
             }
-
             if ($open < $total) {
                 return 'PARCIAL';
             }
@@ -125,18 +126,148 @@ class ServiceDeliveryControlSheetService extends BaseService
 
     public function getServiceDeliveryControlSheetByUuid(string $uuid): ?Model
     {
-        return $this->findByUuid($uuid);
+        return ServiceDeliveryControlSheet::where('uuid', $uuid)
+            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl'])
+            ->first();
+    }
+
+    /**
+     * Normaliza el tipo de planilla a los 4 valores permitidos.
+     */
+    private function normalizeType(mixed $type): string
+    {
+        $allowed = ['DIRECTO_CON_LA_EMPRESA', 'SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'];
+
+        return in_array($type, $allowed, true) ? $type : 'DIRECTO_CON_LA_EMPRESA';
+    }
+
+    private function isExternalType(string $type): bool
+    {
+        return in_array($type, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true);
+    }
+
+    /**
+     * Valida que las fechas de la planilla estén contenidas en el proyecto.
+     */
+    private function validateProjectDates(?string $projectUuid, ?string $startDate, ?string $endDate): void
+    {
+        if (! $projectUuid) {
+            return;
+        }
+        $project = Project::where('uuid', $projectUuid)->first();
+        if (! $project) {
+            throw ValidationException::withMessages(['project_uuid' => 'El proyecto seleccionado no existe.']);
+        }
+        if ($startDate && $project->start_date && Carbon::parse($startDate)->lt(Carbon::parse($project->start_date))) {
+            throw ValidationException::withMessages(['start_date' => 'La fecha de inicio no puede ser anterior al inicio del proyecto ('.$project->start_date->format('d/m/Y').').']);
+        }
+        if ($endDate && $project->completion_date && Carbon::parse($endDate)->gt(Carbon::parse($project->completion_date))) {
+            throw ValidationException::withMessages(['end_date' => 'La fecha de fin no puede superar el fin del proyecto ('.$project->completion_date->format('d/m/Y').').']);
+        }
+    }
+
+    /**
+     * Construye daily_route legacy a partir de routes (compatibilidad PDF/listado).
+     */
+    private function buildDailyRoute(?string $dailyRoute, mixed $routes): ?string
+    {
+        if (is_array($routes) && count($routes) > 0) {
+            $names = [];
+            foreach ($routes as $r) {
+                $label = trim(($r['origin'] ?? '').' - '.($r['destination'] ?? ''), ' -');
+                if ($label) {
+                    $names[] = $label;
+                }
+            }
+            if (! empty($names)) {
+                return mb_substr(implode(' · ', $names), 0, 255);
+            }
+        }
+
+        return $dailyRoute;
+    }
+
+    private function syncRoutes(ServiceDeliveryControlSheet $record, mixed $routes): void
+    {
+        if (! is_array($routes)) {
+            return;
+        }
+        $record->routes()->delete();
+        foreach (array_values($routes) as $index => $routeData) {
+            if (! is_array($routeData)) {
+                continue;
+            }
+            if (empty($routeData['origin']) && empty($routeData['destination'])) {
+                continue;
+            }
+            ServiceDeliveryControlSheetRoute::create([
+                'uuid' => (string) Str::uuid(),
+                'service_delivery_control_sheet_uuid' => $record->uuid,
+                'order_index' => $index + 1,
+                'origin' => $routeData['origin'] ?? null,
+                'destination' => $routeData['destination'] ?? null,
+                'is_active' => true,
+            ]);
+        }
+    }
+
+    private function createControlForSheet(ServiceDeliveryControlSheet $sheet, array $data, string $type, bool $isChild = false): void
+    {
+        if (! $this->isExternalType($type)) {
+            $this->serviceInternalControlService->createServiceInternalControl([
+                'company_uuid' => $sheet->company_uuid,
+                'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
+                'third_party_uuid' => $data['third_party_uuid'] ?? null,
+                'fuec_uuid' => $data['fuec_uuid'] ?? null,
+                'service_delivery_control_sheet_uuid' => $sheet->uuid,
+                'is_active' => $isChild ? false : ($data['is_active'] ?? true),
+            ]);
+
+            return;
+        }
+
+        // Vehículo externo / subcontratado: placa + conductor en texto libre.
+        // Si además viene vehicle_uuid de plataforma, se guarda también el vínculo interno para trazabilidad.
+        if (! empty($data['vehicle_uuid']) || ! empty($data['third_party_uuid'])) {
+            $this->serviceInternalControlService->createServiceInternalControl([
+                'company_uuid' => $sheet->company_uuid,
+                'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
+                'third_party_uuid' => $data['third_party_uuid'] ?? null,
+                'fuec_uuid' => $data['fuec_uuid'] ?? null,
+                'service_delivery_control_sheet_uuid' => $sheet->uuid,
+                'is_active' => $isChild ? false : ($data['is_active'] ?? true),
+            ]);
+        }
+
+        if (! empty($data['vehicle_license_plate']) && ! empty($data['driver_name_and_surname'])) {
+            $this->serviceInternalControlSubcontractedService->createServiceInternalControlSubcontracted([
+                'vehicle_class_uuid' => $data['vehicle_class_uuid'] ?? null,
+                'service_delivery_control_sheet_uuid' => $sheet->uuid,
+                'vehicle_license_plate' => $data['vehicle_license_plate'],
+                'driver_name_and_surname' => $data['driver_name_and_surname'],
+                'driver_license_number' => $data['driver_license_number'] ?? 'N/A',
+                'is_active' => $isChild ? false : ($data['is_active'] ?? true),
+            ]);
+        }
     }
 
     public function createServiceDeliveryControlSheet(array $data): Model
     {
-        return $this->transaction(function () use ($data) {
+        $type = $this->normalizeType($data['type_of_control_sheet'] ?? 'DIRECTO_CON_LA_EMPRESA');
+
+        return $this->transaction(function () use ($data, $type) {
+            $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
+            $endRaw = $data['end_date'] ?? null;
+            $this->validateProjectDates($data['project_uuid'] ?? null, $startRaw, $endRaw);
+
+            $dailyRoute = $this->buildDailyRoute($data['daily_route'] ?? null, $data['routes'] ?? null);
+
             $record = ServiceDeliveryControlSheet::create([
                 'official_name_and_surname' => $data['official_name_and_surname'] ?? null,
-                'service_date' => $data['start_date'] ?? $data['service_date'],
-                'start_date' => $data['start_date'] ?? $data['service_date'],
-                'end_date' => $data['end_date'] ?? null,
-                'daily_route' => $data['daily_route'] ?? null,
+                'service_date' => $startRaw,
+                'start_date' => $startRaw,
+                'end_date' => $endRaw,
+                'daily_route' => $dailyRoute,
                 'start_time' => $data['start_time'] ?? null,
                 'end_time' => $data['end_time'] ?? null,
                 'total_hours' => $data['total_hours'] ?? null,
@@ -144,26 +275,23 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'ending_kilometer' => $data['ending_kilometer'] ?? null,
                 'number_of_tolls' => $data['number_of_tolls'] ?? null,
                 'total_toll_value' => $data['total_toll_value'] ?? null,
-                'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+                'type_of_control_sheet' => $type,
                 'is_active' => $data['is_active'] ?? true,
                 'company_uuid' => $data['company_uuid'],
+                'project_uuid' => $data['project_uuid'] ?? null,
             ]);
 
-            $this->serviceInternalControlService->createServiceInternalControl([
-                'company_uuid' => $data['company_uuid'],
-                'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
-                'third_party_uuid' => $data['third_party_uuid'] ?? null,
-                'fuec_uuid' => $data['fuec_uuid'] ?? null,
-                'service_delivery_control_sheet_uuid' => $record->uuid,
-                'is_active' => $data['is_active'] ?? true,
-            ]);
+            $this->createControlForSheet($record, $data, $type, false);
+            $this->syncRoutes($record, $data['routes'] ?? null);
 
-            // Si es un servicio multi-día (end_date > start_date), generar los registros diarios hijos
-            $startDate = Carbon::parse($data['start_date'] ?? $data['service_date']);
-            $endDate = $data['end_date'] ? Carbon::parse($data['end_date']) : null;
+            // Si daily_route no venía pero sí routes, ya quedó construido. Si no hay routes ni daily_route, se deja null (compatible).
+            // Multi-día: generar hijos diarios
+            $startDate = $startRaw ? Carbon::parse($startRaw) : null;
+            $endDate = $endRaw ? Carbon::parse($endRaw) : null;
 
-            if ($endDate && $endDate->greaterThan($startDate)) {
+            if ($startDate && $endDate && $endDate->greaterThan($startDate)) {
                 $currentDate = $startDate->copy()->addDay();
+                $parentRoutes = $record->routes()->get();
 
                 while (! $currentDate->greaterThan($endDate)) {
                     $child = ServiceDeliveryControlSheet::create([
@@ -172,26 +300,31 @@ class ServiceDeliveryControlSheetService extends BaseService
                         'start_date' => $startDate->toDateString(),
                         'end_date' => $endDate->toDateString(),
                         'parent_uuid' => $record->uuid,
-                        'daily_route' => $data['daily_route'] ?? null,
-                        'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+                        'daily_route' => $dailyRoute,
+                        'type_of_control_sheet' => $type,
                         'is_active' => true,
                         'company_uuid' => $data['company_uuid'],
+                        'project_uuid' => $data['project_uuid'] ?? null,
                     ]);
 
-                    $this->serviceInternalControlService->createServiceInternalControl([
-                        'company_uuid' => $data['company_uuid'],
-                        'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
-                        'third_party_uuid' => $data['third_party_uuid'] ?? null,
-                        'fuec_uuid' => $data['fuec_uuid'] ?? null,
-                        'service_delivery_control_sheet_uuid' => $child->uuid,
-                        'is_active' => false,
-                    ]);
+                    $this->createControlForSheet($child, $data, $type, true);
+
+                    foreach ($parentRoutes as $pr) {
+                        ServiceDeliveryControlSheetRoute::create([
+                            'uuid' => (string) Str::uuid(),
+                            'service_delivery_control_sheet_uuid' => $child->uuid,
+                            'order_index' => $pr->order_index,
+                            'origin' => $pr->origin,
+                            'destination' => $pr->destination,
+                            'is_active' => true,
+                        ]);
+                    }
 
                     $currentDate->addDay();
                 }
             }
 
-            return $record->fresh();
+            return $record->fresh(['project', 'routes', 'children']);
         });
     }
 
@@ -199,10 +332,22 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
+            $type = isset($data['type_of_control_sheet']) ? $this->normalizeType($data['type_of_control_sheet']) : $record->type_of_control_sheet;
+
+            $newProject = $data['project_uuid'] ?? $record->project_uuid;
+            $newStart = $data['start_date'] ?? ($record->start_date ? Carbon::parse($record->start_date)->toDateString() : null);
+            $newEnd = $data['end_date'] ?? ($record->end_date ? Carbon::parse($record->end_date)->toDateString() : null);
+            $this->validateProjectDates($newProject, $newStart, $newEnd);
+
+            $dailyRoute = $this->buildDailyRoute(
+                $data['daily_route'] ?? $record->daily_route,
+                $data['routes'] ?? null
+            );
+
             $record->update([
                 'official_name_and_surname' => $data['official_name_and_surname'] ?? $record->official_name_and_surname,
                 'service_date' => $data['service_date'] ?? $record->service_date,
-                'daily_route' => $data['daily_route'] ?? $record->daily_route,
+                'daily_route' => $dailyRoute,
                 'start_time' => $data['start_time'] ?? $record->start_time,
                 'end_time' => $data['end_time'] ?? $record->end_time,
                 'total_hours' => $data['total_hours'] ?? $record->total_hours,
@@ -210,11 +355,16 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'ending_kilometer' => $data['ending_kilometer'] ?? $record->ending_kilometer,
                 'number_of_tolls' => $data['number_of_tolls'] ?? $record->number_of_tolls,
                 'total_toll_value' => $data['total_toll_value'] ?? $record->total_toll_value,
-                'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+                'type_of_control_sheet' => $type,
                 'is_active' => $data['is_active'] ?? $record->is_active,
+                'project_uuid' => $newProject,
             ]);
 
-            return $record->fresh();
+            if (array_key_exists('routes', $data)) {
+                $this->syncRoutes($record, $data['routes']);
+            }
+
+            return $record->fresh(['project', 'routes']);
         });
     }
 
@@ -238,7 +388,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             ]);
 
             if (! empty($data['fuec_uuid'])) {
-                if ($record->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA' && $record->internalControl) {
+                if (! $this->isExternalType($record->type_of_control_sheet) && $record->internalControl) {
                     $this->serviceInternalControlService->updateServiceInternalControl($record->internalControl->uuid, [
                         'fuec_uuid' => $data['fuec_uuid'],
                     ]);
@@ -254,8 +404,6 @@ class ServiceDeliveryControlSheetService extends BaseService
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
 
-            // Si es un servicio multi-día (padre), no permitir cerrarlo mientras
-            // queden planillas diarias abiertas.
             $pendingChildren = ServiceDeliveryControlSheet::query()
                 ->where('parent_uuid', $record->uuid)
                 ->where('is_active', true)
@@ -276,7 +424,6 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'is_active' => false,
             ]);
 
-            // Guardar firmas del funcionario y conductor en el registro (planilla diaria).
             if (! empty($data['funcionario_signature'])) {
                 $this->signatureService->store([
                     'signature' => $data['funcionario_signature'],
@@ -295,8 +442,6 @@ class ServiceDeliveryControlSheetService extends BaseService
                 ]);
             }
 
-            // Si es una planilla diaria (hijo), cerrar el servicio padre cuando
-            // sea la última planilla pendiente.
             if (! empty($record->parent_uuid)) {
                 $remainingChildren = ServiceDeliveryControlSheet::query()
                     ->where('parent_uuid', $record->parent_uuid)

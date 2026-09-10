@@ -767,6 +767,9 @@ class PdfService
                 $nit = $company?->document_number ?? 'N/A';
             }
 
+            // Agregar información del proyecto si está asociada
+            $nombreProyecto = $sheet->project ? $sheet->project->project_name : null;
+
             // Cargar las firmas asociadas a esta hoja de control
             $signatures = Signature::query()
                 ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheet')
@@ -797,6 +800,13 @@ class PdfService
             $date = Carbon::parse($sheet->service_date);
             $periodo = $date->translatedFormat('F Y');
 
+            // Obtener las rutas asociadas a esta hoja de control (origen → destino)
+            $routes = $sheet->routes()->where('is_active', true)->orderBy('order_index')->get();
+            $rutasLista = $this->formatRoutesList($routes);
+            $rutasTexto = ! empty($rutasLista)
+                ? implode(' · ', $rutasLista)
+                : ($sheet->daily_route ?? 'Sin ruta definida');
+
             // Para la planilla diaria, mostrar el registro en la primera fila, y luego rellenar el resto
             $dias = [];
 
@@ -804,7 +814,8 @@ class PdfService
 
             $dias[] = [
                 'numero' => (int) $date->format('d'),
-                'ruta' => $sheet->daily_route,
+                'ruta' => $rutasTexto,
+                'rutas' => $rutasLista,
                 'hora_inicio' => $sheet->start_time ? $sheet->start_time->format('H:i') : '',
                 'descanso_inicio' => $restHours['inicio'],
                 'descanso_fin' => $restHours['fin'],
@@ -817,9 +828,22 @@ class PdfService
                     : '',
                 'firma_funcionario' => $base64Images['firma_recibido'],
                 'conductor' => $sheet->driver_name,
+                'proyecto' => $nombreProyecto,
             ];
 
             // No agregamos filas vacías para que la tabla solo muestre los registros reales
+
+            // Observaciones: peajes + N recorridos del día + vigencia del proyecto
+            $obsPartes = [];
+            if ($sheet->number_of_tolls) {
+                $obsPartes[] = "Peajes: {$sheet->number_of_tolls} | Valor: $ {$sheet->total_toll_value}";
+            }
+            if ($routes->isNotEmpty()) {
+                $obsPartes[] = "Recorridos del día: {$routes->count()}";
+            }
+            if ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date) {
+                $obsPartes[] = 'Vigencia proyecto: '.Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y');
+            }
 
             $data = [
                 'logo' => $base64Images['logo'],
@@ -832,9 +856,14 @@ class PdfService
                 'nit' => $nit,
                 'empresa' => $empresa,
                 'dias' => $dias,
-                'observaciones' => $sheet->number_of_tolls ? "Peajes: {$sheet->number_of_tolls} | Valor: $ {$sheet->total_toll_value}" : '',
+                'observaciones' => implode(' | ', $obsPartes),
                 'firma_conductor' => $base64Images['firma_conductor'],
                 'firma_recibido' => $base64Images['firma_recibido'],
+                'proyecto' => $nombreProyecto,
+                'proyecto_vigencia' => ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date)
+                    ? Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y')
+                    : null,
+                'rutas_detalle' => $routes->toArray(), // Datos completos para la vista
             ];
 
             $pdf = Pdf::loadView('pdf.service-control-sheet', $data);
@@ -965,9 +994,17 @@ class PdfService
 
                 $restHours = $this->calculateRestHours($sheet->start_time, $sheet->end_time, $sheet->total_hours);
 
+                // Obtener las rutas asociadas a esta hoja (origen → destino)
+                $routes = $sheet->routes()->where('is_active', true)->orderBy('order_index')->get();
+                $rutasLista = $this->formatRoutesList($routes);
+                $rutasTexto = ! empty($rutasLista)
+                    ? implode(' · ', $rutasLista)
+                    : ($sheet->daily_route ?? 'Sin ruta definida');
+
                 $dias[] = [
                     'numero' => $dayNum,
-                    'ruta' => $sheet->daily_route,
+                    'ruta' => $rutasTexto,
+                    'rutas' => $rutasLista,
                     'hora_inicio' => $sheet->start_time ? $sheet->start_time->format('H:i') : '',
                     'descanso_inicio' => $restHours['inicio'],
                     'descanso_fin' => $restHours['fin'],
@@ -981,6 +1018,7 @@ class PdfService
                     'firma_funcionario' => null,
                     'unique_key' => $uniqueKey,
                     'conductor' => $sheet->driver_name,
+                    'proyecto' => $sheet->project ? $sheet->project->project_name : null,
                 ];
             }
 
@@ -1012,10 +1050,23 @@ class PdfService
             }
             unset($dia);
 
-            // Construir observaciones de peajes consolidadas del mes
+            // Construir observaciones consolidadas del mes: peajes + total recorridos
             $totalPeajes = $sheets->sum('number_of_tolls');
             $valorPeajes = $sheets->sum('total_toll_value');
-            $obs = $totalPeajes > 0 ? "Total Peajes del Mes: {$totalPeajes} | Valor Consolidado: $ {$valorPeajes}" : '';
+            $obsPartes = [];
+            if ($totalPeajes > 0) {
+                $obsPartes[] = "Total Peajes del Mes: {$totalPeajes} | Valor Consolidado: $ {$valorPeajes}";
+            }
+            $totalRecorridos = $sheets->sum(fn ($sh) => $sh->routes ? $sh->routes->count() : 0);
+            if ($totalRecorridos > 0) {
+                $obsPartes[] = "Total Recorridos del Mes: {$totalRecorridos}";
+            }
+            $obs = implode(' | ', $obsPartes);
+
+            $proyectoMensual = $sheets->first()?->project;
+            $vigenciaMensual = ($proyectoMensual && $proyectoMensual->start_date && $proyectoMensual->completion_date)
+                ? Carbon::parse($proyectoMensual->start_date)->format('d/m/Y').' - '.Carbon::parse($proyectoMensual->completion_date)->format('d/m/Y')
+                : null;
 
             $data = [
                 'logo' => $base64Images['logo'],
@@ -1031,6 +1082,8 @@ class PdfService
                 'observaciones' => $obs,
                 'firma_conductor' => $base64Images['firma_conductor_mensual'] ?? null,
                 'firma_recibido' => $base64Images['firma_recibido_mensual'] ?? null,
+                'proyecto' => $proyectoMensual ? $proyectoMensual->project_name : null,
+                'proyecto_vigencia' => $vigenciaMensual,
             ];
 
             $pdf = Pdf::loadView('pdf.service-control-sheet', $data);
@@ -1047,6 +1100,21 @@ class PdfService
             Logger::error('PdfService@generateMonthlyServiceControlSheetPdf error: '.$e->getMessage(), $e);
             throw $e;
         }
+    }
+
+    /**
+     * Formatea los recorridos de una planilla como lista "Origen - Destino".
+     *
+     * @param  \Illuminate\Support\Collection  $routes
+     * @return array<int, string>
+     */
+    private function formatRoutesList($routes): array
+    {
+        return $routes
+            ->map(fn ($r) => trim(($r->origin ?? '').' - '.($r->destination ?? ''), ' -'))
+            ->filter()
+            ->values()
+            ->all();
     }
 
     /**

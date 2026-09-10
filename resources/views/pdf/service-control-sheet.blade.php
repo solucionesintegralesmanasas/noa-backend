@@ -390,6 +390,10 @@
             <td class="info-label">EMPRESA / CLIENTE:</td>
             <td class="info-value" colspan="3">{{ $empresa ?? 'N/A' }}</td>
         </tr>
+        <tr>
+            <td class="info-label">PROYECTO:</td>
+            <td class="info-value" colspan="3">{{ $proyecto ?? 'N/A' }}@if(!empty($proyecto_vigencia ?? null)) (Vigencia: {{ $proyecto_vigencia }})@endif</td>
+        </tr>
     </table>
 
     <!-- TABLA PRINCIPAL -->
@@ -417,7 +421,15 @@
             @foreach ($dias as $dia)
                 <tr>
                     <td>{{ $dia['numero'] }}</td>
-                    <td style="text-align: left; padding-left: 4px;">{{ $dia['ruta'] ?? '' }}</td>
+                    <td style="text-align: left; padding-left: 4px;">
+                        @if (!empty($dia['rutas']) && is_array($dia['rutas']))
+                            @foreach ($dia['rutas'] as $i => $r)
+                                <div>{{ $i + 1 }}. {{ $r }}</div>
+                            @endforeach
+                        @else
+                            {{ $dia['ruta'] ?? '' }}
+                        @endif
+                    </td>
                     <td>{{ $dia['hora_inicio'] ?? '' }}</td>
                     <td>{{ $dia['descanso_inicio'] ?? '' }}</td>
                     <td>{{ $dia['descanso_fin'] ?? '' }}</td>

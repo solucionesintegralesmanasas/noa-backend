@@ -32,6 +32,7 @@ class ServiceInternalControlSubcontracted extends Model
         'uuid',
         'vehicle_class_uuid',
         'service_delivery_control_sheet_uuid',
+        'fuec_uuid',
         'vehicle_license_plate',
         'driver_name_and_surname',
         'driver_license_number',

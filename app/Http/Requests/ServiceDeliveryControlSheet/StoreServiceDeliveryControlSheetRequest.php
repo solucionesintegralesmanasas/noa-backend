@@ -34,7 +34,7 @@ class StoreServiceDeliveryControlSheetRequest extends FormRequest
             'ending_kilometer' => ['nullable', 'string', 'max:10'],
             'number_of_tolls' => ['nullable', 'integer', 'min:0'],
             'total_toll_value' => ['nullable', 'numeric', 'min:0'],
-            'type_of_control_sheet' => ['nullable', 'in:DIRECTO_CON_LA_EMPRESA,SUBCONTRATADO'],
+            'type_of_control_sheet' => ['nullable', 'in:DIRECTO_CON_LA_EMPRESA,SUBCONTRATADO,CON_VEHICULO_CONTRATADO,EXTERNO_PLATAFORMA'],
             'is_active' => ['nullable', 'boolean'],
             'vehicle_uuid' => ['nullable', 'uuid', 'exists:vehicles,uuid'],
             'third_party_uuid' => ['nullable', 'uuid', 'exists:third_parties,uuid'],
@@ -43,6 +43,10 @@ class StoreServiceDeliveryControlSheetRequest extends FormRequest
             'vehicle_license_plate' => ['nullable', 'string', 'max:20'],
             'driver_name_and_surname' => ['nullable', 'string', 'max:255'],
             'driver_license_number' => ['nullable', 'string', 'max:20'],
+            'project_uuid' => ['nullable', 'uuid', 'exists:projects,uuid'],
+            'routes' => ['nullable', 'array'],
+            'routes.*.origin' => ['nullable', 'string', 'max:255'],
+            'routes.*.destination' => ['nullable', 'string', 'max:255'],
         ];
     }
 
@@ -57,7 +61,7 @@ class StoreServiceDeliveryControlSheetRequest extends FormRequest
             'service_date.required' => 'El campo fecha del servicio es obligatorio.',
             'service_date.date' => 'El campo fecha del servicio debe ser una fecha válida.',
             'start_date.date' => 'La fecha de inicio debe ser una fecha válida.',
-            'end_date.date' => 'La fecha de fin debe ser una fecha válida.',
+            'end_date.date' => 'El campo fecha de fin debe ser una fecha válida.',
             'end_date.after_or_equal' => 'La fecha de fin debe ser igual o posterior a la fecha de inicio.',
             'daily_route.string' => 'La ruta diaria debe ser una cadena de texto.',
             'daily_route.max' => 'La ruta diaria no debe exceder los 255 caracteres.',
@@ -72,8 +76,14 @@ class StoreServiceDeliveryControlSheetRequest extends FormRequest
             'number_of_tolls.min' => 'El número de peajes no puede ser negativo.',
             'total_toll_value.numeric' => 'El valor total de peajes debe ser un número.',
             'total_toll_value.min' => 'El valor total de peajes no puede ser negativo.',
-            'type_of_control_sheet.in' => 'El tipo de control de hoja debe ser DIRECTO_CON_LA_EMPRESA o SUBCONTRATADO.',
+            'type_of_control_sheet.in' => 'El tipo de control de hoja debe ser DIRECTO_CON_LA_EMPRESA, SUBCONTRATADO, CON_VEHICULO_CONTRATADO o EXTERNO_PLATAFORMA.',
             'is_active.boolean' => 'El estado activo debe ser verdadero o falso.',
+            'project_uuid.exists' => 'El proyecto seleccionado no existe.',
+            'routes.array' => 'Los recorridos deben ser un array.',
+            'routes.*.origin.string' => 'El origen debe ser una cadena de texto.',
+            'routes.*.origin.max' => 'El origen no debe exceder los 255 caracteres.',
+            'routes.*.destination.string' => 'El destino debe ser una cadena de texto.',
+            'routes.*.destination.max' => 'El destino no debe exceder los 255 caracteres.',
         ];
     }
 
@@ -95,6 +105,8 @@ class StoreServiceDeliveryControlSheetRequest extends FormRequest
             'total_toll_value' => 'valor total peajes',
             'type_of_control_sheet' => 'tipo de control de hoja',
             'is_active' => 'estado activo',
+            'project_uuid' => 'proyecto',
+            'routes' => 'recorridos',
         ];
     }
 
