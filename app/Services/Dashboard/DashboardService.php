@@ -4,7 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services\Dashboard;
 
+use App\Models\ControlSheet;
+use App\Models\DriverLicense;
+use App\Models\Fuec;
 use App\Models\Maintenance;
+use App\Models\OwnerDriver;
+use App\Models\ServiceDeliveryControlSheet;
+use App\Models\ThirdParty;
+use App\Models\Vehicle;
+use App\Models\VehicleInspection;
 use App\Services\ContractExtraction\FuecService;
 use App\Services\ContractExtraction\ObjectContractService;
 use App\Services\Fleet\OwnerDriverService;
@@ -72,6 +80,315 @@ class DashboardService
                 $this->formatStat('Nuevos FUEC', $currentFuecs, $previousFuecs, 'fas fa-file-alt', '#f5803e'),
                 $this->formatStat('Vehículos en Servicio', $currentVehicles, $previousVehicles, 'fas fa-bus', '#e63757'),
             ],
+        ];
+    }
+
+    /**
+     * Obtiene el resumen del dashboard específico para el rol CONDUCTOR.
+     * Incluye datos del conductor, vehículos usados con kilometraje,
+     * métricas clave y accesos directos a los 4 módulos operativos.
+     *
+     * @return array<string, mixed>
+     */
+    public function getConductorSummary(int $days = 30): array
+    {
+        $user = Auth::user();
+        if (! $user || ! method_exists($user, 'hasRole') || ! $user->hasRole('CONDUCTOR')) {
+            return [];
+        }
+
+        $startDate = Carbon::now()->subDays($days)->startOfDay();
+        $endDate = Carbon::now()->endOfDay();
+
+        // 1. Resolver el UUID del conductor (ThirdParty) y empresa
+        $companyUuid = $user->company_uuid;
+        $thirdPartyUuid = $user->third_party_uuid;
+
+        if (! $companyUuid && $user->companies()->first()) {
+            $companyUuid = $user->companies()->first()->uuid;
+        }
+
+        if (! $thirdPartyUuid && $user->companies()->first()) {
+            $thirdPartyUuid = $user->companies()->first()->pivot->third_party_uuid;
+        }
+
+        // Obtener datos del conductor
+        $conductor = null;
+        $driverLicense = null;
+        if ($thirdPartyUuid) {
+            $conductor = ThirdParty::withoutGlobalScopes()->where('uuid', $thirdPartyUuid)->first();
+            $driverLicense = DriverLicense::withoutGlobalScopes()
+                ->where('third_party_uuid', $thirdPartyUuid)
+                ->orderBy('expiration_date', 'desc')
+                ->first();
+        }
+
+        // 2. Resolver vehículos vinculados al conductor:
+        // a) Vehículos de inspecciones realizadas por el conductor
+        $inspectedVehicleUuids = VehicleInspection::withoutGlobalScopes()
+            ->when($thirdPartyUuid, fn ($q) => $q->where('driver_uuid', $thirdPartyUuid))
+            ->pluck('vehicle_uuid')
+            ->toArray();
+
+        // b) Vehículos donde el conductor figura en FUECs
+        $fuecVehicleUuids = Fuec::withoutGlobalScopes()
+            ->when($thirdPartyUuid, fn ($q) => $q->where(function ($sq) use ($thirdPartyUuid) {
+                $sq->where('main_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('secondary_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('tertiary_conductor_uuid', $thirdPartyUuid);
+            }))
+            ->pluck('vehicle_uuid')
+            ->toArray();
+
+        // c) Vehículos de planillas de control de servicio interno
+        $serviceSheetVehicleUuids = DB::table('service_internal_controls')
+            ->when($thirdPartyUuid, fn ($q) => $q->where('third_party_uuid', $thirdPartyUuid))
+            ->pluck('vehicle_uuid')
+            ->toArray();
+
+        // d) Vehículos del afiliado asociado (si aplica)
+        $affiliateVehicleUuids = [];
+        if ($thirdPartyUuid) {
+            $affiliate = OwnerDriver::withoutGlobalScopes()->whereIn(
+                'driver_license_uuid',
+                DriverLicense::withoutGlobalScopes()
+                    ->where('third_party_uuid', $thirdPartyUuid)
+                    ->pluck('uuid')
+            )->first();
+
+            if ($affiliate) {
+                $affiliateVehicleUuids = Vehicle::withoutGlobalScopes()
+                    ->where(function ($q) use ($affiliate) {
+                        $q->where('third_party_uuid', $affiliate->third_party_uuid)
+                            ->orWhereHas('owners', fn ($oq) => $oq->where('third_party_uuid', $affiliate->third_party_uuid));
+                    })
+                    ->pluck('uuid')
+                    ->toArray();
+            }
+        }
+
+        // Unir todos los vehículos únicos
+        $allVehicleUuids = array_values(array_unique(array_filter(array_merge(
+            $inspectedVehicleUuids,
+            $fuecVehicleUuids,
+            $serviceSheetVehicleUuids,
+            $affiliateVehicleUuids
+        ))));
+
+        // Fallback: si aún no tiene vehículos específicos asignados, mostrar los vehículos activos de la empresa o flota
+        if (empty($allVehicleUuids)) {
+            $allVehicleUuids = Vehicle::withoutGlobalScopes()
+                ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+                ->where('is_active', true)
+                ->limit(8)
+                ->pluck('uuid')
+                ->toArray();
+        }
+
+        // Consultar los vehículos
+        $vehicles = Vehicle::withoutGlobalScopes()
+            ->with(['brand', 'vehicleClass'])
+            ->whereIn('uuid', $allVehicleUuids)
+            ->get();
+
+        $vehiclesData = [];
+        $totalKmTraveledAllVehicles = 0;
+
+        foreach ($vehicles as $v) {
+            // Obtener el mayor kilometraje reportado en inspecciones
+            $maxInspectionMileage = (int) VehicleInspection::withoutGlobalScopes()
+                ->where('vehicle_uuid', $v->uuid)
+                ->max('mileage');
+
+            // Obtener kilometraje de mantenimientos
+            $maxMaintenanceMileage = (int) Maintenance::withoutGlobalScopes()
+                ->where('vehicle_uuid', $v->uuid)
+                ->max('mileage');
+
+            // Obtener kilometraje final de planillas
+            $maxControlMileage = (int) DB::table('service_delivery_control_sheet')
+                ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
+                ->where('service_internal_controls.vehicle_uuid', $v->uuid)
+                ->whereNotNull('service_delivery_control_sheet.ending_kilometer')
+                ->max(DB::raw('CAST(service_delivery_control_sheet.ending_kilometer AS UNSIGNED)'));
+
+            $currentMileage = max($maxInspectionMileage, $maxMaintenanceMileage, $maxControlMileage);
+
+            // Calcular KM recorrido en el período:
+            // 1) Por inspecciones
+            $periodInspections = VehicleInspection::withoutGlobalScopes()
+                ->where('vehicle_uuid', $v->uuid)
+                ->whereBetween('inspection_date', [$startDate, $endDate])
+                ->orderBy('inspection_date', 'asc')
+                ->get();
+
+            $periodKm = 0;
+            if ($periodInspections->count() >= 2) {
+                $periodKm = (int) ($periodInspections->last()->mileage - $periodInspections->first()->mileage);
+            } elseif ($periodInspections->count() === 1) {
+                $prevKm = VehicleInspection::withoutGlobalScopes()
+                    ->where('vehicle_uuid', $v->uuid)
+                    ->where('inspection_date', '<', $startDate)
+                    ->max('mileage');
+                if ($prevKm) {
+                    $periodKm = (int) ($periodInspections->first()->mileage - (int) $prevKm);
+                }
+            }
+
+            // 2) Por planillas de servicio (si hay registro de km inicial y final)
+            $controlSheetsKm = (int) DB::table('service_delivery_control_sheet')
+                ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
+                ->where('service_internal_controls.vehicle_uuid', $v->uuid)
+                ->whereBetween('service_delivery_control_sheet.service_date', [$startDate, $endDate])
+                ->whereNotNull('service_delivery_control_sheet.starting_kilometer')
+                ->whereNotNull('service_delivery_control_sheet.ending_kilometer')
+                ->selectRaw('SUM(GREATEST(0, CAST(ending_kilometer AS SIGNED) - CAST(starting_kilometer AS SIGNED))) as total_km')
+                ->value('total_km');
+
+            $kmTraveled = max($periodKm, $controlSheetsKm);
+            $totalKmTraveledAllVehicles += $kmTraveled;
+
+            // Última inspección de este vehículo
+            $lastInspection = VehicleInspection::withoutGlobalScopes()
+                ->where('vehicle_uuid', $v->uuid)
+                ->orderBy('inspection_date', 'desc')
+                ->first();
+
+            $inspectionsCount = VehicleInspection::withoutGlobalScopes()
+                ->where('vehicle_uuid', $v->uuid)
+                ->when($thirdPartyUuid, fn ($q) => $q->where('driver_uuid', $thirdPartyUuid))
+                ->count();
+
+            $vehiclesData[] = [
+                'uuid' => $v->uuid,
+                'plate' => $v->vehicle_license_plate,
+                'brand' => $v->brand?->description ?? 'N/A',
+                'line' => $v->line ?? '',
+                'model' => $v->model ?? '',
+                'vehicle_class' => $v->vehicleClass?->description ?? 'VEHÍCULO',
+                'internal_number' => $v->internal_number,
+                'color' => $v->color,
+                'fuel_type' => $v->fuel_type,
+                'type_of_service' => $v->type_of_service,
+                'current_mileage' => $currentMileage,
+                'km_traveled_period' => $kmTraveled,
+                'inspections_count' => $inspectionsCount,
+                'last_inspection_date' => $lastInspection?->inspection_date?->format('Y-m-d') ?? null,
+                'last_inspection_mileage' => $lastInspection?->mileage ?? null,
+                'is_active' => (bool) $v->is_active,
+            ];
+        }
+
+        // Conteo de accesos
+        $inspectionsTotal = VehicleInspection::withoutGlobalScopes()
+            ->when($thirdPartyUuid, fn ($q) => $q->where('driver_uuid', $thirdPartyUuid))
+            ->count();
+
+        $fuecsTotal = Fuec::withoutGlobalScopes()
+            ->when($thirdPartyUuid, fn ($q) => $q->where(function ($sq) use ($thirdPartyUuid) {
+                $sq->where('main_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('secondary_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('tertiary_conductor_uuid', $thirdPartyUuid);
+            }))
+            ->count();
+
+        $controlSheetsTotal = ControlSheet::withoutGlobalScopes()
+            ->when(! empty($allVehicleUuids), fn ($q) => $q->whereIn('vehicle_uuid', $allVehicleUuids))
+            ->count();
+
+        $serviceDeliverySheetsTotal = DB::table('service_delivery_control_sheet')
+            ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
+            ->when($thirdPartyUuid, fn ($q) => $q->where('service_internal_controls.third_party_uuid', $thirdPartyUuid))
+            ->count();
+
+        // Últimas inspecciones realizadas por el conductor
+        $recentInspections = VehicleInspection::withoutGlobalScopes()
+            ->with('vehicle')
+            ->when($thirdPartyUuid, fn ($q) => $q->where('driver_uuid', $thirdPartyUuid))
+            ->orderBy('inspection_date', 'desc')
+            ->limit(5)
+            ->get()
+            ->map(fn ($i) => [
+                'uuid' => $i->uuid,
+                'plate' => $i->vehicle?->vehicle_license_plate ?? 'N/A',
+                'date' => $i->inspection_date?->format('Y-m-d'),
+                'mileage' => $i->mileage,
+                'inspector' => $i->inspector_name,
+            ]);
+
+        // Últimos FUECs donde participa
+        $recentFuecs = Fuec::withoutGlobalScopes()
+            ->with(['vehicle', 'contractor'])
+            ->when($thirdPartyUuid, fn ($q) => $q->where(function ($sq) use ($thirdPartyUuid) {
+                $sq->where('main_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('secondary_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('tertiary_conductor_uuid', $thirdPartyUuid);
+            }))
+            ->orderBy('created_at', 'desc')
+            ->limit(5)
+            ->get()
+            ->map(fn ($f) => [
+                'uuid' => $f->uuid,
+                'number' => $f->number_fuec ?? 'SIN-REF',
+                'plate' => $f->vehicle?->vehicle_license_plate ?? 'N/A',
+                'contractor' => $f->contractor?->company_name ?? 'N/A',
+                'status' => $f->status,
+            ]);
+
+        return [
+            'conductor' => [
+                'name' => $conductor ? trim($conductor->first_name.' '.$conductor->last_name) : $user->name,
+                'document' => $conductor?->document_number ?? null,
+                'phone' => $conductor?->phone ?? null,
+                'email' => $conductor?->email ?? $user->email,
+                'license' => $driverLicense ? [
+                    'license_number' => $driverLicense->number,
+                    'category' => $driverLicense->category,
+                    'due_date' => $driverLicense->expiration_date instanceof Carbon ? $driverLicense->expiration_date->format('Y-m-d') : (string) $driverLicense->expiration_date,
+                    'status' => $driverLicense->status,
+                ] : null,
+            ],
+            'kpis' => [
+                'total_km' => $totalKmTraveledAllVehicles,
+                'vehicles_count' => count($vehiclesData),
+                'inspections_count' => $inspectionsTotal,
+                'fuecs_count' => $fuecsTotal,
+                'control_sheets_count' => $controlSheetsTotal,
+                'service_delivery_count' => $serviceDeliverySheetsTotal,
+            ],
+            'quick_access' => [
+                'inspections' => [
+                    'title' => 'Inspecciones Vehiculares',
+                    'subtitle' => 'Pre-operacional diario',
+                    'count' => $inspectionsTotal,
+                    'route' => '/inspeccion-vehiculos',
+                    'create_route' => '/inspeccion-vehiculos/crear',
+                ],
+                'control_sheets' => [
+                    'title' => 'Listado de ControlSheets',
+                    'subtitle' => 'Planillas de control y soporte',
+                    'count' => $controlSheetsTotal,
+                    'route' => '/planillas-de-control-de-servicios',
+                    'create_route' => '/planillas-de-control-de-servicios/crear',
+                ],
+                'fuec' => [
+                    'title' => 'Listado de FUEC',
+                    'subtitle' => 'Extractos únicos de contrato',
+                    'count' => $fuecsTotal,
+                    'route' => '/extracto-de-contrato',
+                    'create_route' => null,
+                ],
+                'service_delivery' => [
+                    'title' => 'Hojas de Control de Servicio',
+                    'subtitle' => 'Planilla PCP y recorrido diario',
+                    'count' => $serviceDeliverySheetsTotal,
+                    'route' => '/planilla-de-control-de-prestacion-servicios',
+                    'create_route' => '/planilla-de-control-de-prestacion-servicios/control-de-servicios',
+                ],
+            ],
+            'vehicles' => $vehiclesData,
+            'recent_inspections' => $recentInspections,
+            'recent_fuecs' => $recentFuecs,
         ];
     }
 

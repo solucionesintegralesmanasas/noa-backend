@@ -163,6 +163,7 @@ Route::prefix('v1')->group(function () {
                 return response()->json(['ping' => 'pong']);
             })->name('api.v1.dashboard.ping');
             Route::get('/summary', [DashboardController::class, 'summary'])->name('api.v1.dashboard.summary');
+            Route::get('/conductor-summary', [DashboardController::class, 'conductorSummary'])->name('api.v1.dashboard.conductor-summary');
             Route::get('/recent-activity', [DashboardController::class, 'recentActivity'])->name('api.v1.dashboard.recent-activity');
             Route::get('/alerts', [DashboardController::class, 'alerts'])->name('api.v1.dashboard.alerts');
         });
