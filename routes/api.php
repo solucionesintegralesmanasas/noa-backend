@@ -133,6 +133,10 @@ Route::prefix('v1')->group(function () {
         })->name('api.v1.public.cron.run-all');
     });
 
+    // ─── SSE NOTIFICACIONES (fuera de auth:sanctum: EventSource no envía
+    // headers Authorization, el controlador acepta Bearer o ?token=) ───
+    Route::get('/notifications/stream', [NotificationsController::class, 'stream'])->name('api.v1.notifications.stream');
+
     // ─── RUTAS PROTEGIDAS POR AUTENTICACIÓN (Sanctum) ───
     Route::middleware('auth:sanctum')->group(function () {
 
@@ -640,6 +644,7 @@ Route::prefix('v1')->group(function () {
             Route::prefix('vehicle-inspections')->group(function () {
                 Route::get('/', [VehicleInspectionController::class, 'index'])->name('api.v1.fleet.vehicle-inspections.index');
                 Route::get('/list', [VehicleInspectionController::class, 'list'])->name('api.v1.fleet.vehicle-inspections.list');
+                Route::get('/check-today', [VehicleInspectionController::class, 'checkToday'])->name('api.v1.fleet.vehicle-inspections.check-today');
                 Route::post('/', [VehicleInspectionController::class, 'store'])->name('api.v1.fleet.vehicle-inspections.store');
                 Route::get('/{uuid}', [VehicleInspectionController::class, 'show'])->name('api.v1.fleet.vehicle-inspections.show');
                 Route::get('/{uuid}/pdf', [VehicleInspectionController::class, 'downloadPdf'])->name('api.v1.fleet.vehicle-inspections.pdf');
@@ -878,7 +883,6 @@ Route::prefix('v1')->group(function () {
         // ─── MÓDULO NOTIFICACIONES ───
         Route::prefix('notifications')->group(function () {
             Route::get('/', [NotificationsController::class, 'index'])->name('api.v1.notifications.index');
-            Route::get('/stream', [NotificationsController::class, 'stream'])->name('api.v1.notifications.stream');
             Route::post('/sync', [NotificationsController::class, 'sync'])->name('api.v1.notifications.sync');
             Route::post('/read-all', [NotificationsController::class, 'markAllAsRead'])->name('api.v1.notifications.read-all');
             Route::patch('/{uuid}/toggle-status', [NotificationsController::class, 'toggleStatus'])->name('api.v1.notifications.toggle-status');
