@@ -91,6 +91,46 @@ class VehicleInspectionController extends Controller
     }
 
     #[OA\Get(
+        path: '/api/v1/fleet-management/vehicle-inspections/check-today',
+        summary: 'Verificar si existe inspección de un vehículo en una fecha (una al día)',
+        operationId: 'checkTodayVehicleInspection',
+        tags: ['InspeccionVehiculo'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'vehicle_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'date', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'date'), description: 'Fecha a verificar (Y-m-d)'),
+            new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Verificación realizada.'),
+            new OA\Response(response: 422, description: 'Parámetros inválidos.'),
+        ]
+    )]
+    public function checkToday(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'vehicle_uuid' => 'required|string',
+                'date' => 'required|date',
+                'company_uuid' => 'nullable|string',
+            ]);
+
+            $record = $this->inspectionService->existsInspectionForDate(
+                $validated['vehicle_uuid'],
+                $validated['date'],
+                $validated['company_uuid'] ?? null
+            );
+
+            return $this->successResponse([
+                'exists' => $record !== null,
+                'inspection' => $record,
+            ], $record ? 'Inspección del día encontrada.' : 'Sin inspección registrada para esa fecha.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
         path: '/api/v1/fleet-management/vehicle-inspections/{uuid}',
         summary: 'Obtener detalle de InspeccionVehiculo por UUID',
         operationId: 'showVehicleInspection',

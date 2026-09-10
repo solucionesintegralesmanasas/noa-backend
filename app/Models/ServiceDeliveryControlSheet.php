@@ -19,9 +19,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  *
  * @author   Darwin Montes
  *
- * @version  V 1.0.0
+ * @version  V 1.0.1
  *
- * @since    V 1.0.0
+ * @since    V 1.0.1
  *
  * @created  2026-06-19
  */
@@ -34,6 +34,7 @@ class ServiceDeliveryControlSheet extends Model
     protected $fillable = [
         'uuid',
         'company_uuid',
+        'project_uuid',
         'official_name_and_surname',
         'service_date',
         'start_date',
@@ -65,11 +66,16 @@ class ServiceDeliveryControlSheet extends Model
 
     protected $appends = ['vehicle_license_plate', 'driver_name'];
 
-    protected $with = ['internalControl.vehicle', 'internalControl.thirdParty', 'subcontractedControl'];
+    protected $with = ['project:id,uuid,project_name,start_date,completion_date', 'routes', 'internalControl.vehicle', 'internalControl.thirdParty', 'subcontractedControl.vehicleClass'];
 
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class, 'company_uuid', 'uuid');
+    }
+
+    public function project(): BelongsTo
+    {
+        return $this->belongsTo(Project::class, 'project_uuid', 'uuid');
     }
 
     public function internalControl(): HasOne
@@ -92,14 +98,23 @@ class ServiceDeliveryControlSheet extends Model
         return $this->hasMany(ServiceDeliveryControlSheet::class, 'parent_uuid', 'uuid');
     }
 
+    public function routes(): HasMany
+    {
+        return $this->hasMany(ServiceDeliveryControlSheetRoute::class, 'service_delivery_control_sheet_uuid', 'uuid')->orderBy('order_index');
+    }
+
     public function getVehicleLicensePlateAttribute(): ?string
     {
         if ($this->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
             return $this->internalControl && $this->internalControl->vehicle ? $this->internalControl->vehicle->vehicle_license_plate : null;
         }
 
-        if ($this->type_of_control_sheet === 'SUBCONTRATADO' || $this->type_of_control_sheet === 'CON_VEHICULO_CONTRATADO') {
-            return $this->subcontractedControl ? $this->subcontractedControl->vehicle_license_plate : null;
+        if (in_array($this->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
+            if ($this->subcontractedControl) {
+                return $this->subcontractedControl->vehicle_license_plate;
+            }
+            // Fallback: vehículo externo de plataforma guardado como interno
+            return $this->internalControl && $this->internalControl->vehicle ? $this->internalControl->vehicle->vehicle_license_plate : null;
         }
 
         return null;
@@ -114,8 +129,14 @@ class ServiceDeliveryControlSheet extends Model
             }
         }
 
-        if ($this->type_of_control_sheet === 'SUBCONTRATADO' || $this->type_of_control_sheet === 'CON_VEHICULO_CONTRATADO') {
-            return $this->subcontractedControl ? $this->subcontractedControl->driver_name_and_surname : null;
+        if (in_array($this->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
+            if ($this->subcontractedControl) {
+                return $this->subcontractedControl->driver_name_and_surname;
+            }
+            $driver = $this->internalControl ? $this->internalControl->thirdParty : null;
+            if ($driver) {
+                return trim($driver->first_name.' '.$driver->last_name);
+            }
         }
 
         return null;
