@@ -211,6 +211,95 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
     }
 
+    /**
+     * Guarda el cierre de UN solo recorrido (cierre parcial por recorrido).
+     * Permite al conductor certificar cada recorrido conforme lo termina, sin
+     * verse obligado a diligenciar todos de una vez; la planilla sigue en curso.
+     *
+     * @return array{planilla: ?Model, route: ?ServiceDeliveryControlSheetRoute}
+     */
+    public function closeRoute(string $uuid, array $data): array
+    {
+        $record = $this->getServiceDeliveryControlSheetByUuid($uuid);
+        if (! $record) {
+            return ['planilla' => null, 'route' => null];
+        }
+
+        $routes = $record->routes()->orderBy('order_index')->get();
+
+        $route = null;
+        if (! empty($data['route_uuid'])) {
+            $route = $routes->firstWhere('uuid', $data['route_uuid']);
+        } elseif (isset($data['route_index'])) {
+            $route = $routes->get((int) $data['route_index']);
+        }
+
+        if (! $route) {
+            return ['planilla' => $record, 'route' => null];
+        }
+
+        $this->applyRouteClosure($route, $data, $record->company_uuid);
+
+        return [
+            'planilla' => $record->fresh(['routes']),
+            'route' => $route->fresh(),
+        ];
+    }
+
+    /**
+     * Persiste el cierre de cada recorrido (hora fin, km final, peajes, novedad)
+     * y sus dos firmas digitales cuando la planilla tiene más de un recorrido.
+     */
+    private function syncRouteClosures(ServiceDeliveryControlSheet $record, array $data): void
+    {
+        $routesData = $data['routes'] ?? null;
+        if (! is_array($routesData) || count($routesData) === 0) {
+            return;
+        }
+
+        $existing = $record->routes()->orderBy('order_index')->get();
+
+        foreach ($existing as $index => $route) {
+            $closure = $routesData[$index] ?? null;
+            if (! is_array($closure)) {
+                continue;
+            }
+
+            $this->applyRouteClosure($route, $closure, $record->company_uuid);
+        }
+    }
+
+    private function applyRouteClosure(ServiceDeliveryControlSheetRoute $route, array $closure, string $companyUuid): void
+    {
+        $route->update([
+            'end_time' => $closure['end_time'] ?? null,
+            'ending_kilometer' => $closure['ending_kilometer'] !== null && $closure['ending_kilometer'] !== ''
+                ? $closure['ending_kilometer']
+                : null,
+            'number_of_tolls' => $closure['number_of_tolls'] ?? 0,
+            'total_toll_value' => $closure['total_toll_value'] ?? 0,
+            'end_novelty' => $closure['end_novelty'] ?? null,
+        ]);
+
+        if (! empty($closure['funcionario_signature'])) {
+            $this->signatureService->store([
+                'signature' => $closure['funcionario_signature'],
+                'entity_type' => 'App\\Models\\ServiceDeliveryControlSheetRoute',
+                'entity_id' => $route->id,
+                'company_uuid' => $companyUuid,
+            ]);
+        }
+
+        if (! empty($closure['conductor_signature'])) {
+            $this->signatureService->store([
+                'signature' => $closure['conductor_signature'],
+                'entity_type' => 'App\\Models\\ServiceDeliveryControlSheetRoute',
+                'entity_id' => $route->id,
+                'company_uuid' => $companyUuid,
+            ]);
+        }
+    }
+
     private function createControlForSheet(ServiceDeliveryControlSheet $sheet, array $data, string $type, bool $isChild = false): void
     {
         if (! $this->isExternalType($type)) {
@@ -441,6 +530,10 @@ class ServiceDeliveryControlSheetService extends BaseService
                     'company_uuid' => $record->company_uuid,
                 ]);
             }
+
+            // Cierre por recorrido: cuando la planilla tiene más de un recorrido,
+            // cada uno persiste sus datos de llegada y sus dos firmas.
+            $this->syncRouteClosures($record, $data);
 
             if (! empty($record->parent_uuid)) {
                 $remainingChildren = ServiceDeliveryControlSheet::query()

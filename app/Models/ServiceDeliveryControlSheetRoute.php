@@ -32,6 +32,11 @@ class ServiceDeliveryControlSheetRoute extends Model
         'order_index',
         'origin',
         'destination',
+        'end_time',
+        'ending_kilometer',
+        'number_of_tolls',
+        'total_toll_value',
+        'end_novelty',
         'is_active',
     ];
 
@@ -39,6 +44,10 @@ class ServiceDeliveryControlSheetRoute extends Model
 
     protected $casts = [
         'order_index' => 'integer',
+        'end_time' => 'datetime:H:i:s',
+        'ending_kilometer' => 'decimal:2',
+        'number_of_tolls' => 'integer',
+        'total_toll_value' => 'decimal:2',
         'is_active' => 'boolean',
     ];
 

@@ -276,6 +276,56 @@ class ServiceDeliveryControlSheetController extends Controller
         }
     }
 
+    #[OA\Post(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/{uuid}/close-route',
+        summary: 'Guardar el cierre de un solo recorrido (cierre parcial por recorrido)',
+        operationId: 'closeRouteServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'route_uuid', type: 'string', format: 'uuid', description: 'UUID del recorrido a cerrar'),
+                    new OA\Property(property: 'route_index', type: 'integer', nullable: true, description: 'Índice del recorrido (0-based) si no se envía route_uuid'),
+                    new OA\Property(property: 'end_time', type: 'string', example: '18:30'),
+                    new OA\Property(property: 'ending_kilometer', type: 'number', example: 125680),
+                    new OA\Property(property: 'number_of_tolls', type: 'integer', example: 2),
+                    new OA\Property(property: 'total_toll_value', type: 'number', example: 45000),
+                    new OA\Property(property: 'end_novelty', type: 'string', nullable: true),
+                    new OA\Property(property: 'funcionario_signature', type: 'string', nullable: true, description: 'Firma digital base64 PNG del funcionario'),
+                    new OA\Property(property: 'conductor_signature', type: 'string', nullable: true, description: 'Firma digital base64 PNG del conductor'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Cierre del recorrido guardado con éxito.'),
+            new OA\Response(response: 404, description: 'Planilla o recorrido no encontrado.'),
+        ]
+    )]
+    public function closeRoute(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $result = $this->serviceDeliveryControlSheetService->closeRoute($uuid, $request->all());
+            if (! $result['planilla']) {
+                return $this->notFoundResponse('La planilla que desea cerrar no existe.');
+            }
+            if (! $result['route']) {
+                return $this->notFoundResponse('El recorrido indicado no pertenece a esta planilla.');
+            }
+
+            return $this->successResponse([
+                'planilla' => $result['planilla'],
+                'route' => $result['route'],
+            ], 'Cierre del recorrido guardado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/{uuid}/pdf',
         summary: 'Descargar PDF diario de Hoja de Control de Entrega de Servicios',

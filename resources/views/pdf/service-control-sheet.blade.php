@@ -422,7 +422,18 @@
                 <tr>
                     <td>{{ $dia['numero'] }}</td>
                     <td style="text-align: left; padding-left: 4px;">
-                        @if (!empty($dia['rutas']) && is_array($dia['rutas']))
+                        @if (!empty($dia['rutas_detalle']) && is_array($dia['rutas_detalle']))
+                            @foreach ($dia['rutas_detalle'] as $i => $rd)
+                                <div>{{ $i + 1 }}. {{ ($rd['origin'] ?? '') . (($rd['origin'] ?? '') !== '' ? ' - ' : '') . ($rd['destination'] ?? '') }}
+                                    @if (!empty($rd['end_time']))
+                                        <span style="color:#777;">· Fin {{ \Carbon\Carbon::parse($rd['end_time'])->format('H:i') }}</span>
+                                    @endif
+                                    @if (isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null)
+                                        <span style="color:#777;">· km {{ number_format((float)$rd['ending_kilometer'], 0, ',', '.') }}</span>
+                                    @endif
+                                </div>
+                            @endforeach
+                        @elseif (!empty($dia['rutas']) && is_array($dia['rutas']))
                             @foreach ($dia['rutas'] as $i => $r)
                                 <div>{{ $i + 1 }}. {{ $r }}</div>
                             @endforeach
@@ -450,6 +461,54 @@
             @endforeach
         </tbody>
     </table>
+
+    <!-- CIERRE Y FIRMAS POR RECORRIDO (solo cuando hay más de un recorrido con cierre) -->
+    @php
+        $rutasConCierre = collect($rutas_detalle ?? [])->filter(function ($rd) {
+            return !empty($rd['end_time']) || (isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null) || !empty($rd['end_novelty']);
+        });
+    @endphp
+    @if ($rutasConCierre->count() > 0)
+        <div style="margin-top: 6px;">
+            <div style="background:#FF0000; color:#ffffff; font-weight:bold; font-size:8pt; padding:3px 6px; border:1pt solid #000; border-bottom:0;">
+                CIERRE Y FIRMAS POR RECORRIDO ({{ $rutasConCierre->count() }})
+            </div>
+            @foreach ($rutasConCierre as $i => $rd)
+                <table style="width:100%; border-collapse:collapse; border:1pt solid #000;">
+                    <tr>
+                        <td style="font-weight:bold; width:10%; border:0.5pt solid #000; padding:2px 4px;">RECORRIDO {{ $i + 1 }}</td>
+                        <td style="width:40%; border:0.5pt solid #000; padding:2px 4px;">{{ ($rd['origin'] ?? '') . (($rd['origin'] ?? '') !== '' ? ' → ' : '') . ($rd['destination'] ?? '') }}</td>
+                        <td style="font-weight:bold; width:12%; border:0.5pt solid #000; padding:2px 4px;">HORA FIN</td>
+                        <td style="width:13%; border:0.5pt solid #000; padding:2px 4px;">{{ !empty($rd['end_time']) ? \Carbon\Carbon::parse($rd['end_time'])->format('H:i') : '' }}</td>
+                        <td style="font-weight:bold; width:12%; border:0.5pt solid #000; padding:2px 4px;">KM FINAL</td>
+                        <td style="width:13%; border:0.5pt solid #000; padding:2px 4px;">{{ isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null ? number_format((float)$rd['ending_kilometer'], 0, ',', '.') : '' }}</td>
+                    </tr>
+                    @if (!empty($rd['number_of_tolls']) || !empty($rd['total_toll_value']) || !empty($rd['end_novelty']))
+                    <tr>
+                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">PEAJES</td>
+                        <td style="border:0.5pt solid #000; padding:2px 4px;">{{ ($rd['number_of_tolls'] ?? 0) }} · Valor ${{ isset($rd['total_toll_value']) ? number_format((float)$rd['total_toll_value'], 0, ',', '.') : 0 }}</td>
+                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">NOVEDAD</td>
+                        <td colspan="3" style="border:0.5pt solid #000; padding:2px 4px;">{{ $rd['end_novelty'] ?? '' }}</td>
+                    </tr>
+                    @endif
+                    <tr>
+                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">FIRMA FUNCIONARIO</td>
+                        <td style="border:0.5pt solid #000; padding:2px 4px; text-align:center;">
+                            @if (!empty($rd['firma_funcionario']))
+                                <img src="data:image/png;base64,{{ $rd['firma_funcionario'] }}" style="max-height:30px; max-width:120px;">
+                            @endif
+                        </td>
+                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">FIRMA CONDUCTOR</td>
+                        <td colspan="3" style="border:0.5pt solid #000; padding:2px 4px; text-align:center;">
+                            @if (!empty($rd['firma_conductor']))
+                                <img src="data:image/png;base64,{{ $rd['firma_conductor'] }}" style="max-height:30px; max-width:120px;">
+                            @endif
+                        </td>
+                    </tr>
+                </table>
+            @endforeach
+        </div>
+    @endif
 
     <!-- PIE / FIRMAS -->
     <div class="footer-section">
