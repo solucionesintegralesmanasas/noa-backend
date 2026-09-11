@@ -30,7 +30,7 @@ return new class extends Migration
             Schema::create('service_delivery_control_sheet_routes', function (Blueprint $table) {
                 $table->id();
                 $table->char('uuid', 36)->unique();
-                $table->char('service_delivery_control_sheet_uuid', 36)->nullable()->index();
+                $table->char('service_delivery_control_sheet_uuid', 36)->nullable()->index('idx_routes_sheet_uuid');
                 $table->foreign('service_delivery_control_sheet_uuid', 'fk_routes_sheet')->references('uuid')->on('service_delivery_control_sheet')->cascadeOnDelete();
                 $table->integer('order_index')->default(1);
                 $table->string('origin', 255)->nullable();
