@@ -374,6 +374,12 @@ class RoleSeeder extends Seeder
             'projects.update',
             'projects.delete',
             'projects.profile',
+
+            'locations.view',
+            'locations.track',
+            'locations.history',
+            'locations.geofences',
+            'locations.alerts',
         ], 'and', false)->get();
 
         $empleadoPerms = Permission::query()->whereIn('name', [''], 'and', false)->get();
@@ -436,6 +442,8 @@ class RoleSeeder extends Seeder
 
             'service_delivery_control_sheets.index',
             'service_delivery_control_sheets.create',
+
+            'locations.track',
         ], 'and', false)->get();
 
         // 1. Asignar TODOS los permisos al SUPERADMIN
