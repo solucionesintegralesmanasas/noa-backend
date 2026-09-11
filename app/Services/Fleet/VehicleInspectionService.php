@@ -185,10 +185,49 @@ class VehicleInspectionService extends BaseService
 
     /**
      * Método createVehicleInspection.
+     *
+     * Regla de negocio: una sola inspección al día por vehículo. Si ya existe
+     * una inspección para el mismo vehículo en la misma fecha, se retorna y
+     * actualiza el registro existente (idempotente) en lugar de duplicarlo.
      */
     public function createVehicleInspection(array $data): Model
     {
         return $this->transaction(function () use ($data) {
+            $existing = VehicleInspection::query()
+                ->where('vehicle_uuid', $data['vehicle_uuid'])
+                ->whereDate('inspection_date', $data['inspection_date'])
+                ->when(! empty($data['company_uuid']), function ($q) use ($data) {
+                    $q->where('company_uuid', $data['company_uuid']);
+                })
+                ->latest('id')
+                ->first();
+
+            if ($existing) {
+                $existing->update([
+                    'inspector_name' => $data['inspector_name'] ?? $existing->inspector_name,
+                    'mileage' => $data['mileage'] ?? $existing->mileage,
+                    'driver_uuid' => $data['driver_uuid'] ?? $existing->driver_uuid,
+                    'notes' => $data['notes'] ?? $existing->notes,
+                ]);
+
+                if (isset($data['results']) && is_array($data['results'])) {
+                    $existing->inspectionResults()->delete();
+                    foreach ($data['results'] as $result) {
+                        $this->resultService->createInspectionResult(array_merge($result, [
+                            'inspection_uuid' => $existing->uuid,
+                        ]));
+                    }
+                }
+
+                try {
+                    app(NotificationsService::class)->syncNotifications($existing->company_uuid);
+                } catch (\Exception $e) {
+                    Logger::warning('Error syncing notifications after vehicle inspection creation: '.$e->getMessage());
+                }
+
+                return $existing->load('inspectionResults');
+            }
+
             $inspection = VehicleInspection::create([
                 'company_uuid' => $data['company_uuid'],
                 'vehicle_uuid' => $data['vehicle_uuid'],
