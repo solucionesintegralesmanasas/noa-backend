@@ -61,6 +61,9 @@ use App\Http\Controllers\Api\V1\Fleet\VehicleBranchController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleDocumentController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleInspectionController;
+use App\Http\Controllers\Api\V1\Fleet\DriverLocationController;
+use App\Http\Controllers\Api\V1\Fleet\GeofenceController;
+use App\Http\Controllers\Api\V1\Fleet\LocationHistoryController;
 use App\Http\Controllers\Api\V1\Integration\GoogleDriveController;
 use App\Http\Controllers\Api\V1\Notifications\NotificationsController;
 use App\Http\Controllers\Api\V1\Procedure\CapacityInventoryController;
@@ -897,6 +900,67 @@ Route::prefix('v1')->group(function () {
             Route::get('/latest', [SignatureController::class, 'latest'])->name('api.v1.signatures.latest');
             Route::put('/{uuid}', [SignatureController::class, 'replace'])->name('api.v1.signatures.replace');
             Route::delete('/{uuid}', [SignatureController::class, 'destroy'])->name('api.v1.signatures.destroy');
+        });
+
+        // ─── MÓDULO GEOLOCALIZACIÓN ───
+        Route::prefix('tracking')->group(function () {
+            // Conductor envía ubicación
+            Route::post('/location', [DriverLocationController::class, 'store'])
+                ->middleware('permission:locations.track')
+                ->name('api.v1.tracking.location.store');
+
+            // Conductor inicia/detiene sesión
+            Route::post('/session/start', [DriverLocationController::class, 'startSession'])
+                ->middleware('permission:locations.track')
+                ->name('api.v1.tracking.session.start');
+            Route::post('/session/stop', [DriverLocationController::class, 'stopSession'])
+                ->middleware('permission:locations.track')
+                ->name('api.v1.tracking.session.stop');
+
+            // Admin: ver conductores activos
+            Route::get('/active-drivers', [DriverLocationController::class, 'activeDrivers'])
+                ->middleware('permission:locations.view')
+                ->name('api.v1.tracking.active-drivers');
+
+            // Admin: última ubicación de un conductor
+            Route::get('/last-location/{uuid}', [DriverLocationController::class, 'lastLocation'])
+                ->middleware('permission:locations.view')
+                ->name('api.v1.tracking.last-location');
+
+            // Historial de rutas
+            Route::get('/driver/{uuid}/history', [LocationHistoryController::class, 'driverHistory'])
+                ->middleware('permission:locations.history')
+                ->name('api.v1.tracking.driver-history');
+            Route::get('/driver/{uuid}/stats', [LocationHistoryController::class, 'driverStats'])
+                ->middleware('permission:locations.history')
+                ->name('api.v1.tracking.driver-stats');
+
+            // CRUD Geocercas
+            Route::prefix('geofences')->group(function () {
+                Route::get('/', [GeofenceController::class, 'index'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.index');
+                Route::post('/', [GeofenceController::class, 'store'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.store');
+                Route::get('/{uuid}', [GeofenceController::class, 'show'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.show');
+                Route::put('/{uuid}', [GeofenceController::class, 'update'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.update');
+                Route::delete('/{uuid}', [GeofenceController::class, 'destroy'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.destroy');
+            });
+
+            // Alertas
+            Route::get('/alerts', [DriverLocationController::class, 'alerts'])
+                ->middleware('permission:locations.alerts')
+                ->name('api.v1.tracking.alerts');
+            Route::patch('/alerts/{uuid}/read', [DriverLocationController::class, 'markAlertRead'])
+                ->middleware('permission:locations.alerts')
+                ->name('api.v1.tracking.alerts.read');
         });
 
         // ─── MÓDULO CONFIGURACIONES ───

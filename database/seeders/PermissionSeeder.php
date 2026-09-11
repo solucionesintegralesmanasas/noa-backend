@@ -454,6 +454,13 @@ class PermissionSeeder extends Seeder
             'projects.update'   => ['module' => 'Proyectos', 'description' => 'Actualizar un proyecto'],
             'projects.delete'   => ['module' => 'Proyectos', 'description' => 'Eliminar un proyecto'],
             'projects.profile'  => ['module' => 'Proyectos', 'description' => 'Ver el perfil detallado de un proyecto'],
+
+            // --- Geolocalización ---
+            'locations.view'        => ['module' => 'Geolocalización', 'description' => 'Ver mapa de conductores en tiempo real'],
+            'locations.track'       => ['module' => 'Geolocalización', 'description' => 'Enviar ubicación GPS (conductor)'],
+            'locations.history'     => ['module' => 'Geolocalización', 'description' => 'Ver historial de rutas de conductores'],
+            'locations.geofences'   => ['module' => 'Geolocalización', 'description' => 'Gestionar geocercas (crear, editar, eliminar)'],
+            'locations.alerts'      => ['module' => 'Geolocalización', 'description' => 'Ver y gestionar alertas de ubicación'],
         ];
 
         foreach ($permissions as $permissionName => $data) {

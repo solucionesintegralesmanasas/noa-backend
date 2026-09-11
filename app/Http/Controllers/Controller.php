@@ -80,6 +80,7 @@ if (! defined('L5_SWAGGER_CONST_HOST')) {
 #[OA\Tag(name: 'DocumentoVehiculo', description: 'Documentos asociados a vehículos')]
 #[OA\Tag(name: 'AporteSeguridadSocial', description: 'Aportes de seguridad social de conductores')]
 #[OA\Tag(name: 'ConvenioColaboracionEmpresarial', description: 'Convenios de colaboración empresarial')]
+#[OA\Tag(name: 'Geolocalización', description: 'Tracking GPS de conductores, geocercas y alertas de ubicación')]
 // ── ContractExtraction ────────────────────────────────────────────────────────
 #[OA\Tag(name: 'Contratista', description: 'Contratistas del servicio de transporte')]
 #[OA\Tag(name: 'FUEC', description: 'Formato Único de Extracto del Contrato')]
