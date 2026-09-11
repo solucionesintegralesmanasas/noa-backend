@@ -807,6 +807,30 @@ class PdfService
                 ? implode(' · ', $rutasLista)
                 : ($sheet->daily_route ?? 'Sin ruta definida');
 
+            // Firmas por recorrido (cierre individual cuando hay más de un recorrido)
+            $rutasDetalle = [];
+            if ($routes->isNotEmpty()) {
+                $routeIds = $routes->pluck('id')->toArray();
+                $routeSignatures = Signature::query()
+                    ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetRoute')
+                    ->whereIn('entity_id', $routeIds)
+                    ->orderBy('id', 'asc')
+                    ->get()
+                    ->groupBy('entity_id');
+
+                foreach ($routes as $route) {
+                    $sigGroup = $routeSignatures->get($route->id) ?? collect();
+                    $base = $this->getBase64Parallel([
+                        'firma_funcionario' => $sigGroup->get(0),
+                        'firma_conductor' => $sigGroup->get(1),
+                    ]);
+                    $arr = $route->toArray();
+                    $arr['firma_funcionario'] = $base['firma_funcionario'];
+                    $arr['firma_conductor'] = $base['firma_conductor'];
+                    $rutasDetalle[] = $arr;
+                }
+            }
+
             // Para la planilla diaria, mostrar el registro en la primera fila, y luego rellenar el resto
             $dias = [];
 
@@ -863,7 +887,7 @@ class PdfService
                 'proyecto_vigencia' => ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date)
                     ? Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y')
                     : null,
-                'rutas_detalle' => $routes->toArray(), // Datos completos para la vista
+                'rutas_detalle' => $rutasDetalle, // Datos completos para la vista (incluye cierre y firmas por recorrido)
             ];
 
             $pdf = Pdf::loadView('pdf.service-control-sheet', $data);
