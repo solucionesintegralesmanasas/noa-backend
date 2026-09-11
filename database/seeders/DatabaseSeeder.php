@@ -36,8 +36,7 @@ class DatabaseSeeder extends Seeder
             TaxTypeSeeder::class,
             TributeSeeder::class,
             WithholdingSeeder::class,
-            ContextualQuestionSeeder::class,
-            DemoCompanySeeder::class,
+            ContextualQuestionSeeder::class
         ]);
 
     }
