@@ -97,6 +97,10 @@ Route::prefix('v1')->group(function () {
             ->name('api.v1.public.vehicle-inspections.show');
         Route::post('/public/vehicle-inspections/{uuid}', [VehicleInspectionController::class, 'signPublic'])
             ->name('api.v1.public.vehicle-inspections.sign');
+        Route::get('/public/service-delivery-control-sheets/{uuid}', [ServiceDeliveryControlSheetController::class, 'showPublic'])
+            ->name('api.v1.public.service-delivery-control-sheets.show');
+        Route::post('/public/service-delivery-control-sheets/{uuid}', [ServiceDeliveryControlSheetController::class, 'signPublic'])
+            ->name('api.v1.public.service-delivery-control-sheets.sign');
     });
 
     // ─── RUTAS PÚBLICAS (Sin Autenticación) ───
@@ -812,6 +816,7 @@ Route::prefix('v1')->group(function () {
             Route::prefix('service-delivery-control-sheets')->group(function () {
                 Route::get('/', [ServiceDeliveryControlSheetController::class, 'index'])->name('api.v1.fleet.service-delivery-control-sheets.index');
                 Route::get('/list', [ServiceDeliveryControlSheetController::class, 'list'])->name('api.v1.fleet.service-delivery-control-sheets.list');
+                Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
                 Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
                 Route::post('/', [ServiceDeliveryControlSheetController::class, 'store'])->name('api.v1.fleet.service-delivery-control-sheets.store');
                 Route::get('/{uuid}', [ServiceDeliveryControlSheetController::class, 'show'])->name('api.v1.fleet.service-delivery-control-sheets.show');
@@ -821,6 +826,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{uuid}/start', [ServiceDeliveryControlSheetController::class, 'start'])->name('api.v1.fleet.service-delivery-control-sheets.start');
                 Route::post('/{uuid}/close', [ServiceDeliveryControlSheetController::class, 'close'])->name('api.v1.fleet.service-delivery-control-sheets.close');
                 Route::post('/{uuid}/close-route', [ServiceDeliveryControlSheetController::class, 'closeRoute'])->name('api.v1.fleet.service-delivery-control-sheets.close-route');
+                Route::post('/{uuid}/generate-sign-url', [ServiceDeliveryControlSheetController::class, 'generateSignUrl'])->name('api.v1.fleet.service-delivery-control-sheets.generate-sign-url');
             });
         });
 

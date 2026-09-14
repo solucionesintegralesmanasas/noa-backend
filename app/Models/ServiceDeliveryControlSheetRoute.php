@@ -32,6 +32,8 @@ class ServiceDeliveryControlSheetRoute extends Model
         'order_index',
         'origin',
         'destination',
+        'funcionario_nombre',
+        'funcionario_cc',
         'end_time',
         'ending_kilometer',
         'number_of_tolls',
@@ -54,5 +56,11 @@ class ServiceDeliveryControlSheetRoute extends Model
     public function serviceDeliveryControlSheet(): BelongsTo
     {
         return $this->belongsTo(ServiceDeliveryControlSheet::class, 'service_delivery_control_sheet_uuid', 'uuid');
+    }
+
+    public function signatures(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Signature::class, 'entity_id', 'id')
+            ->where('entity_type', self::class);
     }
 }
