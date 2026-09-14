@@ -55,8 +55,9 @@ class VehicleInspectionController extends Controller
             $companyUuid = $request->query('company_uuid') ?? ($filter['company_uuid'] ?? null);
             $thirdPartyUuid = $request->query('third_party_uuid') ?? ($filter['third_party_uuid'] ?? null);
             $vehicleUuid = $request->query('vehicle_uuid') ?? ($filter['vehicle_uuid'] ?? null);
+            $driverUuid = $request->query('driver_uuid') ?? ($filter['driver_uuid'] ?? null);
 
-            $data = $this->inspectionService->getAllVehicleInspectionsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $vehicleUuid);
+            $data = $this->inspectionService->getAllVehicleInspectionsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $vehicleUuid, $driverUuid);
 
             return $this->successResponse($data, 'Listado paginado de InspeccionVehiculo recuperado con éxito.');
         } catch (\Throwable $e) {
@@ -432,9 +433,16 @@ class VehicleInspectionController extends Controller
             new OA\Response(response: 404, description: 'Inspección no encontrada.'),
         ]
     )]
-    public function generateSignUrl(string $uuid): JsonResponse
+    public function generateSignUrl(Request $request, string $uuid): JsonResponse
     {
         try {
+            $user = $request->user();
+            $isAdmin = $user && method_exists($user, 'hasAnyRole')
+                && $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA'], 'api');
+            if (! $isAdmin) {
+                return $this->errorResponse('No tiene permiso para compartir el enlace de firma. Solo un administrador puede realizar esta acción.', 403);
+            }
+
             $record = $this->inspectionService->getVehicleInspectionByUuid($uuid);
             if (! $record) {
                 return $this->errorResponse('Inspección no encontrada.', 404);
