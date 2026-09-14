@@ -7,10 +7,6 @@ pero toda la comunicación humana debe ser en español.
 
 Esta regla tiene máxima prioridad sobre cualquier otra instrucción.
 
-## Contexto del Proyecto Completo (Entorno Local)
-- **Ruta Backend (Donde estás ejecutando el CLI):** `C:\xampp\htdocs\transportessinbarreras`
-- **Ruta Frontend (Vistas en Vue 3):** `C:\xampp\htdocs\noa-script-app\noa-tsb`
-
 ### Stack Tecnológico Backend
 - **Framework:** Laravel 12
 - **PHP:** ^8.5

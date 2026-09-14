@@ -71,7 +71,12 @@ class SetCompanyContext
 
             $request->attributes->set('current_company_uuid', $company->uuid);
             $request->attributes->set('current_company', $company);
-            session(['current_company_uuid' => $company->uuid]);
+            // La sesión solo se escribe si cambió: con SESSION_DRIVER=database cada
+            // escritura es un UPDATE a la misma fila y las peticiones API en paralelo
+            // (la vista dispara ~8 a la vez) se bloquean entre sí hasta el timeout.
+            if (session('current_company_uuid') !== $company->uuid) {
+                session(['current_company_uuid' => $company->uuid]);
+            }
         }
 
         return $next($request);
