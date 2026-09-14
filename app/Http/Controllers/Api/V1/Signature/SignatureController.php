@@ -60,6 +60,16 @@ class SignatureController extends Controller
                 }
             }
 
+            // Las firmas de inspecciones vehiculares son solo para administradores
+            if (isset($data['entity_type']) && str_starts_with((string) $data['entity_type'], 'vehicle_inspection')) {
+                $user = $request->user();
+                $isAdmin = $user && method_exists($user, 'hasAnyRole')
+                    && $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA'], 'api');
+                if (! $isAdmin) {
+                    return $this->errorResponse('No tiene permiso para firmar inspecciones vehiculares. Solo un administrador puede realizar esta acción.', 403);
+                }
+            }
+
             // Resolver company_uuid desde el contexto inyectado por SetCompanyContext
             if (empty($data['company_uuid'])) {
                 $data['company_uuid'] = $request->attributes->get('current_company_uuid');
@@ -145,6 +155,16 @@ class SignatureController extends Controller
                     $data['entity_type'] = $data['role'] === 'inspector'
                         ? 'vehicle_inspection_inspector'
                         : 'vehicle_inspection_coordinator';
+                }
+            }
+
+            // Las firmas de inspecciones vehiculares son solo para administradores
+            if (isset($data['entity_type']) && str_starts_with((string) $data['entity_type'], 'vehicle_inspection')) {
+                $user = $request->user();
+                $isAdmin = $user && method_exists($user, 'hasAnyRole')
+                    && $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA'], 'api');
+                if (! $isAdmin) {
+                    return $this->errorResponse('No tiene permiso para firmar inspecciones vehiculares. Solo un administrador puede realizar esta acción.', 403);
                 }
             }
 
