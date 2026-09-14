@@ -7,11 +7,14 @@ namespace App\Http\Controllers\Api\V1\ServiceDeliveryControlSheet;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ServiceDeliveryControlSheet\StoreServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\UpdateServiceDeliveryControlSheetRequest;
+use App\Models\Signature;
 use App\Models\Vehicle;
 use App\Services\Pdf\PdfService;
 use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
+use App\Services\Signature\SignatureService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
 use OpenApi\Attributes as OA;
 
 /**
@@ -276,6 +279,37 @@ class ServiceDeliveryControlSheetController extends Controller
         }
     }
 
+    #[OA\Get(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/funcionarios/buscar',
+        summary: 'Buscar funcionarios registrados por número de CC',
+        operationId: 'searchFuncionariosServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'cc', in: 'query', required: true, schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Funcionarios encontrados.'),
+            new OA\Response(response: 422, description: 'Parámetro CC requerido.'),
+        ]
+    )]
+    public function buscarFuncionario(Request $request): JsonResponse
+    {
+        try {
+            $request->validate(['cc' => 'required|string|min:3|max:30']);
+            $companyUuid = $request->attributes->get('current_company_uuid')
+                ?? $request->user()->companies()->first()?->uuid;
+            if (! $companyUuid) {
+                return $this->errorResponse('Empresa no identificada.', 422);
+            }
+            $result = $this->serviceDeliveryControlSheetService->searchFuncionarios($companyUuid, $request->input('cc'));
+
+            return $this->successResponse($result, 'Funcionarios encontrados.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     #[OA\Post(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/{uuid}/close-route',
         summary: 'Guardar el cierre de un solo recorrido (cierre parcial por recorrido)',
@@ -296,6 +330,8 @@ class ServiceDeliveryControlSheetController extends Controller
                     new OA\Property(property: 'number_of_tolls', type: 'integer', example: 2),
                     new OA\Property(property: 'total_toll_value', type: 'number', example: 45000),
                     new OA\Property(property: 'end_novelty', type: 'string', nullable: true),
+                    new OA\Property(property: 'funcionario_nombre', type: 'string', nullable: true, description: 'Nombre y apellido del funcionario del recorrido'),
+                    new OA\Property(property: 'funcionario_cc', type: 'string', nullable: true, description: 'Número de CC del funcionario del recorrido'),
                     new OA\Property(property: 'funcionario_signature', type: 'string', nullable: true, description: 'Firma digital base64 PNG del funcionario'),
                     new OA\Property(property: 'conductor_signature', type: 'string', nullable: true, description: 'Firma digital base64 PNG del conductor'),
                 ]
@@ -396,6 +432,167 @@ class ServiceDeliveryControlSheetController extends Controller
             $result = $pdfService->generateMonthlyServiceControlSheetPdf($companyUuid, $vehicleUuid, $year, $month);
 
             return $result['pdf']->download($result['file_name']);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Post(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/{uuid}/generate-sign-url',
+        summary: 'Generar enlace público temporal para firma del coordinador de servicios',
+        operationId: 'generateSignUrlServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Enlace público para firma del coordinador generado con éxito.'),
+            new OA\Response(response: 404, description: 'Registro no encontrado.'),
+        ]
+    )]
+    public function generateSignUrl(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            $isAdmin = $user && method_exists($user, 'hasAnyRole')
+                && $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA'], 'api');
+            if (! $isAdmin) {
+                return $this->errorResponse('No tiene permiso para compartir el enlace de firma.', 403);
+            }
+
+            $record = $this->serviceDeliveryControlSheetService->getServiceDeliveryControlSheetByUuid($uuid);
+            if (! $record) {
+                return $this->errorResponse('El registro que desea compartir no existe.', 404);
+            }
+
+            $apiUrl = URL::temporarySignedRoute(
+                'api.v1.public.service-delivery-control-sheets.show',
+                now()->addHour(),
+                ['uuid' => $uuid],
+                false
+            );
+
+            $parsedUrl = parse_url($apiUrl);
+            parse_str($parsedUrl['query'] ?? '', $queryParameters);
+
+            $frontendBaseUrl = config('app.frontend_url') ?? url('/');
+
+            $publicLink = rtrim($frontendBaseUrl, '/').'/#/firma-documentos/'.$uuid.'?'.http_build_query(array_merge($queryParameters, ['tipo' => 'control']));
+
+            return $this->successResponse([
+                'url' => $publicLink,
+                'expires_at' => now()->addHour()->toIso8601String(),
+            ], 'Enlace público para firma del coordinador generado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/public/service-delivery-control-sheets/{uuid}',
+        summary: 'Obtener detalles públicos de la hoja de control para firma del coordinador (Signed URL)',
+        operationId: 'showPublicServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'signature', in: 'query', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'expires', in: 'query', required: true, schema: new OA\Schema(type: 'integer')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Detalles públicos recuperados.'),
+            new OA\Response(response: 404, description: 'Registro no encontrado.'),
+        ]
+    )]
+    public function showPublic(string $uuid): JsonResponse
+    {
+        try {
+            $record = $this->serviceDeliveryControlSheetService->getServiceDeliveryControlSheetByUuid($uuid);
+            if (! $record) {
+                return $this->errorResponse('El registro solicitado no existe.', 404);
+            }
+
+            $hasCoordinator = Signature::query()
+                ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
+                ->where('entity_id', $record->id)
+                ->exists();
+
+            return $this->successResponse([
+                'uuid' => $record->uuid,
+                'id' => $record->id,
+                'tipo' => 'control',
+                'service_date' => $record->service_date,
+                'vehicle_license_plate' => $record->vehicle_license_plate ?? 'N/A',
+                'driver_name' => $record->driver_name ?? 'N/A',
+                'daily_route' => $record->daily_route ?? 'N/A',
+                'project_name' => $record->project?->project_name,
+                'has_coordinator_signature' => $hasCoordinator,
+            ], 'Detalles públicos de la hoja de control recuperados.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Post(
+        path: '/api/v1/public/service-delivery-control-sheets/{uuid}',
+        summary: 'Firmar hoja de control públicamente como coordinador (Signed URL, una sola firma)',
+        operationId: 'signPublicServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'signature', in: 'query', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'expires', in: 'query', required: true, schema: new OA\Schema(type: 'integer')),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['signature'],
+                properties: [
+                    new OA\Property(property: 'signature', type: 'string', description: 'Firma en formato base64 (data:image/png;base64,...)', maxLength: 500000),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 201, description: 'Hoja de control firmada por el coordinador con éxito.'),
+            new OA\Response(response: 400, description: 'Datos de firma inválidos.'),
+            new OA\Response(response: 404, description: 'Registro no encontrado.'),
+        ]
+    )]
+    public function signPublic(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $record = $this->serviceDeliveryControlSheetService->getServiceDeliveryControlSheetByUuid($uuid);
+            if (! $record) {
+                return $this->errorResponse('El registro solicitado no existe.', 404);
+            }
+
+            $request->validate([
+                'signature' => [
+                    'required',
+                    'string',
+                    'regex:/^data:image\/png;base64,[A-Za-z0-9+\/]+=*$/',
+                    function (string $attribute, mixed $value, callable $fail): void {
+                        [, $base64] = explode(',', $value, 2);
+                        $sizeKb = (int) (strlen($base64) * 3 / 4 / 1024);
+
+                        if ($sizeKb > 500) {
+                            $fail("La firma no debe superar los 500 KB (actual: {$sizeKb} KB).");
+                        }
+                    },
+                ],
+            ]);
+
+            $companyUuid = $record->company_uuid;
+
+            $signatureService = app(SignatureService::class);
+            $signature = $signatureService->store([
+                'entity_type' => 'App\\Models\\ServiceDeliveryControlSheetCoordinator',
+                'entity_id' => $record->id,
+                'company_uuid' => $companyUuid,
+                'signature' => $request->input('signature'),
+            ]);
+
+            return $this->successResponse($signature, 'Hoja de control firmada por el coordinador con éxito.', 201);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

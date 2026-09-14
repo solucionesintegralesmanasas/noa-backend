@@ -192,7 +192,10 @@ class ServiceDeliveryControlSheetService extends BaseService
         if (! is_array($routes)) {
             return;
         }
-        $record->routes()->delete();
+
+        $existingRoutes = $record->routes()->orderBy('order_index')->get();
+        $processedRouteUuids = [];
+
         foreach (array_values($routes) as $index => $routeData) {
             if (! is_array($routeData)) {
                 continue;
@@ -200,14 +203,59 @@ class ServiceDeliveryControlSheetService extends BaseService
             if (empty($routeData['origin']) && empty($routeData['destination'])) {
                 continue;
             }
-            ServiceDeliveryControlSheetRoute::create([
-                'uuid' => (string) Str::uuid(),
-                'service_delivery_control_sheet_uuid' => $record->uuid,
-                'order_index' => $index + 1,
-                'origin' => $routeData['origin'] ?? null,
-                'destination' => $routeData['destination'] ?? null,
-                'is_active' => true,
-            ]);
+
+            $orderIndex = isset($routeData['order_index']) && (int) $routeData['order_index'] > 0
+                ? (int) $routeData['order_index']
+                : ($index + 1);
+
+            $targetRoute = null;
+            if (! empty($routeData['uuid'])) {
+                $targetRoute = $existingRoutes->firstWhere('uuid', $routeData['uuid']);
+            }
+            if (! $targetRoute) {
+                $targetRoute = $existingRoutes->firstWhere('order_index', $orderIndex);
+            }
+
+            $funcionarioNombre = isset($routeData['funcionario_nombre']) && trim((string) $routeData['funcionario_nombre']) !== ''
+                ? mb_substr(trim((string) $routeData['funcionario_nombre']), 0, 150)
+                : ($targetRoute?->funcionario_nombre ?? null);
+
+            $funcionarioCc = isset($routeData['funcionario_cc']) && trim((string) $routeData['funcionario_cc']) !== ''
+                ? mb_substr(trim((string) $routeData['funcionario_cc']), 0, 30)
+                : ($targetRoute?->funcionario_cc ?? null);
+
+            if ($targetRoute) {
+                $targetRoute->update([
+                    'order_index' => $orderIndex,
+                    'origin' => $routeData['origin'] ?? $targetRoute->origin,
+                    'destination' => $routeData['destination'] ?? $targetRoute->destination,
+                    'funcionario_nombre' => $funcionarioNombre,
+                    'funcionario_cc' => $funcionarioCc,
+                    'is_active' => true,
+                ]);
+                $processedRouteUuids[] = $targetRoute->uuid;
+            } else {
+                $newRoute = ServiceDeliveryControlSheetRoute::create([
+                    'uuid' => (string) Str::uuid(),
+                    'service_delivery_control_sheet_uuid' => $record->uuid,
+                    'order_index' => $orderIndex,
+                    'origin' => $routeData['origin'] ?? null,
+                    'destination' => $routeData['destination'] ?? null,
+                    'funcionario_nombre' => $funcionarioNombre,
+                    'funcionario_cc' => $funcionarioCc,
+                    'is_active' => true,
+                ]);
+                $processedRouteUuids[] = $newRoute->uuid;
+            }
+        }
+
+        // Eliminar solo rutas sobrantes que no hayan sido procesadas y que NO tengan cierres
+        foreach ($existingRoutes as $oldRoute) {
+            if (! in_array($oldRoute->uuid, $processedRouteUuids, true)) {
+                if (empty($oldRoute->end_time) && ($oldRoute->ending_kilometer === null || $oldRoute->ending_kilometer === '')) {
+                    $oldRoute->delete();
+                }
+            }
         }
     }
 
@@ -247,6 +295,37 @@ class ServiceDeliveryControlSheetService extends BaseService
     }
 
     /**
+     * Busca funcionarios ya registrados por número de CC dentro de la empresa.
+     * Retorna coincidencias con nombre y veces usado, para reutilizar datos.
+     *
+     * @return array<int, array{funcionario_cc: string, funcionario_nombre: string, usos: int}>
+     */
+    public function searchFuncionarios(string $companyUuid, string $cc): array
+    {
+        $cc = trim($cc);
+        if ($cc === '') {
+            return [];
+        }
+
+        return ServiceDeliveryControlSheetRoute::query()
+            ->join('service_delivery_control_sheet as s', 's.uuid', '=', 'service_delivery_control_sheet_routes.service_delivery_control_sheet_uuid')
+            ->where('s.company_uuid', $companyUuid)
+            ->whereNotNull('service_delivery_control_sheet_routes.funcionario_cc')
+            ->where('service_delivery_control_sheet_routes.funcionario_cc', 'like', '%'.$cc.'%')
+            ->selectRaw('service_delivery_control_sheet_routes.funcionario_cc, MAX(service_delivery_control_sheet_routes.funcionario_nombre) as funcionario_nombre, COUNT(*) as usos')
+            ->groupBy('service_delivery_control_sheet_routes.funcionario_cc')
+            ->orderByDesc('usos')
+            ->limit(10)
+            ->get()
+            ->map(fn ($row) => [
+                'funcionario_cc' => $row->funcionario_cc,
+                'funcionario_nombre' => $row->funcionario_nombre,
+                'usos' => (int) $row->usos,
+            ])
+            ->all();
+    }
+
+    /**
      * Persiste el cierre de cada recorrido (hora fin, km final, peajes, novedad)
      * y sus dos firmas digitales cuando la planilla tiene más de un recorrido.
      */
@@ -271,7 +350,23 @@ class ServiceDeliveryControlSheetService extends BaseService
 
     private function applyRouteClosure(ServiceDeliveryControlSheetRoute $route, array $closure, string $companyUuid): void
     {
+        $funcionarioNombre = isset($closure['funcionario_nombre']) && trim((string) $closure['funcionario_nombre']) !== ''
+            ? mb_substr(trim((string) $closure['funcionario_nombre']), 0, 150)
+            : ($route->funcionario_nombre ?? null);
+        $funcionarioCc = isset($closure['funcionario_cc']) && trim((string) $closure['funcionario_cc']) !== ''
+            ? mb_substr(trim((string) $closure['funcionario_cc']), 0, 30)
+            : ($route->funcionario_cc ?? null);
+
+        if (empty($funcionarioNombre)) {
+            throw ValidationException::withMessages(['funcionario_nombre' => 'El nombre y apellido del funcionario es obligatorio para cada recorrido.']);
+        }
+        if (empty($funcionarioCc)) {
+            throw ValidationException::withMessages(['funcionario_cc' => 'El número de CC del funcionario es obligatorio para cada recorrido.']);
+        }
+
         $route->update([
+            'funcionario_nombre' => $funcionarioNombre,
+            'funcionario_cc' => $funcionarioCc,
             'end_time' => $closure['end_time'] ?? null,
             'ending_kilometer' => $closure['ending_kilometer'] !== null && $closure['ending_kilometer'] !== ''
                 ? $closure['ending_kilometer']
@@ -280,6 +375,12 @@ class ServiceDeliveryControlSheetService extends BaseService
             'total_toll_value' => $closure['total_toll_value'] ?? 0,
             'end_novelty' => $closure['end_novelty'] ?? null,
         ]);
+
+        if (! empty($closure['funcionario_signature']) || ! empty($closure['conductor_signature'])) {
+            \App\Models\Signature::where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetRoute')
+                ->where('entity_id', $route->id)
+                ->delete();
+        }
 
         if (! empty($closure['funcionario_signature'])) {
             $this->signatureService->store([
@@ -405,6 +506,8 @@ class ServiceDeliveryControlSheetService extends BaseService
                             'order_index' => $pr->order_index,
                             'origin' => $pr->origin,
                             'destination' => $pr->destination,
+                            'funcionario_nombre' => $pr->funcionario_nombre,
+                            'funcionario_cc' => $pr->funcionario_cc,
                             'is_active' => true,
                         ]);
                     }
@@ -533,7 +636,25 @@ class ServiceDeliveryControlSheetService extends BaseService
 
             // Cierre por recorrido: cuando la planilla tiene más de un recorrido,
             // cada uno persiste sus datos de llegada y sus dos firmas.
+            // Con un solo recorrido también se persiste (el frontend envía routes[0]
+            // con funcionario y cierre) para que el funcionario no se pierda.
             $this->syncRouteClosures($record, $data);
+
+            if (isset($data['routes']) && is_array($data['routes'])) {
+                $this->syncRoutes($record, $data['routes']);
+            }
+
+            // Validación final: si la planilla tiene recorridos, cada uno debe tener
+            // funcionario almacenado. Evita cerrar el recorrido 1 sin nombre/CC.
+            $rutasFinales = $record->routes()->orderBy('order_index')->get();
+            foreach ($rutasFinales as $idx => $rutaFinal) {
+                if (empty(trim((string) ($rutaFinal->funcionario_nombre ?? '')))
+                    || empty(trim((string) ($rutaFinal->funcionario_cc ?? '')))) {
+                    throw ValidationException::withMessages([
+                        'funcionario_cc' => 'El recorrido '.($idx + 1).' requiere nombre y apellido del funcionario y número de CC por que no se esta almacenando la informacion.',
+                    ]);
+                }
+            }
 
             if (! empty($record->parent_uuid)) {
                 $remainingChildren = ServiceDeliveryControlSheet::query()

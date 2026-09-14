@@ -38,8 +38,12 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
             'is_active' => ['sometimes', 'nullable', 'boolean'],
             'project_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:projects,uuid'],
             'routes' => ['sometimes', 'nullable', 'array'],
+            'routes.*.uuid' => ['sometimes', 'nullable', 'string'],
+            'routes.*.order_index' => ['sometimes', 'nullable', 'integer'],
             'routes.*.origin' => ['nullable', 'string', 'max:255'],
             'routes.*.destination' => ['nullable', 'string', 'max:255'],
+            'routes.*.funcionario_nombre' => ['nullable', 'string', 'max:150'],
+            'routes.*.funcionario_cc' => ['nullable', 'string', 'max:30'],
         ];
     }
 
@@ -77,6 +81,10 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
             'routes.*.origin.max' => 'El origen no debe exceder los 255 caracteres.',
             'routes.*.destination.string' => 'El destino debe ser una cadena de texto.',
             'routes.*.destination.max' => 'El destino no debe exceder los 255 caracteres.',
+            'routes.*.funcionario_nombre.string' => 'El nombre del funcionario debe ser una cadena de texto.',
+            'routes.*.funcionario_nombre.max' => 'El nombre del funcionario no debe exceder los 150 caracteres.',
+            'routes.*.funcionario_cc.string' => 'El CC del funcionario debe ser una cadena de texto.',
+            'routes.*.funcionario_cc.max' => 'El CC del funcionario no debe exceder los 30 caracteres.',
         ];
     }
 
