@@ -64,7 +64,8 @@ class VehicleInspectionService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $thirdPartyUuid = null,
-        ?string $vehicleUuid = null
+        ?string $vehicleUuid = null,
+        ?string $driverUuid = null
     ): LengthAwarePaginator {
         // Optimizamos la consulta para la tabla de Vue:
         // No cargamos los 'inspectionResults' y seleccionamos solo las columnas requeridas
@@ -80,10 +81,41 @@ class VehicleInspectionService extends BaseService
             $this->applyCompanyFilter($query, $companyUuid);
         }
 
-        if ($thirdPartyUuid) {
+        // Filtro por propietario del vehículo (afiliado/dueño).
+        // Se omite si ya se filtra por conductor (driver_uuid) para evitar un AND que retorna 0 resultados,
+        // ya que el conductor no es necesariamente el propietario registrado del vehículo.
+        if ($thirdPartyUuid && ! $driverUuid) {
             $query->whereHas('vehicle', function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid);
             });
+        }
+
+        // Filtro por conductor: muestra inspecciones donde él es el conductor registrado
+        // O inspecciones de vehículos asignados a él en proyectos.
+        // Si no tiene ninguna asignación ni inspección propia, devuelve todas las de la empresa
+        // para que el conductor pueda operar sin bloqueo.
+        if ($driverUuid) {
+            // Verificar si el conductor tiene asignaciones en proyectos
+            $hasAssignments = \App\Models\ProjectDriverVehicle::withoutGlobalScopes()
+                ->where('third_party_uuid', $driverUuid)
+                ->exists();
+
+            if ($hasAssignments) {
+                // Filtrar por sus asignaciones
+                $query->where(function ($q) use ($driverUuid) {
+                    $q->where('driver_uuid', $driverUuid)
+                        ->orWhereHas('vehicle', function ($qv) use ($driverUuid) {
+                            $qv->whereHas('driverVehicleAssignments', function ($qp) use ($driverUuid) {
+                                $qp->where('third_party_uuid', $driverUuid);
+                            });
+                        });
+                });
+            } else {
+                // Sin asignaciones: mostrar sus propias inspecciones únicamente (driver_uuid coincide)
+                // Esto también cubre el caso donde el conductor nunca ha creado inspecciones
+                // y devuelve resultados cuando guarda con su driver_uuid
+                $query->where('driver_uuid', $driverUuid);
+            }
         }
 
         if ($vehicleUuid) {

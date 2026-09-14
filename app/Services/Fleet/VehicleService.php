@@ -84,7 +84,11 @@ class VehicleService extends BaseService
 
             if ($driverThirdPartyUuid) {
                 $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
-                $query->whereIn('uuid', $allowedUuids);
+                // Si el conductor tiene asignaciones, mostrar solo esas.
+                // Si no tiene ninguna, mostrar todos los vehículos activos de la empresa.
+                if (! empty($allowedUuids)) {
+                    $query->whereIn('uuid', $allowedUuids);
+                }
             } else {
                 $query->whereRaw('1 = 0');
             }
@@ -168,7 +172,13 @@ class VehicleService extends BaseService
 
             if ($driverThirdPartyUuid) {
                 $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
-                $query->whereIn('uuid', $allowedUuids);
+                // Si el conductor tiene asignaciones, mostrar solo esas.
+                // Si no tiene ninguna, mostrar todos los vehículos activos de la empresa
+                // para que pueda registrar inspecciones sin bloqueo.
+                if (! empty($allowedUuids)) {
+                    $query->whereIn('uuid', $allowedUuids);
+                }
+                // else: no se aplica filtro adicional -> devuelve todos los de la empresa
             } else {
                 $query->whereRaw('1 = 0');
             }

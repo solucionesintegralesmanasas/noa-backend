@@ -43,6 +43,7 @@ class StoreLocationRequest extends FormRequest
             'location.recorded_at' => 'required|date',
             'location.vehicle_uuid' => 'nullable|uuid|exists:vehicles,uuid',
             'location.project_uuid' => 'nullable|uuid|exists:projects,uuid',
+            'location.third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
             'session_uuid' => 'nullable|uuid|exists:driver_location_sessions,uuid',
         ];
     }

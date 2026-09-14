@@ -42,8 +42,19 @@ class DriverLocationController extends Controller
         try {
             $validated = $request->validated();
             $data = $validated['location'];
-            $data['company_uuid'] = $request->user()->companies()->first()->uuid ?? null;
-            $data['third_party_uuid'] = $request->user()->companies()->first()->pivot->third_party_uuid ?? null;
+            $company = $request->user()->companies()->first();
+            $data['company_uuid'] = $company?->uuid;
+            $data['third_party_uuid'] = $data['third_party_uuid']
+                ?? $request->input('third_party_uuid')
+                ?? $company?->pivot->third_party_uuid
+                ?? $this->resolveDriverUuid($request->user(), $company?->uuid);
+
+            if (empty($data['company_uuid']) || empty($data['third_party_uuid'])) {
+                return $this->validationErrorResponse(
+                    ['third_party_uuid' => ['El usuario no tiene un conductor vinculado en esta empresa. Vincule el usuario a un tercero conductor en company_user.']],
+                    'No se pudo registrar la ubicación: falta el conductor.'
+                );
+            }
 
             $location = $this->trackingService->storeLocation($data);
 
@@ -68,7 +79,30 @@ class DriverLocationController extends Controller
         try {
             $user = $request->user();
             $company = $user->companies()->first();
-            $thirdPartyUuid = $company?->pivot->third_party_uuid;
+            $thirdPartyUuid = $request->input('third_party_uuid')
+                ?? $company?->pivot->third_party_uuid
+                ?? $this->resolveDriverUuid($user, $company?->uuid);
+
+            if (empty($company?->uuid)) {
+                return $this->validationErrorResponse(
+                    ['company_uuid' => ['El usuario no tiene una empresa activa asignada.']],
+                    'No se pudo iniciar la sesión: falta la empresa.'
+                );
+            }
+
+            if (empty($thirdPartyUuid)) {
+                return $this->validationErrorResponse(
+                    ['third_party_uuid' => ['El usuario no tiene un conductor vinculado en esta empresa. Vincule el usuario a un tercero conductor en company_user.']],
+                    'No se pudo iniciar la sesión: falta el conductor.'
+                );
+            }
+
+            if (empty($request->input('vehicle_uuid'))) {
+                return $this->validationErrorResponse(
+                    ['vehicle_uuid' => ['El vehículo es obligatorio para iniciar la sesión.']],
+                    'No se pudo iniciar la sesión: falta el vehículo.'
+                );
+            }
 
             $session = $this->trackingService->startSession([
                 'company_uuid' => $company?->uuid,
@@ -80,6 +114,26 @@ class DriverLocationController extends Controller
             return $this->createdResponse($session, 'Sesión de tracking iniciada.');
         } catch (\Throwable $e) {
             return $this->handleException($e);
+        }
+    }
+
+    /**
+     * Intenta resolver el conductor por el correo del usuario dentro de la empresa.
+     */
+    private function resolveDriverUuid($user, ?string $companyUuid): ?string
+    {
+        if (empty($companyUuid) || empty($user?->email)) {
+            return null;
+        }
+
+        try {
+            return \App\Models\ThirdParty::withoutGlobalScopes()
+                ->where('company_uuid', $companyUuid)
+                ->where('email', $user->email)
+                ->where('is_driver', true)
+                ->value('uuid');
+        } catch (\Throwable) {
+            return null;
         }
     }
 

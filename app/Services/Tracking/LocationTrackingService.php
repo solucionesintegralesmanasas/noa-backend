@@ -53,6 +53,10 @@ class LocationTrackingService extends BaseService
      */
     public function storeLocation(array $data): DriverLocation
     {
+        if (empty($data['company_uuid']) || empty($data['third_party_uuid'])) {
+            throw new \InvalidArgumentException('Faltan campos requeridos para la operación: company_uuid y third_party_uuid son obligatorios.');
+        }
+
         return $this->transaction(function () use ($data) {
             $location = DriverLocation::create([
                 'uuid' => (string) Str::uuid(),
@@ -84,6 +88,10 @@ class LocationTrackingService extends BaseService
      */
     public function startSession(array $data): DriverLocationSession
     {
+        if (empty($data['company_uuid']) || empty($data['third_party_uuid'])) {
+            throw new \InvalidArgumentException('Faltan campos requeridos para la operación: company_uuid y third_party_uuid son obligatorios.');
+        }
+
         return $this->transaction(function () use ($data) {
             DriverLocationSession::where('third_party_uuid', $data['third_party_uuid'])
                 ->where('status', 'active')
