@@ -178,19 +178,19 @@
         }
 
         .col-hora {
-            width: 7%;
+            width: 6%;
         }
 
         .col-descanso {
-            width: 7%;
+            width: 6%;
         }
 
         .col-total {
-            width: 6%;
+            width: 5%;
         }
 
         .col-km {
-            width: 6%;
+            width: 5%;
         }
 
         .col-firma {
@@ -215,13 +215,20 @@
 
         .firma-cell-empty {
             height: 26px;
-            border: 0.5pt dashed #cccccc;
+            border: 0.5pt solid #999999;
             display: inline-block;
             width: 85px;
+            background-color: #ffffff;
         }
 
         .col-conductor {
-            width: 16%;
+            width: 14%;
+        }
+
+        .ruta-detalle {
+            display: block;
+            font-size: 6pt;
+            color: #555555;
         }
 
         /* ── PIE DE PÁGINA ── */
@@ -337,7 +344,7 @@
         <tr>
             <td class="header-logo" rowspan="1">
                 @if (!empty($logo))
-                    <img src="data:image/png;base64,{{ $logo }}" alt="Logo">
+                    <img src="data:{{ $logo_mime ?? 'image/png' }};base64,{{ $logo }}" alt="Logo">
                 @else
                     <div class="header-logo-placeholder">LOGO</div>
                 @endif
@@ -396,7 +403,7 @@
         </tr>
     </table>
 
-    <!-- TABLA PRINCIPAL -->
+    <!-- TABLA PRINCIPAL: UNA FILA POR CADA RUTA (RECORRIDO) -->
     <table class="main-table">
         <thead>
             <tr>
@@ -422,23 +429,9 @@
                 <tr>
                     <td>{{ $dia['numero'] }}</td>
                     <td style="text-align: left; padding-left: 4px;">
-                        @if (!empty($dia['rutas_detalle']) && is_array($dia['rutas_detalle']))
-                            @foreach ($dia['rutas_detalle'] as $i => $rd)
-                                <div>{{ $i + 1 }}. {{ ($rd['origin'] ?? '') . (($rd['origin'] ?? '') !== '' ? ' - ' : '') . ($rd['destination'] ?? '') }}
-                                    @if (!empty($rd['end_time']))
-                                        <span style="color:#777;">· Fin {{ \Carbon\Carbon::parse($rd['end_time'])->format('H:i') }}</span>
-                                    @endif
-                                    @if (isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null)
-                                        <span style="color:#777;">· km {{ number_format((float)$rd['ending_kilometer'], 0, ',', '.') }}</span>
-                                    @endif
-                                </div>
-                            @endforeach
-                        @elseif (!empty($dia['rutas']) && is_array($dia['rutas']))
-                            @foreach ($dia['rutas'] as $i => $r)
-                                <div>{{ $i + 1 }}. {{ $r }}</div>
-                            @endforeach
-                        @else
-                            {{ $dia['ruta'] ?? '' }}
+                        {{ $dia['ruta_unica'] ?? ($dia['ruta'] ?? '') }}
+                        @if (!empty($dia['detalle_cierre'] ?? null))
+                            <span class="ruta-detalle">{{ $dia['detalle_cierre'] }}</span>
                         @endif
                     </td>
                     <td>{{ $dia['hora_inicio'] ?? '' }}</td>
@@ -446,12 +439,12 @@
                     <td>{{ $dia['descanso_fin'] ?? '' }}</td>
                     <td>{{ $dia['hora_fin'] ?? '' }}</td>
                     <td>{{ $dia['total_hours'] ?? '' }}</td>
-                    <td>{{ $dia['km_inicial'] ?? '' }}</td>
-                    <td>{{ $dia['km_final'] ?? '' }}</td>
-                    <td>{{ $dia['km_total'] ?? '' }}</td>
+                    <td>{{ isset($dia['km_inicial']) && is_numeric($dia['km_inicial']) ? rtrim(rtrim(number_format((float) $dia['km_inicial'], 2, '.', ''), '0'), '.') : ($dia['km_inicial'] ?? '') }}</td>
+                    <td>{{ isset($dia['km_final']) && is_numeric($dia['km_final']) ? rtrim(rtrim(number_format((float) $dia['km_final'], 2, '.', ''), '0'), '.') : ($dia['km_final'] ?? '') }}</td>
+                    <td>{{ isset($dia['km_total']) && is_numeric($dia['km_total']) ? rtrim(rtrim(number_format((float) $dia['km_total'], 2, '.', ''), '0'), '.') : ($dia['km_total'] ?? '') }}</td>
                     <td class="firma-cell">
                         @if (!empty($dia['firma_funcionario']))
-                            <img src="data:image/png;base64,{{ $dia['firma_funcionario'] }}">
+                            <img src="data:image/png;base64,{{ $dia['firma_funcionario'] }}" alt="Firma funcionario">
                         @else
                             <div class="firma-cell-empty"></div>
                         @endif
@@ -461,54 +454,6 @@
             @endforeach
         </tbody>
     </table>
-
-    <!-- CIERRE Y FIRMAS POR RECORRIDO (solo cuando hay más de un recorrido con cierre) -->
-    @php
-        $rutasConCierre = collect($rutas_detalle ?? [])->filter(function ($rd) {
-            return !empty($rd['end_time']) || (isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null) || !empty($rd['end_novelty']);
-        });
-    @endphp
-    @if ($rutasConCierre->count() > 0)
-        <div style="margin-top: 6px;">
-            <div style="background:#FF0000; color:#ffffff; font-weight:bold; font-size:8pt; padding:3px 6px; border:1pt solid #000; border-bottom:0;">
-                CIERRE Y FIRMAS POR RECORRIDO ({{ $rutasConCierre->count() }})
-            </div>
-            @foreach ($rutasConCierre as $i => $rd)
-                <table style="width:100%; border-collapse:collapse; border:1pt solid #000;">
-                    <tr>
-                        <td style="font-weight:bold; width:10%; border:0.5pt solid #000; padding:2px 4px;">RECORRIDO {{ $i + 1 }}</td>
-                        <td style="width:40%; border:0.5pt solid #000; padding:2px 4px;">{{ ($rd['origin'] ?? '') . (($rd['origin'] ?? '') !== '' ? ' → ' : '') . ($rd['destination'] ?? '') }}</td>
-                        <td style="font-weight:bold; width:12%; border:0.5pt solid #000; padding:2px 4px;">HORA FIN</td>
-                        <td style="width:13%; border:0.5pt solid #000; padding:2px 4px;">{{ !empty($rd['end_time']) ? \Carbon\Carbon::parse($rd['end_time'])->format('H:i') : '' }}</td>
-                        <td style="font-weight:bold; width:12%; border:0.5pt solid #000; padding:2px 4px;">KM FINAL</td>
-                        <td style="width:13%; border:0.5pt solid #000; padding:2px 4px;">{{ isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null ? number_format((float)$rd['ending_kilometer'], 0, ',', '.') : '' }}</td>
-                    </tr>
-                    @if (!empty($rd['number_of_tolls']) || !empty($rd['total_toll_value']) || !empty($rd['end_novelty']))
-                    <tr>
-                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">PEAJES</td>
-                        <td style="border:0.5pt solid #000; padding:2px 4px;">{{ ($rd['number_of_tolls'] ?? 0) }} · Valor ${{ isset($rd['total_toll_value']) ? number_format((float)$rd['total_toll_value'], 0, ',', '.') : 0 }}</td>
-                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">NOVEDAD</td>
-                        <td colspan="3" style="border:0.5pt solid #000; padding:2px 4px;">{{ $rd['end_novelty'] ?? '' }}</td>
-                    </tr>
-                    @endif
-                    <tr>
-                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">FIRMA FUNCIONARIO</td>
-                        <td style="border:0.5pt solid #000; padding:2px 4px; text-align:center;">
-                            @if (!empty($rd['firma_funcionario']))
-                                <img src="data:image/png;base64,{{ $rd['firma_funcionario'] }}" style="max-height:30px; max-width:120px;">
-                            @endif
-                        </td>
-                        <td style="font-weight:bold; border:0.5pt solid #000; padding:2px 4px;">FIRMA CONDUCTOR</td>
-                        <td colspan="3" style="border:0.5pt solid #000; padding:2px 4px; text-align:center;">
-                            @if (!empty($rd['firma_conductor']))
-                                <img src="data:image/png;base64,{{ $rd['firma_conductor'] }}" style="max-height:30px; max-width:120px;">
-                            @endif
-                        </td>
-                    </tr>
-                </table>
-            @endforeach
-        </div>
-    @endif
 
     <!-- PIE / FIRMAS -->
     <div class="footer-section">
@@ -537,7 +482,7 @@
                         @endif
                     </div>
                     <div class="footer-firma-line"></div>
-                    RECIBO Y FIRMA (FUNCIONARIO)
+                    RECIBO Y FIRMA (COORDINADOR DE SERVICIOS)
                 </td>
             </tr>
         </table>

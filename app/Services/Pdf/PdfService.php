@@ -790,9 +790,28 @@ class PdfService
                 }
             }
 
+            // Firma del coordinador (link público): reemplaza al funcionario en RECIBO Y FIRMA.
+            // Respaldo a la firma del funcionario para planillas firmadas antes de esta funcionalidad.
+            $coordinatorSignature = Signature::query()
+                ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
+                ->where('entity_id', $sheet->id)
+                ->orderBy('id', 'desc')
+                ->first();
+            if (! $coordinatorSignature && $sheet->parent_uuid) {
+                $parentSheetForCoord = ServiceDeliveryControlSheet::where('uuid', $sheet->parent_uuid)->first();
+                if ($parentSheetForCoord) {
+                    $coordinatorSignature = Signature::query()
+                        ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
+                        ->where('entity_id', $parentSheetForCoord->id)
+                        ->orderBy('id', 'desc')
+                        ->first();
+                }
+            }
+
             $base64Images = $this->getBase64Parallel([
                 'logo' => $logoModel,
-                'firma_recibido' => $signatures->get(0), // La primera guardada es el funcionario que recibe
+                'firma_recibido' => $coordinatorSignature ?? $signatures->get(0), // Coordinador por link; respaldo funcionario
+                'firma_funcionario_hoja' => $signatures->get(0), // Funcionario de la hoja: solo columna FIRMA DEL FUNCIONARIO
                 'firma_conductor' => $signatures->get(1),  // La segunda guardada es el conductor
             ]);
 
@@ -831,29 +850,100 @@ class PdfService
                 }
             }
 
-            // Para la planilla diaria, mostrar el registro en la primera fila, y luego rellenar el resto
+            // Para la planilla diaria se genera UNA FILA POR CADA RUTA (recorrido),
+            // repitiendo fecha/horas/km globales en cada línea según formato OPE-F-006.
             $dias = [];
 
             $restHours = $this->calculateRestHours($sheet->start_time, $sheet->end_time, $sheet->total_hours);
 
-            $dias[] = [
+            $horaInicio = $sheet->start_time ? $sheet->start_time->format('H:i') : '';
+            $horaFinGlobal = $sheet->end_time ? $sheet->end_time->format('H:i') : '';
+            $totalHoras = $sheet->total_hours ? $sheet->total_hours->format('H:i') : '';
+            $kmInicialFmt = $this->formatKilometer($sheet->starting_kilometer);
+            $kmFinalGlobalFmt = $this->formatKilometer($sheet->ending_kilometer);
+            $kmTotalGlobal = $sheet->starting_kilometer !== null && $sheet->ending_kilometer !== null
+                && $sheet->starting_kilometer !== '' && $sheet->ending_kilometer !== ''
+                ? $this->formatKilometer($sheet->ending_kilometer - $sheet->starting_kilometer)
+                : '';
+
+            $baseFila = [
                 'numero' => (int) $date->format('d'),
-                'ruta' => $rutasTexto,
-                'rutas' => $rutasLista,
-                'hora_inicio' => $sheet->start_time ? $sheet->start_time->format('H:i') : '',
+                'hora_inicio' => $horaInicio,
                 'descanso_inicio' => $restHours['inicio'],
                 'descanso_fin' => $restHours['fin'],
-                'hora_fin' => $sheet->end_time ? $sheet->end_time->format('H:i') : '',
-                'total_hours' => $sheet->total_hours ? $sheet->total_hours->format('H:i') : '',
-                'km_inicial' => $sheet->starting_kilometer,
-                'km_final' => $sheet->ending_kilometer,
-                'km_total' => $sheet->starting_kilometer !== null && $sheet->ending_kilometer !== null
-                    ? ($sheet->ending_kilometer - $sheet->starting_kilometer)
-                    : '',
-                'firma_funcionario' => $base64Images['firma_recibido'],
+                'hora_fin' => $horaFinGlobal,
+                'total_hours' => $totalHoras,
+                'km_inicial' => $kmInicialFmt,
+                'km_final' => $kmFinalGlobalFmt,
+                'km_total' => $kmTotalGlobal,
                 'conductor' => $sheet->driver_name,
                 'proyecto' => $nombreProyecto,
             ];
+
+            if (! empty($rutasDetalle)) {
+                foreach ($rutasDetalle as $rd) {
+                    $rutaUnica = trim(($rd['origin'] ?? '').' - '.($rd['destination'] ?? ''), ' -');
+                    if ($rutaUnica === '' || $rutaUnica === '-') {
+                        $rutaUnica = $sheet->daily_route ?? 'Sin ruta definida';
+                    }
+                    // Si el recorrido tiene cierre propio se usa en la fila; si no, se conserva el global.
+                    $horaFinRec = ! empty($rd['end_time']) ? Carbon::parse($rd['end_time'])->format('H:i') : '';
+                    $kmFinRec = (isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null && $rd['ending_kilometer'] !== '')
+                        ? $rd['ending_kilometer']
+                        : null;
+                    $horaFinFila = $horaFinRec !== '' ? $horaFinRec : $horaFinGlobal;
+                    $kmFinalFilaRaw = $kmFinRec !== null ? $kmFinRec : $sheet->ending_kilometer;
+                    $kmFinalFila = $this->formatKilometer($kmFinalFilaRaw);
+                    $kmTotalFila = ($sheet->starting_kilometer !== null && $sheet->starting_kilometer !== '' && $kmFinalFilaRaw !== null && $kmFinalFilaRaw !== '')
+                        ? $this->formatKilometer($kmFinalFilaRaw - $sheet->starting_kilometer)
+                        : $kmTotalGlobal;
+                    // Detalle de cierre solo si existe (funcionario / peajes / novedad).
+                    $detalleCierre = '';
+                    $partesCierre = [];
+                    if (! empty($rd['funcionario_nombre']) || ! empty($rd['funcionario_cc'])) {
+                        $funcTxt = 'Funcionario CC '.trim(($rd['funcionario_cc'] ?? '').(! empty($rd['funcionario_nombre']) ? ' - '.$rd['funcionario_nombre'] : ''));
+                        $partesCierre[] = $funcTxt;
+                    }
+                    if (! empty($rd['number_of_tolls']) || ! empty($rd['total_toll_value'])) {
+                        $valorPeaje = isset($rd['total_toll_value']) ? number_format((float) $rd['total_toll_value'], 0, ',', '.') : '0';
+                        $partesCierre[] = 'Peajes: '.($rd['number_of_tolls'] ?? 0).' ($'.$valorPeaje.')';
+                    }
+                    if (! empty($rd['end_novelty'])) {
+                        $partesCierre[] = 'Novedad: '.$rd['end_novelty'];
+                    }
+                    if (! empty($partesCierre)) {
+                        $detalleCierre = implode(' | ', $partesCierre);
+                    }
+                    // La firma de cada fila es la del funcionario del recorrido; si el recorrido
+                    // no tiene firma propia se usa la del funcionario de la hoja como respaldo.
+                    // La firma del coordinador NUNCA va en esta columna: solo en RECIBO Y FIRMA.
+                    $dias[] = array_merge($baseFila, [
+                        'ruta' => $rutaUnica,
+                        'ruta_unica' => $rutaUnica,
+                        'hora_fin' => $horaFinFila,
+                        'km_final' => $kmFinalFila,
+                        'km_total' => $kmTotalFila,
+                        'hora_fin_recorrido' => $horaFinRec,
+                        'km_final_recorrido' => $kmFinRec !== null ? $this->formatKilometer($kmFinRec) : '',
+                        'detalle_cierre' => $detalleCierre,
+                        'firma_funcionario' => $rd['firma_funcionario'] ?? null ?: $base64Images['firma_funcionario_hoja'],
+                        'firma_conductor_recorrido' => null,
+                    ]);
+                }
+            } else {
+                $esDisponibilidad = $routes->isEmpty();
+                $dias[] = array_merge($baseFila, [
+                    'ruta' => $esDisponibilidad ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
+                    'ruta_unica' => $esDisponibilidad ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
+                    'rutas' => $rutasLista,
+                    'hora_fin_recorrido' => '',
+                    'km_final_recorrido' => '',
+                    'detalle_cierre' => $esDisponibilidad ? 'Vehículo en disponibilidad — sin recorridos asignados' : '',
+                    // En disponibilidad no hay funcionario: solo firman conductor y coordinador (pie).
+                    'firma_funcionario' => $esDisponibilidad ? null : $base64Images['firma_funcionario_hoja'],
+                    'firma_conductor_recorrido' => null,
+                ]);
+            }
 
             // No agregamos filas vacías para que la tabla solo muestre los registros reales
 
@@ -864,13 +954,43 @@ class PdfService
             }
             if ($routes->isNotEmpty()) {
                 $obsPartes[] = "Recorridos del día: {$routes->count()}";
+            } else {
+                $obsPartes[] = 'Estado: DISPONIBILIDAD (vehículo y conductor disponibles, sin recorridos asignados)';
             }
             if ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date) {
                 $obsPartes[] = 'Vigencia proyecto: '.Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y');
             }
 
+            $logoData = $this->resolveLogoWithMime($logoModel, $base64Images['logo'] ?? null);
+
+            // Firma del conductor para el pie: respaldo en cadena porque el cierre a veces
+            // solo guarda la firma del funcionario a nivel de hoja.
+            $firmaConductorPie = $base64Images['firma_conductor'] ?? null;
+            if (empty($firmaConductorPie) && ! empty($rutasDetalle)) {
+                foreach ($rutasDetalle as $rdFallback) {
+                    if (! empty($rdFallback['firma_conductor'])) {
+                        $firmaConductorPie = $rdFallback['firma_conductor'];
+                        break;
+                    }
+                }
+            }
+            if (empty($firmaConductorPie)) {
+                try {
+                    $conductorModelo = $sheet->internalControl?->thirdParty ?? null;
+                    $firmaConductorModelo = $conductorModelo?->getFirstMedia('signatures')
+                        ?? $conductorModelo?->getFirstMedia('signature');
+                    if ($firmaConductorModelo) {
+                        $extra = $this->getBase64Parallel(['firma_cond_extra' => $firmaConductorModelo]);
+                        $firmaConductorPie = $extra['firma_cond_extra'] ?? null;
+                    }
+                } catch (\Throwable $e) {
+                    Logger::warning('No se pudo cargar firma del conductor (respaldo): '.$e->getMessage());
+                }
+            }
+
             $data = [
-                'logo' => $base64Images['logo'],
+                'logo' => $logoData['logo'],
+                'logo_mime' => $logoData['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
                 'periodo' => $periodo,
                 'es_historial' => false,
@@ -881,13 +1001,13 @@ class PdfService
                 'empresa' => $empresa,
                 'dias' => $dias,
                 'observaciones' => implode(' | ', $obsPartes),
-                'firma_conductor' => $base64Images['firma_conductor'],
+                'firma_conductor' => $firmaConductorPie,
                 'firma_recibido' => $base64Images['firma_recibido'],
                 'proyecto' => $nombreProyecto,
                 'proyecto_vigencia' => ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date)
                     ? Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y')
                     : null,
-                'rutas_detalle' => $rutasDetalle, // Datos completos para la vista (incluye cierre y firmas por recorrido)
+                'rutas_detalle' => $rutasDetalle, // Se conserva por compatibilidad; la vista ya muestra firmas por fila
             ];
 
             $pdf = Pdf::loadView('pdf.service-control-sheet', $data);
@@ -949,6 +1069,14 @@ class PdfService
                 ->get()
                 ->groupBy('entity_id');
 
+            // Firmas del coordinador (link público, una sola firma por hoja)
+            $allCoordinatorSignatures = Signature::query()
+                ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
+                ->whereIn('entity_id', $sheetsIds)
+                ->orderBy('id', 'desc')
+                ->get()
+                ->groupBy('entity_id');
+
             // Determinar si han pasado los 30 días calendario del mes para guardarlo en el historial permanente
             $endOfMonth = Carbon::createFromDate($year, $month, 1)->endOfMonth();
             $esHistorial = $endOfMonth->copy()->addDays(30)->isPast();
@@ -974,7 +1102,30 @@ class PdfService
                 $nit = $company?->document_number ?? 'N/A';
             }
 
-            // Construir el listado diario del mes (secuencial, de 1 en 1 sin saltos de filas)
+            // Precargar recorridos del mes para generar UNA FILA POR CADA RUTA
+            $sheetUuids = $sheets->pluck('uuid')->all();
+            $routesBySheet = collect();
+            $routeSignaturesByRoute = collect();
+            if (! empty($sheetUuids)) {
+                $todasRutas = \App\Models\ServiceDeliveryControlSheetRoute::query()
+                    ->whereIn('service_delivery_control_sheet_uuid', $sheetUuids)
+                    ->where('is_active', true)
+                    ->orderBy('order_index')
+                    ->get();
+                $routesBySheet = $todasRutas->groupBy('service_delivery_control_sheet_uuid');
+                $todosRouteIds = $todasRutas->pluck('id')->all();
+                if (! empty($todosRouteIds)) {
+                    $routeSignaturesByRoute = Signature::query()
+                        ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetRoute')
+                        ->whereIn('entity_id', $todosRouteIds)
+                        ->orderBy('id', 'asc')
+                        ->get()
+                        ->groupBy('entity_id');
+                }
+            }
+
+            // Construir el listado del mes: UNA FILA POR CADA RUTA (recorrido),
+            // repitiendo fecha/horas/km globales en cada línea según formato OPE-F-006.
             $dias = [];
             $signatureModelsToLoad = [];
 
@@ -985,6 +1136,7 @@ class PdfService
 
                 $sheetSignatures = $allSignatures->get($sheet->id, collect());
                 $firmaFuncModel = $sheetSignatures->first(); // Funcionario que recibe
+                $firmaCondModel = $sheetSignatures->get(1); // Conductor de la hoja
 
                 // Si el día no tiene firmas propias pero pertenece a un servicio multi-día,
                 // buscar las firmas del registro padre
@@ -992,21 +1144,22 @@ class PdfService
                     $parentId = $sheets->firstWhere('uuid', $sheet->parent_uuid)?->id;
                     if ($parentId && $allSignatures->has($parentId)) {
                         $firmaFuncModel = $allSignatures->get($parentId)->first();
+                        $firmaCondModel = $allSignatures->get($parentId)->get(1);
                     }
 
                     // Si el padre no está en el mes consultado, buscar sus firmas directamente
                     if ($firmaFuncModel === null) {
                         $parentSheet = ServiceDeliveryControlSheet::where('uuid', $sheet->parent_uuid)->first();
                         if ($parentSheet) {
-                            $parentSignature = Signature::query()
+                            $parentSigs = Signature::query()
                                 ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheet')
                                 ->where('entity_id', $parentSheet->id)
                                 ->orderBy('id', 'asc')
-                                ->first();
+                                ->get();
 
-                            if ($parentSignature) {
-                                $signatureModelsToLoad["firma_func_{$uniqueKey}"] = $parentSignature;
-                                $firmaFuncModel = $parentSignature;
+                            if ($parentSigs->isNotEmpty()) {
+                                $firmaFuncModel = $parentSigs->first();
+                                $firmaCondModel = $parentSigs->get(1);
                             }
                         }
                     }
@@ -1015,40 +1168,112 @@ class PdfService
                 if ($firmaFuncModel) {
                     $signatureModelsToLoad["firma_func_{$uniqueKey}"] = $firmaFuncModel;
                 }
+                if ($firmaCondModel) {
+                    $signatureModelsToLoad["firma_cond_{$uniqueKey}"] = $firmaCondModel;
+                }
 
                 $restHours = $this->calculateRestHours($sheet->start_time, $sheet->end_time, $sheet->total_hours);
 
-                // Obtener las rutas asociadas a esta hoja (origen → destino)
-                $routes = $sheet->routes()->where('is_active', true)->orderBy('order_index')->get();
+                // Recorridos de esta hoja (desde la precarga, sin N+1)
+                $routes = $routesBySheet->get($sheet->uuid, collect());
                 $rutasLista = $this->formatRoutesList($routes);
                 $rutasTexto = ! empty($rutasLista)
                     ? implode(' · ', $rutasLista)
                     : ($sheet->daily_route ?? 'Sin ruta definida');
 
-                $dias[] = [
+                $kmInicialBase = $this->formatKilometer($sheet->starting_kilometer);
+                $kmFinalBase = $this->formatKilometer($sheet->ending_kilometer);
+                $kmTotalBase = ($sheet->starting_kilometer !== null && $sheet->starting_kilometer !== ''
+                    && $sheet->ending_kilometer !== null && $sheet->ending_kilometer !== '')
+                    ? $this->formatKilometer($sheet->ending_kilometer - $sheet->starting_kilometer)
+                    : '';
+
+                $baseFila = [
                     'numero' => $dayNum,
-                    'ruta' => $rutasTexto,
-                    'rutas' => $rutasLista,
                     'hora_inicio' => $sheet->start_time ? $sheet->start_time->format('H:i') : '',
                     'descanso_inicio' => $restHours['inicio'],
                     'descanso_fin' => $restHours['fin'],
                     'hora_fin' => $sheet->end_time ? $sheet->end_time->format('H:i') : '',
                     'total_hours' => $sheet->total_hours ? $sheet->total_hours->format('H:i') : '',
-                    'km_inicial' => $sheet->starting_kilometer,
-                    'km_final' => $sheet->ending_kilometer,
-                    'km_total' => ($sheet->starting_kilometer !== null && $sheet->ending_kilometer !== null)
-                        ? ($sheet->ending_kilometer - $sheet->starting_kilometer)
-                        : '',
-                    'firma_funcionario' => null,
+                    'km_inicial' => $kmInicialBase,
+                    'km_final' => $kmFinalBase,
+                    'km_total' => $kmTotalBase,
                     'unique_key' => $uniqueKey,
                     'conductor' => $sheet->driver_name,
                     'proyecto' => $sheet->project ? $sheet->project->project_name : null,
                 ];
+
+                if ($routes->isNotEmpty()) {
+                    foreach ($routes as $route) {
+                        $rutaUnica = trim(($route->origin ?? '').' - '.($route->destination ?? ''), ' -');
+                        if ($rutaUnica === '' || $rutaUnica === '-') {
+                            $rutaUnica = $sheet->daily_route ?? 'Sin ruta definida';
+                        }
+                        $claveRecorrido = "rec_{$uniqueKey}_{$route->id}";
+                        $grupoFirmas = $routeSignaturesByRoute->get($route->id) ?? collect();
+                        if ($grupoFirmas->get(0)) {
+                            $signatureModelsToLoad["firma_func_{$claveRecorrido}"] = $grupoFirmas->get(0);
+                        }
+                        if ($grupoFirmas->get(1)) {
+                            $signatureModelsToLoad["firma_conduit_{$claveRecorrido}"] = $grupoFirmas->get(1);
+                        }
+                        $horaFinRec = $route->end_time ? Carbon::parse($route->end_time)->format('H:i') : '';
+                        $kmFinRecRaw = ($route->ending_kilometer !== null && $route->ending_kilometer !== '')
+                            ? $route->ending_kilometer
+                            : null;
+                        $horaFinFila = $horaFinRec !== '' ? $horaFinRec : $baseFila['hora_fin'];
+                        $kmFinalFilaRaw = $kmFinRecRaw !== null ? $kmFinRecRaw : $sheet->ending_kilometer;
+                        $kmFinalFila = $this->formatKilometer($kmFinalFilaRaw);
+                        $kmTotalFila = ($sheet->starting_kilometer !== null && $sheet->starting_kilometer !== ''
+                            && $kmFinalFilaRaw !== null && $kmFinalFilaRaw !== '')
+                            ? $this->formatKilometer($kmFinalFilaRaw - $sheet->starting_kilometer)
+                            : $baseFila['km_total'];
+                        $partesCierre = [];
+                        if (! empty($route->funcionario_nombre) || ! empty($route->funcionario_cc)) {
+                            $funcTxt = 'Funcionario CC '.trim(($route->funcionario_cc ?? '').(! empty($route->funcionario_nombre) ? ' - '.$route->funcionario_nombre : ''));
+                            $partesCierre[] = $funcTxt;
+                        }
+                        if (! empty($route->number_of_tolls) || ! empty($route->total_toll_value)) {
+                            $valorPeaje = $route->total_toll_value !== null ? number_format((float) $route->total_toll_value, 0, ',', '.') : '0';
+                            $partesCierre[] = 'Peajes: '.($route->number_of_tolls ?? 0).' ($'.$valorPeaje.')';
+                        }
+                        if (! empty($route->end_novelty)) {
+                            $partesCierre[] = 'Novedad: '.$route->end_novelty;
+                        }
+                        $dias[] = array_merge($baseFila, [
+                            'ruta' => $rutaUnica,
+                            'ruta_unica' => $rutaUnica,
+                            'hora_fin' => $horaFinFila,
+                            'km_final' => $kmFinalFila,
+                            'km_total' => $kmTotalFila,
+                            'hora_fin_recorrido' => $horaFinRec,
+                            'km_final_recorrido' => $kmFinRecRaw !== null ? $this->formatKilometer($kmFinRecRaw) : '',
+                            'detalle_cierre' => ! empty($partesCierre) ? implode(' | ', $partesCierre) : '',
+                            'clave_recorrido' => $claveRecorrido,
+                            'firma_funcionario' => null,
+                            'firma_conductor_recorrido' => null,
+                        ]);
+                    }
+                } else {
+                    $esDisponibilidadMes = $routes->isEmpty();
+                    $dias[] = array_merge($baseFila, [
+                        'ruta' => $esDisponibilidadMes ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
+                        'ruta_unica' => $esDisponibilidadMes ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
+                        'rutas' => $rutasLista,
+                        'hora_fin_recorrido' => '',
+                        'km_final_recorrido' => '',
+                        'detalle_cierre' => $esDisponibilidadMes ? 'Vehículo en disponibilidad — sin recorridos asignados' : '',
+                        'clave_recorrido' => null,
+                        'firma_funcionario' => null,
+                        'firma_conductor_recorrido' => null,
+                    ]);
+                }
             }
 
             // No rellenamos filas vacías adicionales para que solo se vean los registros reales
 
-            // Obtener las firmas para el pie de página mensual (del último servicio firmado del mes)
+            // Obtener las firmas para el pie de página mensual.
+            // RECIBO Y FIRMA = coordinador por link; respaldo al funcionario de la última hoja firmada.
             $lastSheetWithSignatures = $sheets->reverse()->first(function ($s) use ($allSignatures) {
                 return $allSignatures->has($s->id);
             });
@@ -1056,8 +1281,19 @@ class PdfService
             if ($lastSheetWithSignatures) {
                 $lastSignatures = $allSignatures->get($lastSheetWithSignatures->id, collect());
                 if ($lastSignatures->isNotEmpty()) {
-                    $signatureModelsToLoad['firma_recibido_mensual'] = $lastSignatures->first();
+                    $signatureModelsToLoad['firma_recibido_mensual_respaldo'] = $lastSignatures->first();
                     $signatureModelsToLoad['firma_conductor_mensual'] = $lastSignatures->get(1);
+                }
+            }
+
+            // Coordinador del mes: última hoja con firma de coordinador (link público).
+            $lastSheetWithCoordinator = $sheets->reverse()->first(function ($s) use ($allCoordinatorSignatures) {
+                return $allCoordinatorSignatures->has($s->id);
+            });
+            if ($lastSheetWithCoordinator) {
+                $coordSigs = $allCoordinatorSignatures->get($lastSheetWithCoordinator->id, collect());
+                if ($coordSigs->isNotEmpty()) {
+                    $signatureModelsToLoad['firma_recibido_mensual'] = $coordSigs->first();
                 }
             }
 
@@ -1065,11 +1301,17 @@ class PdfService
             $filesToLoad = array_merge(['logo' => $logoModel], $signatureModelsToLoad);
             $base64Images = $this->getBase64Parallel($filesToLoad);
 
-            // Mapear las firmas a cada día correspondiente
+            // Mapear las firmas a cada fila (una fila por recorrido).
+            // Prioridad: firma del recorrido; si no existe, firma global de la hoja.
+            // La firma del conductor no se usa en el listado: solo va en el pie.
             foreach ($dias as &$dia) {
                 if (! empty($dia['unique_key'])) {
                     $uKey = $dia['unique_key'];
-                    $dia['firma_funcionario'] = $base64Images["firma_func_{$uKey}"] ?? null;
+                    $firmaHojaFunc = $base64Images["firma_func_{$uKey}"] ?? null;
+                    $claveRec = $dia['clave_recorrido'] ?? null;
+                    $firmaRecFunc = ($claveRec !== null) ? ($base64Images["firma_func_{$claveRec}"] ?? null) : null;
+                    $dia['firma_funcionario'] = $firmaRecFunc ?: $firmaHojaFunc;
+                    $dia['firma_conductor_recorrido'] = null;
                 }
             }
             unset($dia);
@@ -1081,7 +1323,7 @@ class PdfService
             if ($totalPeajes > 0) {
                 $obsPartes[] = "Total Peajes del Mes: {$totalPeajes} | Valor Consolidado: $ {$valorPeajes}";
             }
-            $totalRecorridos = $sheets->sum(fn ($sh) => $sh->routes ? $sh->routes->count() : 0);
+            $totalRecorridos = $routesBySheet->sum(fn ($grupo) => $grupo->count());
             if ($totalRecorridos > 0) {
                 $obsPartes[] = "Total Recorridos del Mes: {$totalRecorridos}";
             }
@@ -1092,8 +1334,43 @@ class PdfService
                 ? Carbon::parse($proyectoMensual->start_date)->format('d/m/Y').' - '.Carbon::parse($proyectoMensual->completion_date)->format('d/m/Y')
                 : null;
 
+            $logoDataMensual = $this->resolveLogoWithMime($logoModel, $base64Images['logo'] ?? null);
+
+            // Pie mensual: la firma del conductor a veces solo existe por recorrido o en
+            // otra hoja del mes; se busca en cadena para que FIRMA DEL CONDUCTOR QUE ENTREGA no quede vacía.
+            $firmaConductorMensual = $base64Images['firma_conductor_mensual'] ?? null;
+            if (empty($firmaConductorMensual)) {
+                foreach ($base64Images as $clave => $img) {
+                    if (str_starts_with($clave, 'firma_cond_') && ! empty($img)) {
+                        $firmaConductorMensual = $img;
+                        break;
+                    }
+                }
+            }
+            if (empty($firmaConductorMensual)) {
+                foreach ($base64Images as $clave => $img) {
+                    if (str_starts_with($clave, 'firma_conduit_') && ! empty($img)) {
+                        $firmaConductorMensual = $img;
+                        break;
+                    }
+                }
+            }
+            $firmaRecibidoMensual = $base64Images['firma_recibido_mensual'] ?? null;
+            if (empty($firmaRecibidoMensual)) {
+                $firmaRecibidoMensual = $base64Images['firma_recibido_mensual_respaldo'] ?? null;
+            }
+            if (empty($firmaRecibidoMensual)) {
+                foreach ($dias as $d) {
+                    if (! empty($d['firma_funcionario'])) {
+                        $firmaRecibidoMensual = $d['firma_funcionario'];
+                        break;
+                    }
+                }
+            }
+
             $data = [
-                'logo' => $base64Images['logo'],
+                'logo' => $logoDataMensual['logo'],
+                'logo_mime' => $logoDataMensual['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
                 'periodo' => $periodo,
                 'es_historial' => $esHistorial,
@@ -1104,8 +1381,8 @@ class PdfService
                 'empresa' => $empresa,
                 'dias' => $dias,
                 'observaciones' => $obs,
-                'firma_conductor' => $base64Images['firma_conductor_mensual'] ?? null,
-                'firma_recibido' => $base64Images['firma_recibido_mensual'] ?? null,
+                'firma_conductor' => $firmaConductorMensual,
+                'firma_recibido' => $firmaRecibidoMensual,
                 'proyecto' => $proyectoMensual ? $proyectoMensual->project_name : null,
                 'proyecto_vigencia' => $vigenciaMensual,
             ];
@@ -1124,6 +1401,102 @@ class PdfService
             Logger::error('PdfService@generateMonthlyServiceControlSheetPdf error: '.$e->getMessage(), $e);
             throw $e;
         }
+    }
+
+    /**
+     * Formatea kilómetros sin ceros innecesarios: 12300.00 → 12300, 12300.50 → 12300.5.
+     */
+    private function formatKilometer(mixed $valor): string
+    {
+        if ($valor === null || $valor === '') {
+            return '';
+        }
+        if (! is_numeric($valor)) {
+            return (string) $valor;
+        }
+        $numero = number_format((float) $valor, 2, '.', '');
+        $numero = rtrim(rtrim($numero, '0'), '.');
+
+        return $numero === '' ? '0' : $numero;
+    }
+
+    /**
+     * Resuelve el logo de la empresa con respaldo en disco cuando MediaLibrary no tiene imagen.
+     * Retorna el base64 ya codificado y el mime para usar en el data-uri del PDF.
+     *
+     * @param  mixed  $logoModel  Modelo de MediaLibrary, ruta o nulo.
+     * @param  string|null  $logoBase64  Base64 ya cargado (puede ser nulo).
+     * @return array{logo: string|null, mime: string}
+     */
+    private function resolveLogoWithMime(mixed $logoModel, ?string $logoBase64): array
+    {
+        $mime = 'image/png';
+
+        if (! empty($logoBase64)) {
+            $detected = $this->detectLogoMime($logoModel);
+            if ($detected !== null) {
+                $mime = $detected;
+            }
+
+            return ['logo' => $logoBase64, 'mime' => $mime];
+        }
+
+        $candidatos = [
+            public_path('img/logo.png'),
+            public_path('img/logo.jpg'),
+            public_path('img/logo.jpeg'),
+            public_path('images/logo.png'),
+            public_path('images/logo.jpg'),
+        ];
+
+        foreach ($candidatos as $ruta) {
+            if (is_string($ruta) && file_exists($ruta)) {
+                $codificado = $this->optimizeAndEncodeImage($ruta);
+                if (! empty($codificado)) {
+                    $porExtension = strtolower(pathinfo($ruta, PATHINFO_EXTENSION));
+                    if ($porExtension === 'jpg' || $porExtension === 'jpeg') {
+                        $mime = 'image/jpeg';
+                    }
+
+                    return ['logo' => $codificado, 'mime' => $mime];
+                }
+            }
+        }
+
+        return ['logo' => null, 'mime' => $mime];
+    }
+
+    /**
+     * Detecta el mime del logo cuando proviene de MediaLibrary o de una ruta local.
+     */
+    private function detectLogoMime(mixed $logoModel): ?string
+    {
+        try {
+            if (is_object($logoModel) && method_exists($logoModel, 'getPath')) {
+                $ruta = $logoModel->getPath();
+                if ($ruta && file_exists($ruta) && function_exists('mime_content_type')) {
+                    $detectado = @mime_content_type($ruta);
+                    if (is_string($detectado) && str_starts_with($detectado, 'image/')) {
+                        return $detectado;
+                    }
+                }
+            }
+
+            if (is_string($logoModel) && file_exists($logoModel) && function_exists('mime_content_type')) {
+                $detectado = @mime_content_type($logoModel);
+                if (is_string($detectado) && str_starts_with($detectado, 'image/')) {
+                    return $detectado;
+                }
+            }
+
+            if (is_object($logoModel) && isset($logoModel->mime_type) && is_string($logoModel->mime_type)) {
+                return $logoModel->mime_type;
+            }
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudo detectar mime del logo: '.$e->getMessage());
+        }
+
+        return null;
     }
 
     /**
