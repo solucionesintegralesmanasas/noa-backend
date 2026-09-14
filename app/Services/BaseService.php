@@ -452,12 +452,42 @@ abstract class BaseService
                         $query->whereIn($table . '.driver_license_uuid', $driverLicenseUuids);
                     }
                 } elseif ($table === 'vehicles') {
-                    $query->where(function ($q) use ($affiliateUuid) {
-                        $q->where('vehicles.third_party_uuid', $affiliateUuid)
-                            ->orWhereHas('owners', function ($ownerQuery) use ($affiliateUuid) {
-                                $ownerQuery->where('third_party_uuid', $affiliateUuid);
+                    if ($user->hasRole('AFILIADO')) {
+                        $query->where(function ($q) use ($affiliateUuid) {
+                            $q->where('vehicles.third_party_uuid', $affiliateUuid)
+                                ->orWhereHas('owners', function ($ownerQuery) use ($affiliateUuid) {
+                                    $ownerQuery->where('third_party_uuid', $affiliateUuid);
+                                });
+                        });
+                    } elseif ($user->hasRole('CONDUCTOR')) {
+                        $driverThirdPartyUuid = $thirdPartyUuid;
+                        if ($driverThirdPartyUuid) {
+                            $allowedUuids = app(\App\Services\Fleet\VehicleService::class)->getVehicleUuidsForConductor($driverThirdPartyUuid);
+                            $query->whereIn('vehicles.uuid', $allowedUuids);
+                        } else {
+                            $query->whereRaw('1 = 0');
+                        }
+                    }
+                } elseif ($table === 'vehicle_inspections') {
+                    if ($user->hasRole('AFILIADO')) {
+                        $query->whereHas('vehicle', function ($q) use ($affiliateUuid) {
+                            $q->where('vehicles.third_party_uuid', $affiliateUuid)
+                                ->orWhereHas('owners', function ($oq) use ($affiliateUuid) {
+                                    $oq->where('third_party_uuid', $affiliateUuid);
+                                });
+                        });
+                    } elseif ($user->hasRole('CONDUCTOR')) {
+                        $driverThirdPartyUuid = $thirdPartyUuid;
+                        if ($driverThirdPartyUuid) {
+                            $allowedUuids = app(\App\Services\Fleet\VehicleService::class)->getVehicleUuidsForConductor($driverThirdPartyUuid);
+                            $query->where(function ($q) use ($driverThirdPartyUuid, $allowedUuids) {
+                                $q->where('vehicle_inspections.driver_uuid', $driverThirdPartyUuid)
+                                    ->orWhereIn('vehicle_inspections.vehicle_uuid', $allowedUuids);
                             });
-                    });
+                        } else {
+                            $query->whereRaw('1 = 0');
+                        }
+                    }
                 } elseif (in_array('third_party_uuid', $fillable)) {
                     $query->where($table . '.third_party_uuid', $affiliateUuid);
                 } elseif (method_exists($this->model, 'third_party')) {

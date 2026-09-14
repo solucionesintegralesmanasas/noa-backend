@@ -102,7 +102,7 @@ class DashboardService
         }
 
         $userId = $user->uuid ?? $user->id ?? 'unknown';
-        $cacheKey = 'dashboard_conductor_summary_'.$userId.'_'.$days;
+        $cacheKey = 'dashboard_conductor_summary_v3_disponibilidad_'.$userId.'_'.$days;
 
         return Cache::remember($cacheKey, 60, function () use ($user, $days) {
             $startDate = Carbon::now()->subDays($days)->startOfDay();
@@ -111,13 +111,32 @@ class DashboardService
             // 1. Resolver el UUID del conductor (ThirdParty) y empresa
             $companyUuid = $user->company_uuid;
             $thirdPartyUuid = $user->third_party_uuid;
-
-            if (! $companyUuid && $user->companies()->first()) {
-                $companyUuid = $user->companies()->first()->uuid;
+            $companyFirst = null;
+            try {
+                $companyFirst = $user->companies()->first();
+            } catch (\Throwable) {
+                $companyFirst = null;
             }
 
-            if (! $thirdPartyUuid && $user->companies()->first()) {
-                $thirdPartyUuid = $user->companies()->first()->pivot->third_party_uuid;
+            if (! $companyUuid && $companyFirst) {
+                $companyUuid = $companyFirst->uuid;
+            }
+
+            if (! $thirdPartyUuid && $companyFirst) {
+                $thirdPartyUuid = $companyFirst->pivot->third_party_uuid ?? null;
+            }
+
+            // Fallback: resolver conductor por correo dentro de la empresa (como DriverLocationController).
+            if (! $thirdPartyUuid && $companyUuid && ! empty($user->email)) {
+                try {
+                    $thirdPartyUuid = ThirdParty::withoutGlobalScopes()
+                        ->where('company_uuid', $companyUuid)
+                        ->where('email', $user->email)
+                        ->where('is_driver', true)
+                        ->value('uuid');
+                } catch (\Throwable) {
+                    $thirdPartyUuid = null;
+                }
             }
 
             // Obtener datos del conductor
@@ -326,9 +345,39 @@ class DashboardService
                     'status' => $f->status,
                 ]);
 
-            // Servicio activo (planilla en ruta): iniciada, sin cerrar, del conductor.
+            // Servicio activo (planilla en ruta o disponibilidad): iniciada, sin cerrar, del conductor.
+            // Fuente de verdad: planilla iniciada O sesión GPS activa.
             $activeService = null;
+            $trackingActive = false;
+            $trackingSessionUuid = null;
+            $lastLocation = null;
             if ($thirdPartyUuid) {
+                try {
+                    $trackingSession = \App\Models\DriverLocationSession::withoutGlobalScopes()
+                        ->where('third_party_uuid', $thirdPartyUuid)
+                        ->where('status', 'active')
+                        ->orderBy('started_at', 'desc')
+                        ->first();
+                    $trackingActive = (bool) $trackingSession;
+                    $trackingSessionUuid = $trackingSession?->uuid;
+                    $lastPoint = \App\Models\DriverLocation::withoutGlobalScopes()
+                        ->where('third_party_uuid', $thirdPartyUuid)
+                        ->orderBy('recorded_at', 'desc')
+                        ->first();
+                    if ($lastPoint) {
+                        $lastLocation = [
+                            'latitude' => (float) $lastPoint->latitude,
+                            'longitude' => (float) $lastPoint->longitude,
+                            'speed' => (float) ($lastPoint->speed ?? 0),
+                            'is_moving' => (bool) $lastPoint->is_moving,
+                            'recorded_at' => $lastPoint->recorded_at?->toDateTimeString(),
+                            'vehicle_uuid' => $lastPoint->vehicle_uuid,
+                        ];
+                    }
+                } catch (\Throwable) {
+                    $trackingActive = false;
+                }
+
                 $enRuta = ServiceDeliveryControlSheet::withoutGlobalScopes()
                     ->with(['project', 'routes', 'internalControl.vehicle', 'parent'])
                     ->where('is_active', true)
@@ -342,6 +391,7 @@ class DashboardService
                     $rutas = $enRuta->routes && $enRuta->routes->isNotEmpty()
                         ? $enRuta->routes->map(fn ($r) => trim(($r->origin ?? '').' - '.($r->destination ?? ''), ' -'))->filter()->values()->all()
                         : [];
+                    $serviceMode = count($rutas) > 0 ? 'CON_RECORRIDOS' : 'DISPONIBILIDAD';
                     $activeService = [
                         'uuid' => $enRuta->uuid,
                         'parent_uuid' => $enRuta->parent_uuid,
@@ -349,11 +399,38 @@ class DashboardService
                         'project_name' => $enRuta->project?->project_name,
                         'service_date' => $enRuta->service_date?->toDateString(),
                         'vehicle_plate' => $enRuta->vehicle_license_plate,
+                        'vehicle_uuid' => $enRuta->internalControl?->vehicle_uuid,
                         'driver_name' => $enRuta->driver_name ?: $enRuta->internalControl?->thirdParty?->company_name,
                         'start_time' => $enRuta->start_time ? Carbon::parse($enRuta->start_time)->format('H:i') : null,
                         'starting_kilometer' => $enRuta->starting_kilometer,
                         'routes_count' => count($rutas),
-                        'routes_text' => $rutas ? implode(' · ', $rutas) : ($enRuta->daily_route ?? ''),
+                        'routes_text' => $rutas ? implode(' · ', $rutas) : ($enRuta->daily_route ?: 'En disponibilidad — sin recorridos asignados'),
+                        'service_mode' => $serviceMode,
+                        'tracking_active' => $trackingActive,
+                        'tracking_session_uuid' => $trackingSessionUuid,
+                        'last_location' => $lastLocation,
+                        'en_servicio' => true,
+                    ];
+                } elseif ($trackingActive) {
+                    // Sin planilla pero con GPS activo: también se considera en servicio (disponibilidad por GPS).
+                    $activeService = [
+                        'uuid' => null,
+                        'parent_uuid' => null,
+                        'service_uuid' => null,
+                        'project_name' => 'En servicio — disponibilidad GPS',
+                        'service_date' => Carbon::now()->toDateString(),
+                        'vehicle_plate' => null,
+                        'vehicle_uuid' => $lastLocation['vehicle_uuid'] ?? $trackingSession?->vehicle_uuid,
+                        'driver_name' => $conductor ? trim($conductor->first_name.' '.$conductor->last_name) : $user->name,
+                        'start_time' => $trackingSession?->started_at ? Carbon::parse($trackingSession->started_at)->format('H:i') : null,
+                        'starting_kilometer' => null,
+                        'routes_count' => 0,
+                        'routes_text' => 'En disponibilidad — sin recorridos asignados',
+                        'service_mode' => 'DISPONIBILIDAD_GPS',
+                        'tracking_active' => true,
+                        'tracking_session_uuid' => $trackingSessionUuid,
+                        'last_location' => $lastLocation,
+                        'en_servicio' => true,
                     ];
                 }
             }
