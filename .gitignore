@@ -32,3 +32,12 @@ pnpm-debug.log*
 # Archivos propios del sistema operativo
 .DS_Store
 Thumbs.db
+
+# Skills de uso solo local (no subir al repo, solo solo-espanol queda versionado)
+/.opencode/skills/find-skills/
+/.opencode/skills/frontend-design/
+/.opencode/skills/vue-best-practices/
+/.opencode/skills/impeccable/
+/.opencode/skills/grill-me/
+/.opencode/skills/grilling/
+/skills-lock.json
