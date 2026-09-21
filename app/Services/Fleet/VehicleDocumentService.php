@@ -174,8 +174,12 @@ class VehicleDocumentService extends BaseService
                         'vehicle_uuid' => $doc->vehicle_uuid,
                         'policy_number' => $doc->policy_number,
                         'document_type' => $doc->document_type,
-                        'issuing_entity' => $doc->issuing_entity,
+                        'issue_date' => $doc->issue_date?->toDateString(),
+                        'effective_date' => $doc->effective_date?->toDateString(),
                         'expiry_date' => $doc->expiry_date?->toDateString(),
+                        'issuing_entity' => $doc->issuing_entity,
+                        'tariff_code' => $doc->tariff_code,
+                        'taker' => $doc->taker,
                         'status' => $doc->status,
                     ];
                 })->all(),
@@ -212,8 +216,12 @@ class VehicleDocumentService extends BaseService
             'vehicle_uuid',
             'policy_number',
             'document_type',
-            'issuing_entity',
+            'issue_date',
+            'effective_date',
             'expiry_date',
+            'issuing_entity',
+            'tariff_code',
+            'taker',
             'status',
         ]);
     }
