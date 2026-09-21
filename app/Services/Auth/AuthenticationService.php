@@ -32,21 +32,29 @@ class AuthenticationService
      */
     public function authenticateUser(array $credentials): array
     {
-        $email = $credentials['email'];
+        $login = $credentials['email'];
         $ip = request()->ip();
 
-        $this->enforceRateLimiting($email, $ip);
-        $user = $this->resolveUserByCredentials($email);
+        $this->enforceRateLimiting($login, $ip);
+        $user = $this->resolveUserByCredentials($login);
         $this->validateAccountLockStatus($user);
 
-        if (! Auth::attempt($credentials)) {
-            $this->processFailedAuthentication($email, $ip, $user);
+        // El identificador 'email' del request admite email o user_name
+        // (número de documento). Auth::attempt autentica por la columna 'email',
+        // así que se valida contra el email real del usuario resuelto.
+        $authenticated = $user && Auth::attempt([
+            'email' => $user->email,
+            'password' => $credentials['password'],
+        ]);
+
+        if (! $authenticated) {
+            $this->processFailedAuthentication($login, $ip, $user);
         }
 
         // Limpiar los intentos fallidos en el rate limiter al iniciar sesión exitosamente
-        RateLimiter::clear($this->getRateLimitKey($email, $ip));
+        RateLimiter::clear($this->getRateLimitKey($login, $ip));
 
-        event(new UserAuthenticated($user, $email, $ip));
+        event(new UserAuthenticated($user, $login, $ip));
 
         return $this->processSuccessfulAuthentication($user);
     }
