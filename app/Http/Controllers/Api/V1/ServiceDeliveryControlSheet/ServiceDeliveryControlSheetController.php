@@ -37,7 +37,7 @@ class ServiceDeliveryControlSheetController extends Controller
     #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets',
         summary: 'Consultar listado paginado de Hojas de Control de Entrega de Servicios',
-        description: 'Cada planilla parte de un proyecto registrado (project_uuid) con fecha de inicio y fin. Soporta N recorridos por planilla diaria y vehículos externos de plataforma.',
+        description: 'Cada planilla parte de un proyecto registrado (project_uuid) con fecha de inicio y fin. Soporta N recorridos por planilla diaria y vehículos externos de plataforma. Con solo_cerradas=true solo salen las cerradas.',
         operationId: 'listServiceDeliveryControlSheets',
         tags: ['ServiceDeliveryControlSheet'],
         parameters: [
@@ -46,6 +46,7 @@ class ServiceDeliveryControlSheetController extends Controller
             new OA\Parameter(name: 'search', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid'), description: 'Filtrar planillas de un proyecto'),
+            new OA\Parameter(name: 'solo_cerradas', in: 'query', required: false, schema: new OA\Schema(type: 'boolean', default: false), description: 'true = solo planillas cerradas (is_active=false y sin hijos abiertos)'),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
@@ -61,7 +62,10 @@ class ServiceDeliveryControlSheetController extends Controller
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid');
             $projectUuid = $request->query('project_uuid');
-            $data = $this->serviceDeliveryControlSheetService->getAllServiceDeliveryControlSheetsWithPagination($perPage, $page, $search, $companyUuid, $projectUuid);
+            $soloCerradas = $request->has('solo_cerradas')
+                ? filter_var($request->query('solo_cerradas'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false
+                : false;
+            $data = $this->serviceDeliveryControlSheetService->getAllServiceDeliveryControlSheetsWithPagination($perPage, $page, $search, $companyUuid, $projectUuid, $soloCerradas);
 
             return $this->successResponse($data, 'Listado paginado recuperado con éxito.');
         } catch (\Throwable $e) {
@@ -362,6 +366,48 @@ class ServiceDeliveryControlSheetController extends Controller
         }
     }
 
+    #[OA\Post(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/route-map-capture',
+        summary: 'Pegar captura del mapa del recorrido en la planilla del día del conductor',
+        description: 'Recibe la captura PNG del mapa tomada en el frontend y la adjunta como imagen ROUTE_MAP de las planillas del conductor en la fecha indicada. El PDF diario la usa en lugar del mapa automático.',
+        operationId: 'attachRouteMapServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['third_party_uuid', 'service_date', 'image_base64'],
+                properties: [
+                    new OA\Property(property: 'third_party_uuid', type: 'string', format: 'uuid', description: 'UUID del conductor'),
+                    new OA\Property(property: 'service_date', type: 'string', format: 'date', example: '2026-09-16'),
+                    new OA\Property(property: 'image_base64', type: 'string', description: 'Captura PNG en base64 (acepta data URL)'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Captura pegada con éxito.'),
+            new OA\Response(response: 422, description: 'Sin planilla del conductor para esa fecha o imagen inválida.'),
+        ]
+    )]
+    public function attachRouteMap(Request $request): JsonResponse
+    {
+        try {
+            $request->validate([
+                'third_party_uuid' => 'required|uuid|exists:third_parties,uuid',
+                'service_date' => 'required|date',
+                'image_base64' => 'required|string|max:5500000',
+            ]);
+            $result = $this->serviceDeliveryControlSheetService->attachRouteMapByDriverDate(
+                $request->input('third_party_uuid'),
+                $request->input('service_date'),
+                $request->input('image_base64')
+            );
+
+            return $this->successResponse($result, 'Captura del mapa pegada en la planilla del día.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/{uuid}/pdf',
         summary: 'Descargar PDF diario de Hoja de Control de Entrega de Servicios',
@@ -389,13 +435,14 @@ class ServiceDeliveryControlSheetController extends Controller
 
     #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/monthly/pdf',
-        summary: 'Descargar PDF mensual de Hoja de Control de Entrega de Servicios',
+        summary: 'Descargar PDF mensual de Hoja de Control de Entrega de Servicios (solo días finalizados por defecto)',
         operationId: 'downloadMonthlyPdfServiceDeliveryControlSheet',
         tags: ['ServiceDeliveryControlSheet'],
         parameters: [
             new OA\Parameter(name: 'vehicle_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'year', in: 'query', required: true, schema: new OA\Schema(type: 'integer')),
             new OA\Parameter(name: 'month', in: 'query', required: true, schema: new OA\Schema(type: 'integer')),
+            new OA\Parameter(name: 'solo_finalizados', in: 'query', required: false, schema: new OA\Schema(type: 'boolean', default: true), description: 'true = solo días cerrados (is_active=false). false = todos los días.'),
         ],
         responses: [
             new OA\Response(response: 200, description: 'PDF descargado con éxito.'),
@@ -409,12 +456,16 @@ class ServiceDeliveryControlSheetController extends Controller
                 'vehicle_uuid' => 'required|string',
                 'year' => 'required|integer',
                 'month' => 'required|integer|between:1,12',
+                'solo_finalizados' => 'nullable|boolean',
             ]);
 
             $companyUuid = $request->attributes->get('current_company_uuid');
             $vehicleUuid = $request->query('vehicle_uuid');
             $year = (int) $request->query('year');
             $month = (int) $request->query('month');
+            $soloFinalizados = $request->has('solo_finalizados')
+                ? filter_var($request->query('solo_finalizados'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? true
+                : true;
 
             if (! $companyUuid) {
                 $vehicle = Vehicle::where('uuid', $vehicleUuid)->first();
@@ -429,9 +480,125 @@ class ServiceDeliveryControlSheetController extends Controller
             }
 
             $pdfService = app(PdfService::class);
-            $result = $pdfService->generateMonthlyServiceControlSheetPdf($companyUuid, $vehicleUuid, $year, $month);
+            $result = $pdfService->generateMonthlyServiceControlSheetPdf($companyUuid, $vehicleUuid, $year, $month, $soloFinalizados);
 
             return $result['pdf']->download($result['file_name']);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/reports/{tipo}/pdf',
+        summary: 'Descargar reporte PDF de Control de Servicio solo con días cerrados',
+        operationId: 'downloadReportPdfServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'tipo', in: 'path', required: true, schema: new OA\Schema(type: 'string', enum: ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'])),
+            new OA\Parameter(name: 'fecha_desde', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
+            new OA\Parameter(name: 'fecha_hasta', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
+            new OA\Parameter(name: 'fecha', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
+            new OA\Parameter(name: 'vehicle_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'third_party_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'year', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
+            new OA\Parameter(name: 'month', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Reporte PDF generado.'),
+            new OA\Response(response: 404, description: 'Sin fechas cerradas para los filtros.'),
+        ]
+    )]
+    public function downloadReportPdf(Request $request, string $tipo)
+    {
+        try {
+            $tipos = ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'];
+            if (! in_array($tipo, $tipos, true)) {
+                return $this->errorResponse('Tipo de reporte inválido.', 422);
+            }
+            $request->validate([
+                'fecha_desde' => 'nullable|date',
+                'fecha_hasta' => 'nullable|date|after_or_equal:fecha_desde',
+                'fecha' => 'nullable|date',
+                'vehicle_uuid' => 'nullable|string',
+                'third_party_uuid' => 'nullable|string',
+                'year' => 'nullable|integer|min:2020|max:2100',
+                'month' => 'nullable|integer|between:1,12',
+            ]);
+            if ($tipo === 'rango' && (! $request->query('fecha_desde') || ! $request->query('fecha_hasta'))) {
+                return $this->errorResponse('El rango requiere fecha_desde y fecha_hasta.', 422);
+            }
+            if ($tipo === 'vehiculo' && ! $request->query('vehicle_uuid')) {
+                return $this->errorResponse('El reporte por vehículo requiere vehicle_uuid.', 422);
+            }
+            if ($tipo === 'conductor' && ! $request->query('third_party_uuid')) {
+                return $this->errorResponse('El reporte por conductor requiere third_party_uuid.', 422);
+            }
+            if ($tipo === 'dia' && ! $request->query('fecha')) {
+                return $this->errorResponse('El reporte por día requiere fecha.', 422);
+            }
+            if ($tipo === 'mensual' && (! $request->query('year') || ! $request->query('month'))) {
+                return $this->errorResponse('El reporte mensual requiere year y month.', 422);
+            }
+
+            // El mensual con vehículo usa el generador clásico (historial, peajes,
+            // vigencia y firmas por recorrido); sin vehículo usa el genérico.
+            if ($tipo === 'mensual' && $request->query('vehicle_uuid')) {
+                $companyUuid = $request->attributes->get('current_company_uuid');
+                $vehicleUuid = $request->query('vehicle_uuid');
+                if (! $companyUuid) {
+                    $vehicle = Vehicle::where('uuid', $vehicleUuid)->first();
+                    if (! $vehicle) {
+                        return $this->errorResponse('Vehículo no encontrado.', 404);
+                    }
+                    $companyUuid = $vehicle->company_uuid;
+                }
+                $result = app(PdfService::class)->generateMonthlyServiceControlSheetPdf(
+                    $companyUuid, $vehicleUuid, (int) $request->query('year'), (int) $request->query('month'), true
+                );
+
+                return $result['pdf']->download($result['file_name']);
+            }
+
+            $filtros = array_merge($request->query(), [
+                'tipo' => $tipo,
+                'company_uuid' => $request->attributes->get('current_company_uuid'),
+            ]);
+            $result = app(PdfService::class)->generateFilteredServiceControlSheetPdf($filtros);
+
+            return $result['pdf']->download($result['file_name']);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/reports/{tipo}/excel',
+        summary: 'Descargar reporte Excel de Control de Servicio solo con días cerrados',
+        operationId: 'downloadReportExcelServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'tipo', in: 'path', required: true, schema: new OA\Schema(type: 'string', enum: ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'])),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Reporte Excel generado.'),
+        ]
+    )]
+    public function downloadReportExcel(Request $request, string $tipo)
+    {
+        try {
+            $tipos = ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'];
+            if (! in_array($tipo, $tipos, true)) {
+                return $this->errorResponse('Tipo de reporte inválido.', 422);
+            }
+            $filtros = array_merge($request->query(), [
+                'tipo' => $tipo,
+                'company_uuid' => $request->attributes->get('current_company_uuid'),
+            ]);
+
+            return \Maatwebsite\Excel\Facades\Excel::download(
+                new \App\Exports\ServiceControlSheetExport($filtros),
+                'Reporte_Control_'.ucfirst($tipo).'_'.now()->format('Ymd_His').'.xlsx'
+            );
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

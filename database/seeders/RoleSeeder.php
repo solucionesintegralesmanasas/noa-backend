@@ -442,6 +442,7 @@ class RoleSeeder extends Seeder
 
             'service_delivery_control_sheets.index',
             'service_delivery_control_sheets.create',
+            'service_delivery_control_sheets.history_pdf',
 
             'locations.track',
         ], 'and', false)->get();

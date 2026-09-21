@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
 
 /**
  * Hoja de control de entrega de servicios.
@@ -25,9 +27,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  *
  * @created  2026-06-19
  */
-class ServiceDeliveryControlSheet extends Model
+class ServiceDeliveryControlSheet extends Model implements HasMedia
 {
-    use BelongsToCompany, FormatsDates, HasFactory, HasUuid, LogsActivity;
+    use BelongsToCompany, FormatsDates, HasFactory, HasUuid, InteractsWithMedia, LogsActivity;
 
     protected $table = 'service_delivery_control_sheet';
 
@@ -67,6 +69,16 @@ class ServiceDeliveryControlSheet extends Model
     protected $appends = ['vehicle_license_plate', 'driver_name'];
 
     protected $with = ['project:id,uuid,project_name,start_date,completion_date', 'routes', 'internalControl.vehicle', 'internalControl.thirdParty', 'subcontractedControl.vehicleClass'];
+
+    /**
+     * Colecciones de archivos de la hoja.
+     * ROUTE_MAP guarda la captura del mapa del recorrido pegada desde el frontend
+     * (una sola imagen por hoja; subir una nueva reemplaza la anterior).
+     */
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection('ROUTE_MAP')->singleFile();
+    }
 
     public function company(): BelongsTo
     {
