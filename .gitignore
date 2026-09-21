@@ -9,6 +9,7 @@
 /auth.json
 
 # Archivos generados por Laravel, Vite y pruebas
+/app.zip
 /.phpunit.result.cache
 /bootstrap/cache/*.php
 /public/build/
