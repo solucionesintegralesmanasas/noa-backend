@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Auth;
 
+use App\Models\ThirdParty;
 use App\Models\User;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
@@ -109,7 +110,7 @@ class UserService extends BaseService
             'name' => $data['name'],
             'email' => $data['email'],
             'email_verified_at' => now(),
-            'user_name' => $data['user_name'] ?? null,
+            'user_name' => $this->resolveUserName($data),
             'password' => $data['password'],
             'verification_code' => $data['verification_code'] ?? null,
             'verification_code_expires_at' => $data['verification_code_expires_at'] ?? null,
@@ -122,6 +123,28 @@ class UserService extends BaseService
             'google_drive_refresh_token' => $data['google_drive_refresh_token'] ?? null,
             'status' => $data['status'] ?? 1,
         ]));
+    }
+
+    /**
+     * Resuelve el user_name del usuario a partir del número de documento del
+     * tercero vinculado (third_party_uuid). Si no hay tercero, se usa el
+     * user_name enviado explícitamente o null.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function resolveUserName(array $data): ?string
+    {
+        if (! empty($data['third_party_uuid'])) {
+            $documentNumber = ThirdParty::query()
+                ->where('uuid', $data['third_party_uuid'])
+                ->value('document_number');
+
+            if ($documentNumber) {
+                return $documentNumber;
+            }
+        }
+
+        return $data['user_name'] ?? null;
     }
 
     /**
