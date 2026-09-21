@@ -30,6 +30,7 @@ class User extends Authenticatable implements TwoFactorAuthenticatable
     protected $fillable = [
         'name',
         'email',
+        'email_verified_at',
         'user_name',
         'password',
         'verification_code',
@@ -68,6 +69,20 @@ class User extends Authenticatable implements TwoFactorAuthenticatable
             'last_login_at' => 'datetime',
             'locked_until' => 'datetime',
         ];
+    }
+
+    /**
+     * Cada vez que se crea un usuario, el correo queda verificado automáticamente
+     * (el sistema no tiene flujo de verificación por email; autenticación los bloquea).
+     * Solo se omite si el flujo que crea el usuario lo indica explícitamente con null.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function (User $user) {
+            if (! array_key_exists('email_verified_at', $user->getAttributes())) {
+                $user->email_verified_at = now();
+            }
+        });
     }
 
     /**

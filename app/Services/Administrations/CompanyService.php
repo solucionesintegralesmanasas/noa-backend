@@ -216,6 +216,7 @@ class CompanyService extends BaseService
             $user = User::create([
                 'name' => trim($data['legal_representative_name'].' '.$data['legal_representative_last_name']),
                 'email' => $data['email'],
+                'email_verified_at' => now(),
                 'user_name' => $data['document_number'], // Nombre de usuario por defecto
                 'password' => Hash::make($data['document_number']), // Contraseña por defecto
                 'third_party_uuid' => $thirdParty->uuid,
