@@ -53,7 +53,8 @@ class ServiceDeliveryControlSheetService extends BaseService
         int $page = 1,
         string $search = '',
         ?string $companyUuid = null,
-        ?string $projectUuid = null
+        ?string $projectUuid = null,
+        bool $soloCerradas = false
     ): LengthAwarePaginator {
         $query = $this->query()
             ->whereNull('parent_uuid')
@@ -62,6 +63,19 @@ class ServiceDeliveryControlSheetService extends BaseService
             ->withCount(['children as children_open' => function ($q) {
                 $q->where('is_active', true);
             }]);
+
+        if ($soloCerradas) {
+            // Solo fechas cerradas que imprimen PDF:
+            // - Un día: padre sin hijos y con is_active=false.
+            // - Multi-día: padre con al menos un hijo cerrado (aunque el padre siga parcial).
+            // El expandible del frontend oculta los hijos abiertos y deja solo los cerrados.
+            $query->where(function ($q) {
+                $q->where(function ($qq) {
+                    $qq->where('is_active', false)
+                        ->whereDoesntHave('children', fn ($c) => $c->where('is_active', true));
+                })->orWhereHas('children', fn ($c) => $c->where('is_active', false));
+            });
+        }
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
@@ -90,6 +104,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         $paginator->getCollection()->transform(function ($item) {
             $item->setAttribute('control_status', $this->resolveControlStatus($item));
             $item->setAttribute('routes_total', $item->routes ? $item->routes->count() : 0);
+            $item->setAttribute('has_coordinator_signature', Signature::query()->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')->where('entity_id', $item->id)->exists());
 
             return $item;
         });
@@ -256,6 +271,134 @@ class ServiceDeliveryControlSheetService extends BaseService
                     $oldRoute->delete();
                 }
             }
+        }
+    }
+
+    /**
+     * Pega la captura del mapa del recorrido (tomada en el frontend) a las
+     * planillas del día del conductor. Resuelve por conductor + fecha y, como
+     * respaldo, por vehículo/proyecto del GPS de ese día.
+     *
+     * @return array{planillas: array<int, string>, service_date: string}
+     */
+    public function attachRouteMapByDriverDate(string $thirdPartyUuid, string $serviceDate, string $imageBase64): array
+    {
+        $fecha = Carbon::parse($serviceDate)->toDateString();
+
+        $candidatas = ServiceDeliveryControlSheet::query()
+            ->whereDate('service_date', $fecha)
+            ->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $thirdPartyUuid))
+            ->get();
+
+        if ($candidatas->isEmpty()) {
+            $gps = \App\Models\DriverLocation::query()
+                ->where('third_party_uuid', $thirdPartyUuid)
+                ->whereDate('recorded_at', $fecha)
+                ->orderBy('recorded_at', 'asc')
+                ->first(['vehicle_uuid', 'project_uuid', 'company_uuid']);
+
+            if ($gps) {
+                $placaGps = $gps->vehicle_uuid
+                    ? \App\Models\Vehicle::where('uuid', $gps->vehicle_uuid)->value('vehicle_license_plate')
+                    : null;
+                $candidatas = ServiceDeliveryControlSheet::query()
+                    ->whereDate('service_date', $fecha)
+                    ->when($gps->project_uuid, fn ($q) => $q->where('project_uuid', $gps->project_uuid))
+                    ->where(function ($q) use ($gps, $placaGps) {
+                        if ($gps->vehicle_uuid) {
+                            $q->whereHas('internalControl', fn ($qq) => $qq->where('vehicle_uuid', $gps->vehicle_uuid));
+                        }
+                        if ($placaGps) {
+                            $q->orWhereHas('subcontractedControl', fn ($qq) => $qq->where('vehicle_license_plate', $placaGps));
+                        }
+                    })
+                    ->get();
+            }
+        }
+
+        if ($candidatas->isEmpty()) {
+            throw ValidationException::withMessages([
+                'service_date' => 'No hay planilla del conductor para esa fecha; no se pudo pegar la captura.',
+            ]);
+        }
+
+        $binario = $this->decodificarImagenMapa($imageBase64);
+        $pegadas = [];
+        foreach ($candidatas as $planilla) {
+            $this->guardarImagenMapa($planilla, $binario, $fecha);
+            $pegadas[] = $planilla->uuid;
+        }
+
+        return ['planillas' => $pegadas, 'service_date' => $fecha];
+    }
+
+    /**
+     * Valida y decodifica la imagen base64 de la captura del mapa.
+     */
+    private function decodificarImagenMapa(string $imageBase64): string
+    {
+        $crudo = trim($imageBase64);
+        if (str_contains($crudo, ',')) {
+            [, $crudo] = explode(',', $crudo, 2);
+        }
+        $binario = base64_decode($crudo, true);
+        if ($binario === false || strlen($binario) < 1000) {
+            throw ValidationException::withMessages(['image_base64' => 'La captura del mapa llegó vacía o corrupta.']);
+        }
+        if (strlen($binario) > 4 * 1024 * 1024) {
+            throw ValidationException::withMessages(['image_base64' => 'La captura supera los 4 MB permitidos.']);
+        }
+        $info = @getimagesizefromstring($binario);
+        if (! $info || ! in_array($info['mime'], ['image/png', 'image/jpeg'], true)) {
+            throw ValidationException::withMessages(['image_base64' => 'La captura debe ser una imagen PNG o JPG.']);
+        }
+        if ($info[0] < 300 || $info[1] < 150) {
+            throw ValidationException::withMessages(['image_base64' => 'La captura es demasiado pequeña para el reporte.']);
+        }
+
+        return $binario;
+    }
+
+    /**
+     * Guarda la captura como archivo único ROUTE_MAP de la planilla.
+     * Si el ancho supera 1200 px se reduce con GD para no engordar el PDF.
+     */
+    private function guardarImagenMapa(ServiceDeliveryControlSheet $planilla, string $binario, string $fecha): void
+    {
+        try {
+            if (extension_loaded('gd')) {
+                $img = @imagecreatefromstring($binario);
+                if ($img) {
+                    $ancho = imagesx($img);
+                    $alto = imagesy($img);
+                    if ($ancho > 1200) {
+                        $nuevoAncho = 1200;
+                        $nuevoAlto = (int) round($alto * $nuevoAncho / $ancho);
+                        $red = imagecreatetruecolor($nuevoAncho, $nuevoAlto);
+                        imagecopyresampled($red, $img, 0, 0, 0, 0, $nuevoAncho, $nuevoAlto, $ancho, $alto);
+                        ob_start();
+                        imagepng($red);
+                        $binario = (string) ob_get_clean();
+                        imagedestroy($red);
+                    }
+                    imagedestroy($img);
+                }
+            }
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudo optimizar la captura del mapa: '.$e->getMessage());
+        }
+
+        $temporal = tempnam(sys_get_temp_dir(), 'mapa_').'.png';
+        file_put_contents($temporal, $binario);
+
+        try {
+            $planilla->clearMediaCollection('ROUTE_MAP');
+            $planilla->addMedia($temporal)
+                ->usingFileName('mapa-recorrido-'.str_replace('-', '', $fecha).'.png')
+                ->withCustomProperties(['source' => 'frontend', 'captured_at' => now()->toIso8601String()])
+                ->toMediaCollection('ROUTE_MAP');
+        } finally {
+            @unlink($temporal);
         }
     }
 
@@ -480,7 +623,9 @@ class ServiceDeliveryControlSheetService extends BaseService
             $endDate = $endRaw ? Carbon::parse($endRaw) : null;
 
             if ($startDate && $endDate && $endDate->greaterThan($startDate)) {
-                $currentDate = $startDate->copy()->addDay();
+                // Los hijos cubren TODOS los días incluyendo el de inicio, para que
+                // cada día (incluido el primero) tenga su planilla diaria trabajable.
+                $currentDate = $startDate->copy();
                 $parentRoutes = $record->routes()->get();
 
                 while (! $currentDate->greaterThan($endDate)) {

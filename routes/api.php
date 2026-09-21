@@ -817,7 +817,10 @@ Route::prefix('v1')->group(function () {
                 Route::get('/', [ServiceDeliveryControlSheetController::class, 'index'])->name('api.v1.fleet.service-delivery-control-sheets.index');
                 Route::get('/list', [ServiceDeliveryControlSheetController::class, 'list'])->name('api.v1.fleet.service-delivery-control-sheets.list');
                 Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
+                Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
                 Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
+                Route::get('/reports/{tipo}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadReportPdf'])->name('api.v1.fleet.service-delivery-control-sheets.reports.pdf');
+                Route::get('/reports/{tipo}/excel', [ServiceDeliveryControlSheetController::class, 'downloadReportExcel'])->name('api.v1.fleet.service-delivery-control-sheets.reports.excel');
                 Route::post('/', [ServiceDeliveryControlSheetController::class, 'store'])->name('api.v1.fleet.service-delivery-control-sheets.store');
                 Route::get('/{uuid}', [ServiceDeliveryControlSheetController::class, 'show'])->name('api.v1.fleet.service-delivery-control-sheets.show');
                 Route::get('/{uuid}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadDailyPdf'])->name('api.v1.fleet.service-delivery-control-sheets.pdf');
