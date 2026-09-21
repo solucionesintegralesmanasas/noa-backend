@@ -42,6 +42,21 @@ class PdfService
     ) {}
 
     /**
+     * Normaliza la base de una URL web para QR/links de validación.
+     * Evita el doble esquema (https://https://dominio...) cuando web_page ya lo incluye.
+     */
+    private function buildWebBaseUrl(?string $webPage = null): string
+    {
+        $base = ($webPage && trim($webPage) !== '') ? trim($webPage) : (string) config('app.url');
+
+        if (! preg_match('~^https?://~i', $base)) {
+            $base = 'https://'.$base;
+        }
+
+        return rtrim($base, '/');
+    }
+
+    /**
      * Método generateFromView.
      *
      *
@@ -224,8 +239,7 @@ class PdfService
 
             $vCode = strtolower($fuec->verification_code);
 
-            $qrUrl = (config('app.env') === 'production' ? 'https://' : 'http://').
-                ($fuec->company->web_page ?? config('app.url')).
+            $qrUrl = $this->buildWebBaseUrl($fuec->company->web_page).
                 '/#/validacion-de-fuec/'.$vCode;
 
             // Generar código QR usando BaconQrCode (disponible nativamente en composer.lock)
@@ -443,7 +457,7 @@ class PdfService
                 'firma' => $signatureModel,
             ]);
 
-            $qrUrl = 'https://'.($fullCompany->web_page ?? 'falcon-fuec.com').'/validar-vehiculo/'.$vehicleUuid;
+            $qrUrl = $this->buildWebBaseUrl($fullCompany->web_page ?? null).'/validar-vehiculo/'.$vehicleUuid;
             $renderer = new ImageRenderer(
                 new RendererStyle(150),
                 new SvgImageBackEnd
@@ -514,7 +528,7 @@ class PdfService
             ]);
 
             // ✅ Generar Código QR usando BaconQrCode (disponible nativamente)
-            $qrUrl = 'https://'.$webPage.'/validar-vehiculo/'.$vehicle->uuid;
+            $qrUrl = $this->buildWebBaseUrl($webPage).'/validar-vehiculo/'.$vehicle->uuid;
 
             $renderer = new ImageRenderer(
                 new RendererStyle(150),
