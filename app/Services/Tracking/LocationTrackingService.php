@@ -154,12 +154,17 @@ class LocationTrackingService extends BaseService
             ->whereIn('third_party_uuid', $activeDriverUuids)
             ->groupBy('third_party_uuid');
 
-        return DriverLocation::whereIn('id', $latestPerDriver)
+        $ubicaciones = DriverLocation::whereIn('id', $latestPerDriver)
             ->with([
                 'driver:id,uuid,first_name,last_name,document_number',
                 'vehicle:id,uuid,vehicle_license_plate,model',
+                'project:uuid,project_name',
             ])
             ->get();
+
+        $this->adjuntarPlanillaDelDia($ubicaciones, $companyUuid);
+
+        return $ubicaciones;
     }
 
     /**
@@ -167,10 +172,161 @@ class LocationTrackingService extends BaseService
      */
     public function getLastLocation(string $driverUuid): ?DriverLocation
     {
-        return DriverLocation::where('third_party_uuid', $driverUuid)
+        $ubicacion = DriverLocation::where('third_party_uuid', $driverUuid)
             ->latest('recorded_at')
             ->with(['driver', 'vehicle', 'project'])
             ->first();
+
+        if ($ubicacion) {
+            $this->adjuntarPlanillaDelDia(collect([$ubicacion]), $ubicacion->company_uuid);
+        }
+
+        return $ubicacion;
+    }
+
+    /**
+     * Adjunta a cada ubicación la planilla del día (proyecto, funcionario y rutas).
+     * Cruza por vehículo (uuid directo o placa para subcontratados) y proyecto.
+     * Si no hay planilla, deja planilla_dia en nulo sin romper la respuesta.
+     *
+     * @param  \Illuminate\Support\Collection<int, DriverLocation>  $ubicaciones
+     */
+    private function adjuntarPlanillaDelDia(\Illuminate\Support\Collection $ubicaciones, ?string $companyUuid): void
+    {
+        if ($ubicaciones->isEmpty()) {
+            return;
+        }
+
+        try {
+            $hoy = now()->toDateString();
+
+            $planillas = \App\Models\ServiceDeliveryControlSheet::query()
+                ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+                ->whereDate('service_date', $hoy)
+                ->with([
+                    'routes' => fn ($q) => $q->where('is_active', true)->orderBy('order_index'),
+                    'internalControl:id,service_delivery_control_sheet_uuid,vehicle_uuid',
+                    'project:uuid,project_name',
+                ])
+                ->get();
+
+            foreach ($ubicaciones as $ubicacion) {
+                $candidatas = $planillas->filter(function ($p) use ($ubicacion) {
+                    $porVehiculo = $p->internalControl
+                        && $ubicacion->vehicle_uuid
+                        && $p->internalControl->vehicle_uuid === $ubicacion->vehicle_uuid;
+                    $placaUbicacion = $ubicacion->vehicle?->vehicle_license_plate;
+                    $porPlaca = $placaUbicacion && (
+                        $p->vehicle_license_plate === $placaUbicacion
+                        || $p->internalControl?->vehicle?->vehicle_license_plate === $placaUbicacion
+                    );
+
+                    return $porVehiculo || $porPlaca;
+                });
+
+                // Preferir la planilla del mismo proyecto del GPS cuando hay varias.
+                $elegida = null;
+                if ($candidatas->isNotEmpty()) {
+                    $elegida = $ubicacion->project_uuid
+                        ? $candidatas->firstWhere('project_uuid', $ubicacion->project_uuid) ?? $candidatas->first()
+                        : $candidatas->first();
+                }
+
+                if (! $elegida) {
+                    $ubicacion->setAttribute('planilla_dia', $this->buscarUltimasRutasConocidas($ubicacion, $companyUuid));
+
+                    continue;
+                }
+
+                $rutas = $elegida->routes->map(fn ($r) => [
+                    'origin' => $r->origin,
+                    'destination' => $r->destination,
+                    'funcionario_nombre' => $r->funcionario_nombre,
+                    'funcionario_cc' => $r->funcionario_cc,
+                ])->values();
+
+                // Si la planilla de hoy no trae rutas (disponibilidad), respaldar con
+                // las últimas rutas conocidas del mismo vehículo/proyecto para que el
+                // monitor sí muestre ruta y funcionario.
+                $esHoy = true;
+                if ($rutas->isEmpty()) {
+                    $respaldo = $this->buscarUltimasRutasConocidas($ubicacion, $companyUuid);
+                    if ($respaldo) {
+                        $ubicacion->setAttribute('planilla_dia', $respaldo);
+
+                        continue;
+                    }
+                }
+
+                $ubicacion->setAttribute('planilla_dia', [
+                    'uuid' => $elegida->uuid,
+                    'service_date' => $elegida->service_date,
+                    'driver_name' => $elegida->driver_name,
+                    'project_name' => $elegida->project?->project_name ?? $ubicacion->project?->project_name,
+                    'routes' => $rutas,
+                    'es_planilla_hoy' => $esHoy,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            foreach ($ubicaciones as $ubicacion) {
+                $ubicacion->setAttribute('planilla_dia', null);
+            }
+        }
+    }
+
+    /**
+     * Busca la planilla más reciente (hasta hoy) del mismo vehículo/proyecto
+     * que sí tenga rutas activas, para mostrar ruta y funcionario aunque hoy
+     * la planilla esté en disponibilidad o sin recorridos.
+     */
+    private function buscarUltimasRutasConocidas(object $ubicacion, ?string $companyUuid): ?array
+    {
+        try {
+            $hoy = now()->toDateString();
+            $placa = $ubicacion->vehicle?->vehicle_license_plate;
+
+            $candidatas = \App\Models\ServiceDeliveryControlSheet::query()
+                ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+                ->whereDate('service_date', '<=', $hoy)
+                ->when($ubicacion->project_uuid, fn ($q) => $q->where('project_uuid', $ubicacion->project_uuid))
+                ->whereHas('routes', fn ($q) => $q->where('is_active', true))
+                ->with([
+                    'routes' => fn ($q) => $q->where('is_active', true)->orderBy('order_index'),
+                    'internalControl:id,service_delivery_control_sheet_uuid,vehicle_uuid',
+                    'project:uuid,project_name',
+                ])
+                ->orderByDesc('service_date')
+                ->limit(20)
+                ->get()
+                ->filter(function ($p) use ($ubicacion, $placa) {
+                    $porVehiculo = $p->internalControl
+                        && $ubicacion->vehicle_uuid
+                        && $p->internalControl->vehicle_uuid === $ubicacion->vehicle_uuid;
+
+                    return $porVehiculo || ($placa && $p->vehicle_license_plate === $placa);
+                });
+
+            $elegida = $candidatas->first();
+            if (! $elegida) {
+                return null;
+            }
+
+            return [
+                'uuid' => $elegida->uuid,
+                'service_date' => $elegida->service_date,
+                'driver_name' => $elegida->driver_name,
+                'project_name' => $elegida->project?->project_name ?? $ubicacion->project?->project_name,
+                'routes' => $elegida->routes->map(fn ($r) => [
+                    'origin' => $r->origin,
+                    'destination' => $r->destination,
+                    'funcionario_nombre' => $r->funcionario_nombre,
+                    'funcionario_cc' => $r->funcionario_cc,
+                ])->values(),
+                'es_planilla_hoy' => false,
+            ];
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
