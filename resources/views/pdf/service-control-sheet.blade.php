@@ -29,6 +29,25 @@
             background: #ffffff;
         }
 
+        /* Marca de agua con el logo registrado de la empresa */
+        .watermark {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: 520px;
+            height: 520px;
+            margin-left: -260px;
+            margin-top: -260px;
+            opacity: 0.07;
+            z-index: -1000;
+            text-align: center;
+        }
+
+        .watermark img {
+            width: 100%;
+            max-height: 100%;
+        }
+
         .page {
             width: 100%;
             padding: 10mm 8mm;
@@ -133,6 +152,16 @@
             border-collapse: collapse;
             border: 1pt solid #000000;
             margin-top: 4px;
+            table-layout: fixed;
+            word-wrap: break-word;
+        }
+
+        .main-table thead {
+            display: table-header-group;
+        }
+
+        .main-table tr {
+            page-break-inside: avoid;
         }
 
         .main-table th,
@@ -142,6 +171,7 @@
             vertical-align: middle;
             padding: 2px 2px;
             font-size: 7pt;
+            overflow: hidden;
         }
 
         /* Encabezado rojo */
@@ -169,20 +199,20 @@
         }
 
         .col-fecha {
-            width: 7%;
+            width: 8%;
         }
 
         .col-ruta {
-            width: 18%;
+            width: 19%;
             text-align: left;
         }
 
         .col-hora {
-            width: 6%;
+            width: 5.5%;
         }
 
         .col-descanso {
-            width: 6%;
+            width: 5.5%;
         }
 
         .col-total {
@@ -194,7 +224,7 @@
         }
 
         .col-firma {
-            width: 14%;
+            width: 13%;
         }
 
         .firma-cell {
@@ -202,8 +232,6 @@
             padding: 2px;
             vertical-align: middle;
             text-align: center;
-            border: 0.5pt solid #000;
-            background-color: #ffffff;
         }
 
         .firma-cell img {
@@ -211,14 +239,6 @@
             max-width: 85px;
             display: block;
             margin: 0 auto;
-        }
-
-        .firma-cell-empty {
-            height: 26px;
-            border: 0.5pt solid #999999;
-            display: inline-block;
-            width: 85px;
-            background-color: #ffffff;
         }
 
         .col-conductor {
@@ -229,12 +249,41 @@
             display: block;
             font-size: 6pt;
             color: #555555;
+            word-wrap: break-word;
+        }
+
+        .fecha-numero {
+            display: block;
+            font-weight: bold;
+            font-size: 9pt;
+        }
+
+        .fecha-completa {
+            display: block;
+            font-size: 6.5pt;
+            color: #000000;
+            white-space: nowrap;
+        }
+
+        .estado-finalizada {
+            display: block;
+            font-size: 6pt;
+            font-weight: bold;
+            color: #0a7a2e;
+        }
+
+        .estado-abierta {
+            display: block;
+            font-size: 6pt;
+            font-weight: bold;
+            color: #b77900;
         }
 
         /* ── PIE DE PÁGINA ── */
         .footer-section {
             margin-top: 4px;
             border: 1pt solid #000000;
+            page-break-inside: avoid;
         }
 
         .footer-obs {
@@ -331,10 +380,85 @@
             border-bottom: 0.5pt solid #000;
             margin-bottom: 3px;
         }
+
+        /* ── ANEXO MAPA RECORRIDO GPS (siempre en segunda página) ── */
+        .mapa-section {
+            margin-top: 4px;
+            border: 1pt solid #000000;
+            page-break-before: always;
+            page-break-inside: avoid;
+        }
+
+        .mapa-titulo {
+            background-color: #1e3a5f;
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 8pt;
+            text-align: center;
+            padding: 4px 6px;
+        }
+
+        .mapa-subtitulo {
+            font-size: 7pt;
+            text-align: center;
+            padding: 3px 6px;
+            border-bottom: 0.5pt solid #000;
+            color: #333;
+        }
+
+        .mapa-imagen {
+            text-align: center;
+            padding: 4px;
+            background-color: #ffffff;
+        }
+
+        .mapa-imagen img {
+            width: 100%;
+            display: block;
+        }
+
+        .mapa-stats {
+            width: 100%;
+            border-collapse: collapse;
+            border-top: 0.5pt solid #000;
+        }
+
+        .mapa-stats td {
+            border: 0.5pt solid #000;
+            font-size: 7.5pt;
+            text-align: center;
+            padding: 3px 4px;
+            width: 25%;
+        }
+
+        .mapa-stats .stat-label {
+            font-weight: bold;
+            background-color: #eef2f7;
+        }
+
+        .mapa-leyenda {
+            font-size: 7pt;
+            text-align: center;
+            padding: 3px 6px;
+            color: #333;
+        }
+
+        .mapa-vacio {
+            font-size: 8pt;
+            text-align: center;
+            padding: 14px 6px;
+            color: #666;
+        }
     </style>
 </head>
 
 <body>
+
+    @if (!empty($logo))
+        <div class="watermark">
+            <img src="data:{{ $logo_mime ?? 'image/png' }};base64,{{ $logo }}" alt="">
+        </div>
+    @endif
 
     <!-- ================================================================
      PÁGINA 1 — PLANILLA DE CONTROL
@@ -344,9 +468,9 @@
         <tr>
             <td class="header-logo" rowspan="1">
                 @if (!empty($logo))
-                    <img src="data:{{ $logo_mime ?? 'image/png' }};base64,{{ $logo }}" alt="Logo">
+                    <img src="data:{{ $logo_mime ?? 'image/png' }};base64,{{ $logo }}" alt="Logo empresa">
                 @else
-                    <div class="header-logo-placeholder">LOGO</div>
+                    <div class="header-logo-placeholder">SIN LOGO<br>Suba el logo en Empresas</div>
                 @endif
             </td>
             <td class="header-title">
@@ -427,7 +551,15 @@
         <tbody>
             @foreach ($dias as $dia)
                 <tr>
-                    <td>{{ $dia['numero'] }}</td>
+                    <td><span class="fecha-numero">{{ $dia['numero'] }}</span><span class="fecha-completa">{{ $dia['fecha_completa'] ?? '' }}</span>
+                        @if (array_key_exists('is_closed', $dia))
+                            @if (!empty($dia['is_closed']))
+                                <span class="estado-finalizada">FINALIZADA</span>
+                            @else
+                                <span class="estado-abierta">ABIERTA</span>
+                            @endif
+                        @endif
+                    </td>
                     <td style="text-align: left; padding-left: 4px;">
                         {{ $dia['ruta_unica'] ?? ($dia['ruta'] ?? '') }}
                         @if (!empty($dia['detalle_cierre'] ?? null))
@@ -445,8 +577,6 @@
                     <td class="firma-cell">
                         @if (!empty($dia['firma_funcionario']))
                             <img src="data:image/png;base64,{{ $dia['firma_funcionario'] }}" alt="Firma funcionario">
-                        @else
-                            <div class="firma-cell-empty"></div>
                         @endif
                     </td>
                     <td style="text-align: left; padding-left: 4px;">{{ $dia['conductor'] ?? '' }}</td>
@@ -465,7 +595,7 @@
             <tr>
                 <td
                     style="width:50%; padding:6px 10px; border-right:0.5pt solid #000; vertical-align:bottom; font-size:7.5pt; text-align: center;">
-                    <div style="height: 45px; vertical-align: bottom; margin-bottom: 2px; border: 0.5pt solid #000; padding: 3px; background: #ffffff;">
+                    <div style="height: 45px; vertical-align: bottom; margin-bottom: 2px; padding: 3px;">
                         @if (!empty($firma_conductor))
                             <img src="data:image/png;base64,{{ $firma_conductor }}"
                                 style="max-height: 38px; max-width: 180px;">
@@ -475,7 +605,7 @@
                     FIRMA DEL CONDUCTOR QUE ENTREGA
                 </td>
                 <td style="width:50%; padding:6px 10px; vertical-align:bottom; font-size:7.5pt; text-align: center;">
-                    <div style="height: 45px; vertical-align: bottom; margin-bottom: 2px; border: 0.5pt solid #000; padding: 3px; background: #ffffff;">
+                    <div style="height: 45px; vertical-align: bottom; margin-bottom: 2px; padding: 3px;">
                         @if (!empty($firma_recibido))
                             <img src="data:image/png;base64,{{ $firma_recibido }}"
                                 style="max-height: 38px; max-width: 180px;">
@@ -493,7 +623,46 @@
             con letra legible y datos exactos.
         </div>
     </div>
-    </div>
+
+    <!-- ANEXO: RECORRIDO GPS DEL VEHÍCULO EN PROYECTO -->
+    @if (!empty($mapa_recorrido) || !empty($mapa_sin_datos))
+        <div class="mapa-section">
+            <div class="mapa-titulo">ANEXO: RECORRIDO GPS DEL VEHÍCULO EN PROYECTO</div>
+            <div class="mapa-subtitulo">
+                Proyecto: {{ $proyecto ?? 'N/A' }} &nbsp;|&nbsp; Placa: {{ $placa ?? 'N/A' }} &nbsp;|&nbsp; Periodo: {{ $periodo ?? 'N/A' }}@if(!empty($mapa_fecha ?? null)) &nbsp;|&nbsp; Recorrido GPS del {{ $mapa_fecha }}@endif
+            </div>
+            @if (!empty($mapa_recorrido))
+                <div class="mapa-imagen">
+                    <img src="data:image/png;base64,{!! $mapa_recorrido !!}" alt="Mapa del recorrido GPS" width="800">
+                </div>
+                @if (!empty($mapa_stats))
+                    <table class="mapa-stats">
+                        <tr>
+                            <td class="stat-label">Puntos GPS</td>
+                            <td class="stat-label">Distancia GPS</td>
+                            <td class="stat-label">Hora inicio GPS</td>
+                            <td class="stat-label">Hora fin GPS</td>
+                        </tr>
+                        <tr>
+                            <td>{{ $mapa_stats['total_puntos'] ?? 0 }}</td>
+                            <td>{{ $mapa_stats['distancia_km'] ?? 0 }} km</td>
+                            <td>{{ $mapa_stats['hora_inicio'] ?? '—' }}</td>
+                            <td>{{ $mapa_stats['hora_fin'] ?? '—' }}</td>
+                        </tr>
+                    </table>
+                @endif
+                <div class="mapa-leyenda">
+                    @if (!empty($mapa_es_captura ?? null))
+                        Captura del mapa en vivo pegada por el usuario
+                    @else
+                        Marcador verde = inicio del recorrido &nbsp;·&nbsp; Marcador rojo = fin del recorrido &nbsp;·&nbsp; Línea azul = trazado GPS
+                    @endif
+                </div>
+            @else
+                <div class="mapa-vacio">Sin puntos GPS registrados para este vehículo, proyecto y fecha. El vehículo pudo estar en disponibilidad o sin transmisión GPS ese día.</div>
+            @endif
+        </div>
+    @endif
 </body>
 
 </html>

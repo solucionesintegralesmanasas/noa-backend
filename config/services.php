@@ -58,4 +58,11 @@ return [
         'timeout' => (int) env('AI_TIMEOUT', 25),
     ],
 
+    'route_map' => [
+        'provider' => env('MAP_STATIC_PROVIDER', 'osm'),
+        'osm_url' => env('MAP_STATIC_OSM_URL', 'https://staticmap.openstreetmap.de/staticmap.php'),
+        'mapbox_token' => env('MAPBOX_TOKEN'),
+        'timeout' => (int) env('MAP_STATIC_TIMEOUT', 6),
+    ],
+
 ];

@@ -170,6 +170,42 @@ class LocationHistoryService extends BaseService
     }
 
     /**
+     * Obtiene el recorrido GPS de un vehículo dentro de un proyecto para un día específico.
+     * Filtro usado por el PDF diario de planilla: vehicle_uuid + project_uuid + fecha de servicio.
+     *
+     * @param  string|null  $vehicleUuid  UUID del vehículo (puede ser nulo para subcontratados sin uuid)
+     * @param  string|null  $projectUuid  UUID del proyecto
+     * @param  string|\Illuminate\Support\Carbon  $serviceDate  Fecha del servicio (Y-m-d)
+     * @param  string|null  $companyUuid  UUID de la empresa (opcional)
+     */
+    public function getVehicleProjectDayHistory(
+        ?string $vehicleUuid,
+        ?string $projectUuid,
+        mixed $serviceDate,
+        ?string $companyUuid = null
+    ): \Illuminate\Support\Collection {
+        $day = Carbon::parse($serviceDate);
+
+        $query = DriverLocation::query()
+            ->whereBetween('recorded_at', [$day->copy()->startOfDay(), $day->copy()->endOfDay()])
+            ->orderBy('recorded_at', 'asc');
+
+        if (! empty($vehicleUuid)) {
+            $query->where('vehicle_uuid', $vehicleUuid);
+        }
+
+        if (! empty($projectUuid)) {
+            $query->where('project_uuid', $projectUuid);
+        }
+
+        if (! empty($companyUuid)) {
+            $query->where('company_uuid', $companyUuid);
+        }
+
+        return $query->get(['latitude', 'longitude', 'speed', 'recorded_at', 'vehicle_uuid', 'project_uuid']);
+    }
+
+    /**
      * Calcula distancia Haversine en metros.
      */
     private function haversineDistance(float $lat1, float $lng1, float $lat2, float $lng2): float
