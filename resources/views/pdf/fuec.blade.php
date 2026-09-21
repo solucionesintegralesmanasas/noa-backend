@@ -540,7 +540,7 @@
         <tr>
             <td style="text-align:center; font-size:10px; color:#000000; padding:10px;">
                 Verifique la información de este Formato Único de Extracto de Contrato en: <br>
-                <a href="https://{{ $fuec->company->web_page }}/validacion-de-fuec/"
+                <a href="{{ $data['qr_url'] ?? ($fuec->company->web_page.'/#/validacion-de-fuec/'.$fuec->verification_code) }}"
                     style="color: blue; text-decoration: none;">Validacion de fuec</a><br><br>
                 Finalmente ingrese el siguiente código: <strong>{{ $fuec->verification_code }}</strong>
             </td>
