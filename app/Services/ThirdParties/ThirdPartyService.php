@@ -13,7 +13,6 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de Tercero.
@@ -323,10 +322,14 @@ class ThirdPartyService extends BaseService
         $flagEmp = $data['is_employee'] ?? $thirdParty->is_employee ?? false;
         $isEmployee = $flagEmp === true || $flagEmp === 1 || $flagEmp === '1' || $flagEmp === 'true';
 
-        // Si existe usuario vinculado por pivote, actualizar su email si cambió
+        // Si existe usuario vinculado por pivote, actualizar su email y user_name si cambiaron
         if ($linkedUser) {
+            $documentNumber = $data['document_number'] ?? $thirdParty->document_number;
             if ($email && $linkedUser->email !== $email) {
                 $linkedUser->update(['email' => $email]);
+            }
+            if ($documentNumber && $linkedUser->user_name !== $documentNumber) {
+                $linkedUser->update(['user_name' => $documentNumber]);
             }
             $linkedUser->companies()->syncWithoutDetaching([
                 $thirdParty->company_uuid => [
@@ -346,18 +349,17 @@ class ThirdPartyService extends BaseService
         $firstName = $data['first_name'] ?? $thirdParty->first_name ?? $data['trade_name'] ?? $thirdParty->trade_name ?? $data['company_name'] ?? $thirdParty->company_name ?? 'Usuario';
         $lastName = $data['last_name'] ?? $thirdParty->last_name ?? '';
         $fullName = trim($firstName.' '.$lastName);
-        $userName = Str::slug($email);
 
-        // Contraseña temporal = número de documento (el usuario debe cambiarla)
-        $tempPassword = $data['document_number'] ?? $thirdParty->document_number;
+        // user_name y contraseña temporal = número de documento (el usuario debe cambiarla)
+        $documentNumber = $data['document_number'] ?? $thirdParty->document_number;
 
         /** @var User $user */
         $user = User::firstOrCreate(
             ['email' => $email],
             [
                 'name' => $fullName,
-                'user_name' => $userName,
-                'password' => Hash::make($tempPassword),
+                'user_name' => $documentNumber,
+                'password' => Hash::make($documentNumber),
                 'email_verified_at' => now(),
                 'status' => 1,
             ]
