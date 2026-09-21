@@ -47,6 +47,22 @@ class VehicleService extends BaseService
     }
 
     /**
+     * Normaliza un campo opcional: cadena vacía o solo espacios se guarda como NULL.
+     */
+    private function optionalText(array $data, string $key): ?string
+    {
+        if (! array_key_exists($key, $data)) {
+            return null;
+        }
+        $value = $data[$key];
+        if ($value === null) {
+            return null;
+        }
+        $value = trim((string) $value);
+        return $value === '' ? null : $value;
+    }
+
+    /**
      * Método getAllVehiclesWithPagination.
      */
     public function getAllVehiclesWithPagination(int $perPage = 15, int $page = 1, string $search = '', ?string $companyUuid = null, ?string $thirdPartyUuid = null): LengthAwarePaginator
@@ -289,10 +305,10 @@ class VehicleService extends BaseService
                 'line' => $data['line'],
                 'model' => $data['model'],
                 'color' => $data['color'],
-                'serial_number' => $data['serial_number'] ?? null,
+                'serial_number' => $this->optionalText($data, 'serial_number'),
                 'engine_number' => $data['engine_number'],
                 'chassis_number' => $data['chassis_number'],
-                'vin_number' => $data['vin_number'] ?? null,
+                'vin_number' => $this->optionalText($data, 'vin_number'),
                 'engine_displacement' => $data['engine_displacement'],
                 'body_type' => $data['body_type'],
                 'fuel_type' => $data['fuel_type'],
@@ -378,10 +394,10 @@ class VehicleService extends BaseService
                 'line' => $data['line'] ?? $record->line,
                 'model' => $data['model'] ?? $record->model,
                 'color' => $data['color'] ?? $record->color,
-                'serial_number' => array_key_exists('serial_number', $data) ? $data['serial_number'] : $record->serial_number,
+                'serial_number' => array_key_exists('serial_number', $data) ? $this->optionalText($data, 'serial_number') : $record->serial_number,
                 'engine_number' => $data['engine_number'] ?? $record->engine_number,
                 'chassis_number' => $data['chassis_number'] ?? $record->chassis_number,
-                'vin_number' => array_key_exists('vin_number', $data) ? $data['vin_number'] : $record->vin_number,
+                'vin_number' => array_key_exists('vin_number', $data) ? $this->optionalText($data, 'vin_number') : $record->vin_number,
                 'engine_displacement' => $data['engine_displacement'] ?? $record->engine_displacement,
                 'body_type' => $data['body_type'] ?? $record->body_type,
                 'fuel_type' => $data['fuel_type'] ?? $record->fuel_type,
