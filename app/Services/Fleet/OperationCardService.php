@@ -49,7 +49,8 @@ class OperationCardService extends BaseService
         int $page = 1,
         string $search = '',
         ?string $companyUuid = null,
-        ?string $thirdPartyUuid = null
+        ?string $thirdPartyUuid = null,
+        ?string $vehicleUuid = null
     ): LengthAwarePaginator {
         $query = $this->query()->with('vehicle');
 
@@ -61,6 +62,10 @@ class OperationCardService extends BaseService
             $query->whereHas('vehicle', function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid);
             });
+        }
+
+        if ($vehicleUuid) {
+            $query->where('vehicle_uuid', $vehicleUuid);
         }
 
         if (! empty($search)) {
