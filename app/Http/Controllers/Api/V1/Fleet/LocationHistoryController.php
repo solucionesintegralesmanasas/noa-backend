@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1\Fleet;
 
 use App\Http\Controllers\Controller;
 use App\Services\Tracking\LocationHistoryService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -34,23 +35,74 @@ class LocationHistoryController extends Controller
         parameters: [
             new OA\Parameter(name: 'start_date', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'date')),
             new OA\Parameter(name: 'end_date', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'date')),
+            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 500, maximum: 2000)),
+            new OA\Parameter(name: 'page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 1)),
+            new OA\Parameter(name: 'mode', in: 'query', required: false, description: 'points: página del historial; map: trazado decimado para el mapa', schema: new OA\Schema(type: 'string', enum: ['points', 'map'], default: 'points')),
+            new OA\Parameter(name: 'max_points', in: 'query', required: false, description: 'Solo en mode=map: máximo de puntos del trazado', schema: new OA\Schema(type: 'integer', default: 1000, maximum: 5000)),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Historial de ubicaciones.'),
+            new OA\Response(response: 422, description: 'Rango inválido o mayor de 31 días.'),
         ]
     )]
     public function driverHistory(Request $request, string $uuid): JsonResponse
     {
+        $validated = $request->validate([
+            'start_date' => ['required', 'date'],
+            'end_date' => ['required', 'date', 'after_or_equal:start_date'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:2000'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'mode' => ['sometimes', 'in:points,map'],
+            'max_points' => ['sometimes', 'integer', 'min:100', 'max:5000'],
+        ]);
+
+        $this->validarRango($validated['start_date'], $validated['end_date']);
+        $companyUuid = $request->user()->companies()->first()->uuid ?? null;
+
         try {
-            $startDate = $request->query('start_date', now()->subDays(7)->format('Y-m-d'));
-            $endDate = $request->query('end_date', now()->format('Y-m-d'));
-            $companyUuid = $request->user()->companies()->first()->uuid ?? null;
+            if (($validated['mode'] ?? 'points') === 'map') {
+                $items = $this->historyService->getDriverHistoryForMap(
+                    $uuid,
+                    $validated['start_date'],
+                    $validated['end_date'],
+                    $companyUuid,
+                    (int) ($validated['max_points'] ?? 1000)
+                );
 
-            $history = $this->historyService->getDriverHistory($uuid, $startDate, $endDate, $companyUuid);
+                return $this->successResponse(
+                    $items,
+                    'Trazado del recorrido recuperado.',
+                    200,
+                    ['mode' => 'map', 'points' => $items->count()]
+                );
+            }
 
-            return $this->successResponse($history, 'Historial de ruta recuperado.');
+            $result = $this->historyService->getDriverHistory(
+                $uuid,
+                $validated['start_date'],
+                $validated['end_date'],
+                $companyUuid,
+                (int) ($validated['per_page'] ?? 500),
+                (int) ($validated['page'] ?? 1)
+            );
+
+            return $this->successResponse($result['data'], 'Historial de ruta recuperado.', 200, $result['meta']);
         } catch (\Throwable $e) {
             return $this->handleException($e);
+        }
+    }
+
+    /**
+     * El rango máximo es 31 días (ARQ-002): acota el peor caso de escaneo.
+     */
+    private function validarRango(string $startDate, string $endDate): void
+    {
+        // Carbon 3 devuelve diffs con signo: se fuerza valor absoluto.
+        $dias = abs(Carbon::parse($startDate)->startOfDay()
+            ->diffInDays(Carbon::parse($endDate)->endOfDay()));
+
+        if ($dias > 31) {
+            abort(422, 'El rango máximo permitido es de 31 días.');
         }
     }
 
@@ -60,16 +112,35 @@ class LocationHistoryController extends Controller
         operationId: 'driverStats',
         tags: ['Geolocalización'],
         security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'start_date', in: 'query', required: false, description: 'Si se envía junto a end_date, devuelve los agregados del rango en "range". Sin rango solo devuelve sesiones.', schema: new OA\Schema(type: 'string', format: 'date')),
+            new OA\Parameter(name: 'end_date', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
+        ],
         responses: [
             new OA\Response(response: 200, description: 'Estadísticas del conductor.'),
+            new OA\Response(response: 422, description: 'Rango inválido o mayor de 31 días.'),
         ]
     )]
     public function driverStats(Request $request, string $uuid): JsonResponse
     {
+        $validated = $request->validate([
+            'start_date' => ['sometimes', 'date'],
+            'end_date' => ['sometimes', 'date', 'after_or_equal:start_date'],
+        ]);
+
+        if (isset($validated['start_date'], $validated['end_date'])) {
+            $this->validarRango($validated['start_date'], $validated['end_date']);
+        }
+
         try {
             $companyUuid = $request->user()->companies()->first()->uuid ?? null;
 
-            $stats = $this->historyService->getDriverStats($uuid, $companyUuid);
+            $stats = $this->historyService->getDriverStats(
+                $uuid,
+                $companyUuid,
+                $validated['start_date'] ?? null,
+                $validated['end_date'] ?? null
+            );
 
             return $this->successResponse($stats, 'Estadísticas del conductor recuperadas.');
         } catch (\Throwable $e) {
