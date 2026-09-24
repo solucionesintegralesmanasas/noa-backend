@@ -27,7 +27,10 @@ return new class extends Migration
 
             DB::table('system_configuration')
                 ->where('company_uuid', $company->uuid)
-                ->whereNull('own_company_names')
+                ->where(function ($query) {
+                    $query->whereNull('own_company_names')
+                        ->orWhere('own_company_names', '[]');
+                })
                 ->update([
                     'own_company_names' => json_encode($names),
                     'updated_at' => now(),
