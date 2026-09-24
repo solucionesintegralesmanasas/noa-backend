@@ -82,6 +82,173 @@ class NotificationsService extends BaseService
     }
 
     /**
+     * Construye el enlace útil de una alerta: el dato que la ata (placa,
+     * licencia o nombre) apunta a la vista donde se corrige o se registra.
+     * El label devuelto es siempre un substring exacto del mensaje.
+     * Retorna null cuando no hay destino resoluble.
+     */
+    private function construirAction(string $type, array $alert): ?array
+    {
+        switch ($type) {
+            case 'VEHICLE_DOCUMENT':
+                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
+                $docType = (string) ($alert['document_type'] ?? '');
+                if ($placa === '' || $docType === '') {
+                    return null;
+                }
+                $docUuid = $alert['document_uuid'] ?? null;
+                if ($docUuid) {
+                    return [
+                        'label' => $placa,
+                        'path' => '/vehiculos-documentos/editar/'.$docUuid,
+                        'permission' => 'vehicle_documents.update',
+                        'aria_label' => "Editar el documento {$docType} del vehículo {$placa}",
+                    ];
+                }
+                $vUuid = $alert['vehicle_uuid'] ?? null;
+                if (! $vUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $placa,
+                    'path' => '/vehiculos-documentos/'.rawurlencode($docType).'/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
+                    'permission' => 'vehicle_documents.create',
+                    'aria_label' => "Registrar el documento {$docType} del vehículo {$placa}",
+                ];
+
+            case 'OPERATION_CARD':
+                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
+                if ($placa === '') {
+                    return null;
+                }
+                $cardUuid = $alert['operation_card_uuid'] ?? null;
+                $numero = (string) ($alert['operating_card_number'] ?? '');
+                if ($cardUuid) {
+                    return [
+                        'label' => $placa,
+                        'path' => '/tarjetas-de-operacion/editar/'.$cardUuid,
+                        'permission' => 'operation_cards.update',
+                        'aria_label' => "Editar la tarjeta de operación {$numero} del vehículo {$placa}",
+                    ];
+                }
+                $vUuid = $alert['vehicle_uuid'] ?? null;
+                if (! $vUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $placa,
+                    'path' => '/tarjetas-de-operacion/crear?'.http_build_query(['wizard' => $vUuid]),
+                    'permission' => 'operation_cards.create',
+                    'aria_label' => "Registrar la tarjeta de operación del vehículo {$placa}",
+                ];
+
+            case 'FIRST_RTM':
+                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
+                $vUuid = $alert['vehicle_uuid'] ?? null;
+                if ($placa === '' || ! $vUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $placa,
+                    'path' => '/vehiculos-documentos/RTM/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
+                    'permission' => 'vehicle_documents.create',
+                    'aria_label' => "Registrar la RTM del vehículo {$placa}",
+                ];
+
+            case 'DRIVER_LICENSE':
+                $numero = (string) ($alert['license_number'] ?? '');
+                $conductor = (string) ($alert['driver_name'] ?? '');
+                $tpUuid = $alert['third_party_uuid'] ?? null;
+                if ($numero === '' || ! $tpUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => '#'.$numero,
+                    'path' => '/terceros/conductor/perfil/'.$tpUuid,
+                    'permission' => 'driver.profile',
+                    'aria_label' => "Ver la ficha del conductor {$conductor} (licencia #{$numero})",
+                ];
+
+            case 'AGREEMENT':
+                $placa = (string) ($alert['license_plate'] ?? '');
+                $agUuid = $alert['agreement_uuid'] ?? null;
+                if ($placa === '' || ! $agUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $placa,
+                    'path' => '/convenios-colaboracion/editar/'.$agUuid,
+                    'permission' => 'business_collaboration_agreements.update',
+                    'aria_label' => "Editar el convenio del vehículo {$placa}",
+                ];
+
+            case 'AFFILIATE_CHARGE':
+                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
+                $chUuid = $alert['charge_uuid'] ?? null;
+                if ($placa === '' || ! $chUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $placa,
+                    'path' => '/pagos-de-administracion/perfil/'.$chUuid,
+                    'permission' => 'affiliate_admin_charges.profile',
+                    'aria_label' => "Ver el cobro de administración del vehículo {$placa}",
+                ];
+
+            case 'VEHICLE_INSPECTION_PENDING':
+                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
+                $vUuid = $alert['vehicle_uuid'] ?? null;
+                if ($placa === '' || ! $vUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $placa,
+                    'path' => '/inspeccion-vehiculos/crear?'.http_build_query(['vehicle_uuid' => $vUuid, 'return_to' => '/notificaciones']),
+                    'permission' => 'vehicle_inspections.create',
+                    'aria_label' => "Registrar la inspección del vehículo {$placa}",
+                ];
+
+            case 'VEHICLE_MAINTENANCE_ALERT':
+                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
+                $vUuid = $alert['vehicle_uuid'] ?? null;
+                if ($placa === '' || ! $vUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $placa,
+                    'path' => '/mantenimiento/crear?'.http_build_query(['vehicle' => $vUuid, 'type' => 'PREVENTIVA']),
+                    'permission' => 'maintenance.create',
+                    'aria_label' => "Registrar el mantenimiento del vehículo {$placa}",
+                ];
+
+            case 'SOCIAL_SECURITY_MORA':
+                $nombre = (string) ($alert['third_party_name'] ?? '');
+                $tpUuid = $alert['third_party_uuid'] ?? null;
+                if ($nombre === '' || ! $tpUuid) {
+                    return null;
+                }
+
+                return [
+                    'label' => $nombre,
+                    'path' => '/terceros/perfil/'.$tpUuid,
+                    'permission' => 'third_parties.profile',
+                    'aria_label' => "Ver la ficha de {$nombre}",
+                ];
+
+            default:
+                return null;
+        }
+    }
+
+    /**
      * Método syncNotifications.
      */
     public function syncNotifications(?string $companyUuid = null, ?string $thirdPartyUuid = null): void
@@ -127,8 +294,10 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'] ?? null,
                     'expiry_date' => isset($alert['expiry_date']) ? Carbon::parse($alert['expiry_date']) : null,
                     'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'document_type' => $alert['document_type'] ?? null,
+                        'action' => $this->construirAction('VEHICLE_DOCUMENT', $alert),
                     ],
                 ];
             }
@@ -153,8 +322,10 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'] ?? null,
                     'expiry_date' => isset($alert['expiration_date']) ? Carbon::parse($alert['expiration_date']) : null,
                     'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'operating_card_number' => $alert['operating_card_number'] ?? null,
+                        'action' => $this->construirAction('OPERATION_CARD', $alert),
                     ],
                 ];
             }
@@ -179,8 +350,10 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'] ?? null,
                     'expiry_date' => isset($alert['expiration_date']) ? Carbon::parse($alert['expiration_date']) : null,
                     'extra_data' => [
+                        'third_party_uuid' => $alert['third_party_uuid'] ?? null,
                         'driver_name' => $alert['driver_name'] ?? null,
                         'license_number' => $alert['license_number'] ?? null,
+                        'action' => $this->construirAction('DRIVER_LICENSE', $alert),
                     ],
                 ];
             }
@@ -205,7 +378,9 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'] ?? null,
                     'expiry_date' => isset($alert['first_rtm_due_date']) ? Carbon::parse($alert['first_rtm_due_date']) : null,
                     'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
+                        'action' => $this->construirAction('FIRST_RTM', $alert),
                     ],
                 ];
             }
@@ -236,8 +411,10 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'] ?? null,
                     'expiry_date' => isset($alert['expiration_date']) ? Carbon::parse($alert['expiration_date']) : null,
                     'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
                         'entity_name' => $alert['entity_name'] ?? null,
                         'license_plate' => $alert['license_plate'] ?? null,
+                        'action' => $this->construirAction('AGREEMENT', $alert),
                     ],
                 ];
             }
@@ -263,8 +440,10 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'] ?? null,
                     'expiry_date' => isset($alert['due_date']) ? Carbon::parse($alert['due_date']) : null,
                     'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'amount' => $alert['amount'] ?? null,
+                        'action' => $this->construirAction('AFFILIATE_CHARGE', $alert),
                     ],
                 ];
             }
@@ -288,7 +467,9 @@ class NotificationsService extends BaseService
                     'days_left' => 0,
                     'expiry_date' => Carbon::today(),
                     'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
+                        'action' => $this->construirAction('VEHICLE_INSPECTION_PENDING', $alert),
                     ],
                 ];
             }
@@ -322,10 +503,12 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'],
                     'expiry_date' => Carbon::today(),
                     'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'milestone' => $alert['milestone'] ?? null,
                         'status' => $alert['status'] ?? null,
                         'km_left' => $alert['km_left'] ?? null,
+                        'action' => $this->construirAction('VEHICLE_MAINTENANCE_ALERT', $alert),
                     ],
                 ];
             }
@@ -360,9 +543,11 @@ class NotificationsService extends BaseService
                     'days_left' => $alert['days_left'] ?? null,
                     'expiry_date' => isset($alert['billing_period']) ? Carbon::parse($alert['billing_period']) : null,
                     'extra_data' => [
+                        'third_party_uuid' => $tpUuid,
                         'third_party_name' => $alert['third_party_name'] ?? null,
                         'billing_period' => $alert['billing_period'] ?? null,
                         'status' => $alert['status'] ?? null,
+                        'action' => $this->construirAction('SOCIAL_SECURITY_MORA', $alert),
                     ],
                 ];
             }
