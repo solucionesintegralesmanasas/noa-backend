@@ -368,20 +368,24 @@ Las vistas no deben crear directamente temporizadores, conexiones SSE ni reglas 
 
 **Criterio de salida:** ninguna petición crítica crece sin límite por volumen de datos.
 
-### Fase 2: Desacoplamiento backend
+### Fase 2: Acotar y persistir (sin cola)
 
-**Objetivo:** extraer trabajo pesado del ciclo HTTP.
+**Objetivo:** acotar el trabajo pesado dentro del request y persistir resultados.
+
+**Restricción (2026-09-24):** el hosting compartido no tiene workers ni Cron, así que ARQ-003/004/005 en su
+forma con cola están BLOQUEADOS. Se ejecutan sus equivalentes síncronos (sufijo R). Ver ADR-001.
 
 **Tareas:**
 
-- Crear Jobs GPS.
-- Crear estado conductor/geocerca.
-- Crear Jobs de PDF y Excel.
-- Implementar almacenamiento temporal de reportes.
-- Cachear mapas.
-- Añadir pruebas de los módulos extraídos.
+- Reducir consultas por punto GPS ingerido (ARQ-004R): hoist de `getPreviousGeofenceState` (2G→1 por punto),
+  batch de búsquedas históricas, eager de `internalControl.vehicle`.
+- Acotar mapas del PDF (ARQ-005R): decimación + topes ya aplicados; reutilizar en todo mapa generado.
+- Archivar PDFs en la primera generación (ARQ-005R): ver ADR-001, pendiente decisión de negocio §5.
+- Avisar todo truncado visible (reporte 500, rangos 62 días) en vez de cortar en silencio.
+- Evidencia acumulada por proyecto en la ficha (hecho: frontend `a451ea5`).
+- Añadir pruebas de los módulos acotados (ARQ-015 sin dependencia de cola).
 
-**Criterio de salida:** la recepción GPS y la creación de reportes no bloquean procesamiento pesado.
+**Criterio de salida:** ningún request crece sin límite por volumen de datos; los PDFs se generan una vez.
 
 ### Fase 3: Read models y agregados
 
@@ -419,45 +423,47 @@ Las vistas no deben crear directamente temporizadores, conexiones SSE ni reglas 
 **Tareas:**
 
 - Integrar métricas de aplicación.
-- Monitorizar Jobs fallidos.
-- Monitorizar colas y tiempos de espera.
+- Monitorizar tiempos de generación de PDF y truncados visibles.
 - Automatizar presupuestos de bundle.
 - Ejecutar pruebas de carga periódicas.
-- Documentar decisiones arquitectónicas en ADR.
+- Documentar decisiones arquitectónicas en ADR (`docs/adr/`; ver ADR-001).
 
 **Criterio de salida:** las regresiones de rendimiento son detectadas en CI o en observabilidad, no por usuarios.
 
 ## 7. Backlog priorizado
 
-| ID | Tarea | Prioridad | Dependencias |
-|---|---|---|---|
-| ARQ-001 | Medir endpoints GPS, dashboard y reportes | P0 | Ninguna |
-| ARQ-002 | Limitar y paginar historiales GPS | P0 | ARQ-001 |
-| ARQ-003 | Crear Job de procesamiento GPS | P0 | ARQ-001 |
-| ARQ-004 | Persistir estado conductor/geocerca | P0 | ARQ-003 |
-| ARQ-005 | Convertir PDF y Excel a Jobs | P0 | ARQ-001 |
-| ARQ-006 | Cachear mapas por hash | P1 | ARQ-005 |
-| ARQ-007 | Optimizar monitor GPS y eliminar N+1 | P1 | ARQ-001 |
-| ARQ-008 | Validar índices con `EXPLAIN` | P1 | ARQ-001 |
-| ARQ-009 | Unificar SSE y polling | P1 | Ninguna |
-| ARQ-010 | Añadir cancelación y pausa de polling | P1 | ARQ-009 |
-| ARQ-011 | Crear cola local de puntos GPS | P2 | ARQ-003 |
-| ARQ-012 | Reducir dependencias globales | P1 | Nueva medición frontend |
-| ARQ-013 | Reducir registro global de PrimeVue | P1 | ARQ-012 |
-| ARQ-014 | Separar bloques del dashboard | P2 | ARQ-001 |
-| ARQ-015 | Añadir pruebas de dominio | P0 | ARQ-003 |
-| ARQ-016 | Incorporar lint y typecheck | P1 | Ninguna |
+Leyenda de Estado: HECHO · EN CURSO · PENDIENTE · BLOQUEADO (requiere workers/Cron que el hosting no tiene).
+
+| ID | Tarea | Prioridad | Dependencias | Estado |
+|---|---|---|---|---|
+| ARQ-001 | Medir endpoints GPS, dashboard y reportes | P0 | Ninguna | HECHO (local + Lighthouse; falta prod) |
+| ARQ-002 | Limitar y paginar historiales GPS | P0 | ARQ-001 | HECHO |
+| ARQ-003 | Crear Job de procesamiento GPS | P0 | — | BLOQUEADO (sin workers) |
+| ARQ-004 | Persistir estado conductor/geocerca | P0 | ARQ-003 | BLOQUEADO en forma con cola; parte ejecutable → ARQ-004R |
+| ARQ-004R | Reducir consultas por punto ingerido (hoist + batch, sin cambiar modelo) | P0 | Ninguna | PENDIENTE |
+| ARQ-005 | Convertir PDF y Excel a Jobs | P0 | — | BLOQUEADO (sin workers); forma ejecutable → ARQ-005R |
+| ARQ-005R | PDFs síncronos acotados + archivado (ver ADR-001) | P0 | Ninguna | EN CURSO (topes y avisos hechos; archivado pendiente de decisión) |
+| ARQ-006 | Cachear mapas por hash | P1 | ARQ-005R | PENDIENTE |
+| ARQ-007 | Optimizar monitor GPS y eliminar N+1 | P1 | Ninguna | PENDIENTE (cuantificado: 11 + P + 4F consultas) |
+| ARQ-008 | Validar índices con `EXPLAIN` | P1 | Ninguna | EN CURSO (evidencia lista; falta migración) |
+| ARQ-009 | Unificar SSE y polling | P1 | Ninguna | HECHO (frontend) |
+| ARQ-010 | Añadir cancelación y pausa de polling | P1 | ARQ-009 | HECHO (frontend) |
+| ARQ-011 | Crear cola local de puntos GPS | P2 | Ninguna | PENDIENTE (no requiere workers backend) |
+| ARQ-012 | Reducir dependencias globales | P1 | Nueva medición frontend | HECHO (frontend) |
+| ARQ-013 | Reducir registro global de PrimeVue | P1 | ARQ-012 | HECHO (frontend) |
+| ARQ-014 | Separar bloques del dashboard | P2 | ARQ-001 | PENDIENTE |
+| ARQ-015 | Añadir pruebas de dominio (sobre servicios, sin cola) | P0 | Ninguna | PENDIENTE |
+| ARQ-016 | Incorporar lint y typecheck | P1 | Ninguna | HECHO (frontend; backend sin linter: PENDIENTE) |
 
 ## 8. Métricas de aceptación
 
 ### Backend
 
 - p95 de ingestión GPS inferior al objetivo definido en la Fase 0.
-- La ingestión no espera a geocercas, mapas ni reportes.
+- La ingestión hace el mínimo trabajo posible por punto (ARQ-004R) mientras no haya cola.
 - Cero consultas N+1 en el endpoint del monitor.
 - Historiales siempre paginados o limitados.
-- Exportaciones grandes no bloquean trabajadores HTTP.
-- Jobs fallidos visibles y reintentables.
+- PDFs acotados, con truncados visibles y archivados una sola vez (ADR-001).
 - Consultas críticas utilizan índices comprobados con `EXPLAIN`.
 
 ### Frontend
@@ -479,20 +485,25 @@ Las vistas no deben crear directamente temporizadores, conexiones SSE ni reglas 
 
 ## 9. Primera entrega recomendada
 
-La primera entrega debe incluir `ARQ-001` a `ARQ-005`:
+La primera entrega incluye lo ejecutable sin cola: `ARQ-001`, `ARQ-002`, `ARQ-004R`, `ARQ-005R`, `ARQ-007`,
+`ARQ-008` y `ARQ-015`:
 
-1. Medir la situación actual.
-2. Limitar historiales.
-3. Extraer el procesamiento GPS a cola.
-4. Convertir PDF y Excel a generación asíncrona.
-5. Añadir pruebas de contrato para proteger el cambio.
+1. Medir la situación actual (hecho en local; falta producción).
+2. Limitar historiales (hecho).
+3. Reducir el costo por punto GPS ingerido sin cambiar el modelo (ARQ-004R).
+4. Acotar y archivar PDFs síncronos (ARQ-005R + ADR-001).
+5. Eliminar el N+1 del monitor y validar índices con `EXPLAIN`.
+6. Añadir pruebas sobre los servicios acotados (ARQ-015).
 
-Esta secuencia tiene el mayor leverage porque ataca simultáneamente latencia, memoria, disponibilidad y capacidad de crecimiento.
+`ARQ-003/004/005` en forma con cola quedan BLOQUEADOS hasta que la infraestructura tenga workers.
 
 ## 10. Riesgos y decisiones pendientes
 
-- Definir Redis, base de datos u otro backend para producción de colas.
-- Definir almacenamiento final de reportes y tiempo de expiración.
+- ~~Definir Redis, base de datos u otro backend para producción de colas.~~ **CERRADO 2026-09-24:**
+  no hay cola en el hosting compartido (sin workers ni Cron); la estrategia es síncrono acotado + archivado
+  (ARQ-004R/005R, ADR-001). Reabrir solo si cambia la infraestructura.
+- ~~Definir almacenamiento final de reportes y tiempo de expiración.~~ **CERRADO 2026-09-24:** disco local +
+  MediaLibrary asociado a la planilla (ver ADR-001); expiración pendiente de la decisión de negocio §5.
 - Confirmar volumen esperado de puntos GPS por empresa y por día.
 - Confirmar política legal y operativa de retención GPS.
 - Confirmar si SSE seguirá siendo válido para todos los clientes móviles.
