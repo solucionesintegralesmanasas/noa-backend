@@ -485,6 +485,36 @@ class NotificationsService extends BaseService
     }
 
     /**
+     * Cuenta las notificaciones pendientes agrupadas por prioridad.
+     * Respeta el mismo aislamiento de empresa y tercero que el listado.
+     *
+     * @return array{total: int, PRIORITARIA: int, NORMAL: int}
+     */
+    public function getUnreadCountsByPriority(?string $companyUuid = null): array
+    {
+        $query = $this->query();
+
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        if ($companyUuid) {
+            $this->applyCompanyFilter($query, $companyUuid);
+        }
+
+        $rows = $query->where('status', 'PENDIENTE')
+            ->select('priority', DB::raw('count(*) as total'))
+            ->groupBy('priority')
+            ->pluck('total', 'priority');
+
+        return [
+            'total' => (int) $rows->sum(),
+            'PRIORITARIA' => (int) ($rows['PRIORITARIA'] ?? 0),
+            'NORMAL' => (int) ($rows['NORMAL'] ?? 0),
+        ];
+    }
+
+    /**
      * Método markAsRead.
      */
     public function markAsRead(string $uuid): bool
