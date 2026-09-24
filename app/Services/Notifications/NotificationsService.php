@@ -15,6 +15,7 @@ use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Services\BaseService;
 use App\Utils\Logger;
+use App\Utils\OwnCompany;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -61,6 +62,26 @@ class NotificationsService extends BaseService
     }
 
     /**
+     * Resuelve la prioridad de una alerta ligada a un vehículo.
+     * Es PRIORITARIA cuando el vehículo opera con tarjeta de la empresa propia.
+     */
+    private function prioridadVehiculo(?string $vehicleUuid, ?string $companyUuid): string
+    {
+        if (! $vehicleUuid) {
+            return 'NORMAL';
+        }
+
+        $vehicle = Vehicle::query()->where('uuid', '=', $vehicleUuid, 'and')->with('operationCards')->first();
+        if (! $vehicle) {
+            return 'NORMAL';
+        }
+
+        return OwnCompany::esVehiculoPropio($vehicle, $companyUuid ?? $vehicle->company_uuid)
+            ? 'PRIORITARIA'
+            : 'NORMAL';
+    }
+
+    /**
      * Método syncNotifications.
      */
     public function syncNotifications(?string $companyUuid = null, ?string $thirdPartyUuid = null): void
@@ -100,6 +121,7 @@ class NotificationsService extends BaseService
                     'type' => 'VEHICLE_DOCUMENT',
                     'title' => 'Documento '.($alert['document_type'] ?? '').' '.($alert['status'] ?? 'FALTANTE'),
                     'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
                     'entity_uuid' => $entityUuid,
                     'entity_type' => isset($alert['document_uuid']) ? VehicleDocument::class : Vehicle::class,
                     'days_left' => $alert['days_left'] ?? null,
@@ -125,6 +147,7 @@ class NotificationsService extends BaseService
                     'type' => 'OPERATION_CARD',
                     'title' => 'Tarjeta de Operación '.($alert['operating_card_number'] ?? 'FALTANTE'),
                     'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
                     'entity_uuid' => $alert['operation_card_uuid'] ?? $alert['vehicle_uuid'] ?? null,
                     'entity_type' => isset($alert['operation_card_uuid']) ? OperationCard::class : Vehicle::class,
                     'days_left' => $alert['days_left'] ?? null,
@@ -150,6 +173,7 @@ class NotificationsService extends BaseService
                     'type' => 'DRIVER_LICENSE',
                     'title' => 'Licencia de Conducción #'.($alert['license_number'] ?? ''),
                     'message' => $alert['message'],
+                    'priority' => 'NORMAL',
                     'entity_uuid' => $licUuid,
                     'entity_type' => DriverLicense::class,
                     'days_left' => $alert['days_left'] ?? null,
@@ -175,6 +199,7 @@ class NotificationsService extends BaseService
                     'type' => 'FIRST_RTM',
                     'title' => 'Primera RTM - '.($alert['vehicle_license_plate'] ?? ''),
                     'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
                     'entity_uuid' => $vUuid,
                     'entity_type' => Vehicle::class,
                     'days_left' => $alert['days_left'] ?? null,
@@ -198,12 +223,14 @@ class NotificationsService extends BaseService
                 if (! $cUuid) {
                     continue;
                 }
+                $vUuid = $alert['vehicle_uuid'] ?? null;
 
                 $activeAlerts[] = [
                     'company_uuid' => $cUuid,
                     'type' => 'AGREEMENT',
                     'title' => 'Convenio Colaboración #'.($alert['resolution_number'] ?? ''),
                     'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
                     'entity_uuid' => $agUuid,
                     'entity_type' => BusinessCollaborationAgreement::class,
                     'days_left' => $alert['days_left'] ?? null,
@@ -223,12 +250,14 @@ class NotificationsService extends BaseService
                 if (! $cUuid) {
                     continue;
                 }
+                $vUuid = $charge?->vehicle_uuid ?? null;
 
                 $activeAlerts[] = [
                     'company_uuid' => $cUuid,
                     'type' => 'AFFILIATE_CHARGE',
                     'title' => 'Cobro de Administración - '.($alert['vehicle_license_plate'] ?? ''),
                     'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
                     'entity_uuid' => $chUuid,
                     'entity_type' => AffiliateAdminCharge::class,
                     'days_left' => $alert['days_left'] ?? null,
@@ -253,6 +282,7 @@ class NotificationsService extends BaseService
                     'type' => 'VEHICLE_INSPECTION_PENDING',
                     'title' => 'Inspección Pendiente: '.($alert['vehicle_license_plate'] ?? ''),
                     'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
                     'entity_uuid' => $vUuid,
                     'entity_type' => Vehicle::class,
                     'days_left' => 0,
@@ -286,6 +316,7 @@ class NotificationsService extends BaseService
                     'type' => 'VEHICLE_MAINTENANCE_ALERT',
                     'title' => $alert['title'],
                     'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
                     'entity_uuid' => $deterministicUuid,
                     'entity_type' => Vehicle::class,
                     'days_left' => $alert['days_left'],
@@ -323,6 +354,7 @@ class NotificationsService extends BaseService
                     'type' => 'SOCIAL_SECURITY_MORA',
                     'title' => $alert['title'],
                     'message' => $alert['message'],
+                    'priority' => 'NORMAL',
                     'entity_uuid' => $deterministicUuid,
                     'entity_type' => SocialSecurityContribution::class,
                     'days_left' => $alert['days_left'] ?? null,
@@ -348,6 +380,7 @@ class NotificationsService extends BaseService
                     $existing->update([
                         'title' => $alertData['title'],
                         'message' => $alertData['message'],
+                        'priority' => $alertData['priority'] ?? 'NORMAL',
                         'days_left' => $alertData['days_left'],
                         'expiry_date' => $alertData['expiry_date'],
                         'extra_data' => $alertData['extra_data'],
@@ -360,6 +393,7 @@ class NotificationsService extends BaseService
                         'title' => $alertData['title'],
                         'message' => $alertData['message'],
                         'status' => 'PENDIENTE',
+                        'priority' => $alertData['priority'] ?? 'NORMAL',
                         'entity_uuid' => $alertData['entity_uuid'],
                         'entity_type' => $alertData['entity_type'],
                         'days_left' => $alertData['days_left'],
@@ -391,7 +425,8 @@ class NotificationsService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $status = null,
-        ?string $type = null
+        ?string $type = null,
+        ?string $priority = null
     ): LengthAwarePaginator {
         $query = $this->query();
 
@@ -409,6 +444,10 @@ class NotificationsService extends BaseService
 
         if ($type) {
             $query->where('type', $type);
+        }
+
+        if ($priority) {
+            $query->where('priority', $priority);
         }
 
         if (! empty($search)) {
@@ -438,7 +477,11 @@ class NotificationsService extends BaseService
             $this->applyCompanyFilter($query, $companyUuid);
         }
 
-        return $query->latest()->limit($limit)->get();
+        // Las prioritarias (vehículos de la empresa propia) siempre primero.
+        return $query->orderByRaw("CASE WHEN priority = 'PRIORITARIA' THEN 0 ELSE 1 END")
+            ->latest()
+            ->limit($limit)
+            ->get();
     }
 
     /**
@@ -559,6 +602,7 @@ class NotificationsService extends BaseService
             $alertDate = $today->copy()->addDays(self::EXPIRY_ALERT_DAYS);
 
             $query = Vehicle::query()
+                ->where('vehicles.is_active', true)
                 ->with([
                     'thirdParty',
                     'vehicleDocuments',
@@ -691,7 +735,7 @@ class NotificationsService extends BaseService
             $today = Carbon::today();
             $alertDate = $today->copy()->addDays(self::EXPIRY_ALERT_DAYS);
 
-            $vehiclesQuery = Vehicle::query()->with(['thirdParty', 'operationCards']);
+            $vehiclesQuery = Vehicle::query()->where('vehicles.is_active', true)->with(['thirdParty', 'operationCards']);
 
             if ($companyUuid) {
                 $vehiclesQuery->where('vehicles.company_uuid', $companyUuid);
@@ -866,6 +910,7 @@ class NotificationsService extends BaseService
             $alertDate = $now->copy()->addDays(self::RTM_ALERT_DAYS);
 
             $query = Vehicle::query()
+                ->where('vehicles.is_active', true)
                 ->with(['thirdParty:uuid,company_uuid,first_name,last_name,trade_name'])
                 ->whereNotNull('registration_date')
                 ->whereDoesntHave('vehicleDocuments', function ($q) {
@@ -946,6 +991,7 @@ class NotificationsService extends BaseService
             $alertDate = $today->copy()->addDays(self::AGREEMENT_ALERT_DAYS);
 
             $query = BusinessCollaborationAgreement::query()
+                ->whereHas('vehicle', fn ($vq) => $vq->where('vehicles.is_active', true))
                 ->with(['vehicle:uuid,vehicle_license_plate,third_party_uuid', 'vehicle.thirdParty:uuid,company_uuid']);
 
             if ($companyUuid) {
@@ -1030,6 +1076,7 @@ class NotificationsService extends BaseService
             $alertDate = $today->copy()->addDays(self::EXPIRY_ALERT_DAYS);
 
             $query = AffiliateAdminCharge::query()
+                ->whereHas('vehicle', fn ($vq) => $vq->where('vehicles.is_active', true))
                 ->with(['vehicle.thirdParty'])
                 ->where('status', '!=', 'PAGADO');
 
@@ -1297,7 +1344,7 @@ class NotificationsService extends BaseService
     {
         try {
             $today = Carbon::today();
-            $vehiclesQuery = Vehicle::query();
+            $vehiclesQuery = Vehicle::query()->where('vehicles.is_active', true);
 
             if ($companyUuid) {
                 $vehiclesQuery->where('vehicles.company_uuid', $companyUuid);
@@ -1346,7 +1393,7 @@ class NotificationsService extends BaseService
     public function notificationsForPreventativeMaintenance(?string $companyUuid = null, ?string $thirdPartyUuid = null): array
     {
         try {
-            $vehiclesQuery = Vehicle::query();
+            $vehiclesQuery = Vehicle::query()->where('vehicles.is_active', true);
 
             if ($companyUuid) {
                 $vehiclesQuery->where('company_uuid', $companyUuid);

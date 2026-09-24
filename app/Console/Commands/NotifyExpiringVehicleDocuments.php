@@ -19,7 +19,7 @@ class NotifyExpiringVehicleDocuments extends Command
      *
      * @var string
      */
-    protected $description = 'Notifica a los propietarios sobre documentos de vehículos próximos a vencer o vencidos';
+    protected $description = 'Envía el digest consolidado de vencimientos al correo principal de cada empresa';
 
     /**
      * Execute the console command.

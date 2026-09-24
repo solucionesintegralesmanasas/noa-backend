@@ -49,6 +49,8 @@ class UpdateSystemConfigurationRequest extends FormRequest
             'activate_notifications' => 'sometimes|boolean',
             'notify_by_email' => 'sometimes|boolean',
             'notification_email' => 'nullable|email|max:191',
+            'own_company_names' => 'nullable|array',
+            'own_company_names.*' => 'nullable|string|max:255',
             'fuec_pdf_show_signatures' => 'nullable|boolean',
             'fuec_pdf_show_contractor_details' => 'nullable|boolean',
             'fuec_pdf_show_route_details' => 'nullable|boolean',

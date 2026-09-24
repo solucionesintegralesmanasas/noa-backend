@@ -9,16 +9,24 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class VehicleDocumentExpiringMail extends Mailable
+/**
+ * Digest consolidado de documentos próximos a vencer o vencidos.
+ * Lista en un solo correo los vehículos, documentos y fechas de vencimiento.
+ */
+class VehicleExpiryDigestMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     /**
      * Create a new message instance.
+     *
+     * @param  array<int, array{placa: string, documento: string, fecha: string, days_left: int, estado: string}>  $items
      */
     public function __construct(
-        public mixed $document,
-        public string $milestone
+        public string $companyName,
+        public array $items,
+        public string $asunto,
+        public string $intro
     ) {}
 
     /**
@@ -26,11 +34,8 @@ class VehicleDocumentExpiringMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $docType = $this->document->document_type ?? 'Documento';
-        $plate = $this->document->vehicle->vehicle_license_plate ?? 'N/A';
-
         return new Envelope(
-            subject: "Alerta de Vencimiento: {$docType} - {$plate}",
+            subject: $this->asunto,
         );
     }
 
@@ -40,9 +45,11 @@ class VehicleDocumentExpiringMail extends Mailable
     public function content(): Content
     {
         return new Content(
-            view: 'emails.vehicle-documents.expiring',
+            view: 'emails.vehicle-documents.digest',
             with: [
-                'document' => $this->document,
+                'companyName' => $this->companyName,
+                'items' => $this->items,
+                'intro' => $this->intro,
             ],
         );
     }
