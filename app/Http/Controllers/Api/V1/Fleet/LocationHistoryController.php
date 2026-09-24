@@ -93,7 +93,8 @@ class LocationHistoryController extends Controller
     }
 
     /**
-     * El rango máximo es 31 días (ARQ-002): acota el peor caso de escaneo.
+     * El rango máximo es LocationHistoryService::RANGO_MAXIMO_DIAS (ARQ-002):
+     * acota el peor caso de escaneo.
      */
     private function validarRango(string $startDate, string $endDate): void
     {
@@ -101,8 +102,8 @@ class LocationHistoryController extends Controller
         $dias = abs(Carbon::parse($startDate)->startOfDay()
             ->diffInDays(Carbon::parse($endDate)->endOfDay()));
 
-        if ($dias > 31) {
-            abort(422, 'El rango máximo permitido es de 31 días.');
+        if ($dias > LocationHistoryService::RANGO_MAXIMO_DIAS) {
+            abort(422, 'El rango máximo permitido es de ' . LocationHistoryService::RANGO_MAXIMO_DIAS . ' días.');
         }
     }
 
@@ -125,10 +126,18 @@ class LocationHistoryController extends Controller
     {
         $validated = $request->validate([
             'start_date' => ['sometimes', 'date'],
-            'end_date' => ['sometimes', 'date', 'after_or_equal:start_date'],
+            'end_date' => ['sometimes', 'date'],
         ]);
 
-        if (isset($validated['start_date'], $validated['end_date'])) {
+        $conInicio = isset($validated['start_date']);
+        $conFin = isset($validated['end_date']);
+        if ($conInicio !== $conFin) {
+            abort(422, 'Envía start_date y end_date juntos para filtrar por rango.');
+        }
+        if ($conInicio && $conFin) {
+            if (Carbon::parse($validated['end_date'])->lt(Carbon::parse($validated['start_date']))) {
+                abort(422, 'end_date debe ser posterior o igual a start_date.');
+            }
             $this->validarRango($validated['start_date'], $validated['end_date']);
         }
 
