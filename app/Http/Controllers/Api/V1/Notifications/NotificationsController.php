@@ -41,6 +41,7 @@ class NotificationsController extends Controller
             new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'status', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['PENDIENTE', 'LEIDA'])),
             new OA\Parameter(name: 'type', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'priority', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['PRIORITARIA', 'NORMAL'])),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
@@ -57,8 +58,9 @@ class NotificationsController extends Controller
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $status = $request->query('status');
             $type = $request->query('type');
+            $priority = $request->query('priority');
 
-            $data = $this->notificationsService->getNotificationsWithPagination($perPage, $page, $search, $companyUuid, $status, $type);
+            $data = $this->notificationsService->getNotificationsWithPagination($perPage, $page, $search, $companyUuid, $status, $type, $priority);
 
             return $this->successResponse($data, 'Listado paginado de notificaciones recuperado con éxito.');
         } catch (\Throwable $e) {

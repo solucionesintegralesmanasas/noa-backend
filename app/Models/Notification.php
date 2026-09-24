@@ -51,6 +51,7 @@ class Notification extends Model
         'title',
         'message',
         'status',
+        'priority',
         'entity_uuid',
         'entity_type',
         'days_left',
