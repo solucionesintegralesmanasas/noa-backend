@@ -13,6 +13,7 @@ use App\Models\VehicleDocument;
 use App\Services\BaseService;
 use App\Utils\OwnCompany;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -107,32 +108,48 @@ class EmailLogService extends BaseService
             );
         }
 
-        // 2. Proceso real: ventana de 5 días, día cero y vencidos.
-        $ventana = array_values(array_filter($items, fn (array $item) => $item['days_left'] <= self::WINDOW_DAYS));
-        if (empty($ventana)) {
-            return;
+        // 2. Proceso real: próximos (5 a 1 día) y críticos (hoy y vencidos).
+        // Cada grupo tiene su propia cadencia para no mezclarlos.
+        $proximos = array_values(array_filter(
+            $items,
+            fn (array $item) => $item['days_left'] >= 1 && $item['days_left'] <= self::WINDOW_DAYS
+        ));
+        $criticos = array_values(array_filter($items, fn (array $item) => $item['days_left'] <= 0));
+
+        // 2a. Digest diario de próximos: una vez al día, en cualquier corrida.
+        if (! empty($proximos) && ! $this->digestEnviado($companyUuid, self::SLOT_DIARIO, $today)) {
+            $this->enviarDigest(
+                $config,
+                $email,
+                $proximos,
+                self::SLOT_DIARIO,
+                "Vencimientos próximos - {$companyName}",
+                'Estos documentos vencen en 5 días o menos. Se envía un reporte diario.',
+                false
+            );
         }
 
-        $criticos = array_filter($ventana, fn (array $item) => $item['days_left'] <= 0);
+        // 2b. Digest crítico: dos al día según la franja. Fuera de franja
+        // solo se omite este digest, nunca el diario de próximos.
         if (! empty($criticos)) {
             $slot = $this->slotPorHora((int) $now->hour);
             if ($slot === null) {
                 return;
             }
+            if ($this->digestEnviado($companyUuid, $slot, $today)) {
+                return;
+            }
             $etiqueta = $slot === self::SLOT_MANANA ? ' (mañana)' : ' (tarde)';
-            $asunto = "Vencimientos de documentos{$etiqueta} - {$companyName}";
-            $intro = 'Hay documentos vencidos o que vencen hoy. Se envían dos reportes al día (mañana y tarde) hasta ponerse al día.';
-        } else {
-            $slot = self::SLOT_DIARIO;
-            $asunto = "Vencimientos próximos - {$companyName}";
-            $intro = 'Estos documentos vencen en 5 días o menos. Se envía un reporte diario.';
+            $this->enviarDigest(
+                $config,
+                $email,
+                $criticos,
+                $slot,
+                "Vencimientos de documentos{$etiqueta} - {$companyName}",
+                'Hay documentos vencidos o que vencen hoy. Se envían dos reportes al día (mañana y tarde) hasta ponerse al día.',
+                false
+            );
         }
-
-        if ($this->digestEnviado($companyUuid, $slot, $today)) {
-            return;
-        }
-
-        $this->enviarDigest($config, $email, $ventana, $slot, $asunto, $intro, false);
     }
 
     /**
@@ -169,15 +186,23 @@ class EmailLogService extends BaseService
                         );
                     }
 
-                    $tarjeta = $vehicle->operationCards
+                    $tarjetas = $vehicle->operationCards
+                        ->filter(fn (OperationCard $t) => $t->expiration_date !== null)
                         ->sortByDesc(fn (OperationCard $t) => (string) $t->expiration_date)
-                        ->first();
+                        ->values();
 
-                    if ($tarjeta && $tarjeta->expiration_date) {
+                    // Siempre la tarjeta más reciente; además, cualquier otra
+                    // tarjeta vigente (las vencidas no recientes están superadas
+                    // y no deben revivir en el reporte).
+                    foreach ($tarjetas as $indice => $tarjeta) {
+                        $vencimiento = Carbon::parse($tarjeta->expiration_date)->startOfDay();
+                        if ($indice > 0 && $vencimiento->lt($today)) {
+                            continue;
+                        }
                         $items[] = $this->armarItem(
                             (string) $vehicle->vehicle_license_plate,
                             'Tarjeta de Operación #'.($tarjeta->operating_card_number ?? ''),
-                            Carbon::parse($tarjeta->expiration_date)->startOfDay(),
+                            $vencimiento,
                             $today,
                             OperationCard::class,
                             (string) $tarjeta->uuid
@@ -268,26 +293,35 @@ class EmailLogService extends BaseService
             Mail::to($email)->send(new VehicleExpiryDigestMail($companyName, $items, $asunto, $intro));
             Log::info("Digest de vencimientos enviado a {$email} | Empresa: {$config->company_uuid} | Slot: {$slot} | Items: ".count($items));
 
-            if ($porEntidad) {
-                foreach ($items as $item) {
+            try {
+                if ($porEntidad) {
+                    foreach ($items as $item) {
+                        EmailNotificationLog::create([
+                            'company_uuid' => $config->company_uuid,
+                            'entity_type' => $item['entity_type'],
+                            'entity_uuid' => $item['entity_uuid'],
+                            'recipient_email' => $email,
+                            'milestone' => $slot,
+                            'sent_date' => Carbon::today(),
+                            'status' => 'sent',
+                        ]);
+                    }
+                } else {
                     EmailNotificationLog::create([
                         'company_uuid' => $config->company_uuid,
-                        'entity_type' => $item['entity_type'],
-                        'entity_uuid' => $item['entity_uuid'],
                         'recipient_email' => $email,
                         'milestone' => $slot,
                         'sent_date' => Carbon::today(),
                         'status' => 'sent',
                     ]);
                 }
-            } else {
-                EmailNotificationLog::create([
-                    'company_uuid' => $config->company_uuid,
-                    'recipient_email' => $email,
-                    'milestone' => $slot,
-                    'sent_date' => Carbon::today(),
-                    'status' => 'sent',
-                ]);
+            } catch (QueryException $e) {
+                // Otra ejecución registró el mismo slot/entidad primero:
+                // el correo ya salió y el constraint evitó el duplicado.
+                if (($e->errorInfo[1] ?? null) !== 1062) {
+                    throw $e;
+                }
+                Log::info("Digest {$slot} ya registrado para {$email}; se evita el duplicado.");
             }
         } catch (\Exception $e) {
             Log::error("Error enviando digest de vencimientos a {$email}: ".$e->getMessage());

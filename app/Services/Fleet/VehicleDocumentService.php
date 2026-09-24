@@ -7,7 +7,6 @@ namespace App\Services\Fleet;
 use App\Models\VehicleDocument;
 use App\Models\Vehicle;
 use App\Services\BaseService;
-use App\Services\Notifications\EmailLogService;
 use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -264,15 +263,14 @@ class VehicleDocumentService extends BaseService
             try {
                 $document->load(['vehicle.thirdParty', 'company']);
 
-                // 1. Enviar correo instantáneo si aplica
-                app(EmailLogService::class)->processSingleDocument($document);
-
-                // 2. Eliminar la notificación de "FALTANTE" en la campanita web
+                // 1. Eliminar la notificación de "FALTANTE" en la campanita web
                 $hash = md5($document->vehicle_uuid.'_'.$document->document_type);
                 $entityUuid = sprintf('%08s-%04s-%04s-%04s-%12s', substr($hash, 0, 8), substr($hash, 8, 4), substr($hash, 12, 4), substr($hash, 16, 4), substr($hash, 20, 12));
                 app(NotificationsService::class)->deleteByEntity($entityUuid, 'VEHICLE_DOCUMENT');
 
-                // 3. Sincronizar notificaciones de la empresa de forma inmediata
+                // 2. Sincronizar notificaciones de la empresa de forma inmediata.
+                // El aviso por correo lo cubre el digest consolidado (EmailLogService),
+                // que corre en la mañana y en la tarde con su propia cadencia.
                 app(NotificationsService::class)->syncNotifications($document->company_uuid);
 
             } catch (\Exception $e) {
@@ -307,13 +305,11 @@ class VehicleDocumentService extends BaseService
             try {
                 $record->load(['vehicle.thirdParty', 'company']);
 
-                // 1. Enviar correo instantáneo de la nueva fecha si aplica
-                app(EmailLogService::class)->processSingleDocument($record);
-
-                // 2. Limpiar alertas previas ("VENCIDO" / "POR VENCER") en la campanita web
+                // 1. Limpiar alertas previas ("VENCIDO" / "POR VENCER") en la campanita web
                 app(NotificationsService::class)->deleteByEntity($record->uuid, 'VEHICLE_DOCUMENT');
 
-                // 3. Sincronizar notificaciones de la empresa de forma inmediata
+                // 2. Sincronizar notificaciones de la empresa de forma inmediata.
+                // El aviso por correo lo cubre el digest consolidado (EmailLogService).
                 app(NotificationsService::class)->syncNotifications($record->company_uuid);
 
             } catch (\Exception $e) {
