@@ -82,6 +82,21 @@ class NotificationsService extends BaseService
     }
 
     /**
+     * Traduce el tipo de documento al slug que usan las rutas del frontend.
+     * El formulario de documentos renderiza sus secciones por slug, no por
+     * el tipo crudo (SOAT/RTM/RCC/RCE), así que el enlace debe usar el slug.
+     */
+    private function slugDocumento(string $docType): ?string
+    {
+        return match (strtoupper(trim($docType))) {
+            'SOAT' => 'soat',
+            'RTM' => 'tecnomecanica',
+            'RCC', 'RCE' => 'poliza',
+            default => null,
+        };
+    }
+
+    /**
      * Construye el enlace útil de una alerta: el dato que la ata (placa,
      * licencia o nombre) apunta a la vista donde se corrige o se registra.
      * El label devuelto es siempre un substring exacto del mensaje.
@@ -93,14 +108,15 @@ class NotificationsService extends BaseService
             case 'VEHICLE_DOCUMENT':
                 $placa = (string) ($alert['vehicle_license_plate'] ?? '');
                 $docType = (string) ($alert['document_type'] ?? '');
-                if ($placa === '' || $docType === '') {
+                $slug = $this->slugDocumento($docType);
+                if ($placa === '' || $slug === null) {
                     return null;
                 }
                 $docUuid = $alert['document_uuid'] ?? null;
                 if ($docUuid) {
                     return [
                         'label' => $placa,
-                        'path' => '/vehiculos-documentos/editar/'.$docUuid,
+                        'path' => '/vehiculos-documentos/'.$slug.'/editar/'.$docUuid,
                         'permission' => 'vehicle_documents.update',
                         'aria_label' => "Editar el documento {$docType} del vehículo {$placa}",
                     ];
@@ -112,7 +128,7 @@ class NotificationsService extends BaseService
 
                 return [
                     'label' => $placa,
-                    'path' => '/vehiculos-documentos/'.rawurlencode($docType).'/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
+                    'path' => '/vehiculos-documentos/'.$slug.'/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
                     'permission' => 'vehicle_documents.create',
                     'aria_label' => "Registrar el documento {$docType} del vehículo {$placa}",
                 ];
@@ -139,7 +155,7 @@ class NotificationsService extends BaseService
 
                 return [
                     'label' => $placa,
-                    'path' => '/tarjetas-de-operacion/crear?'.http_build_query(['wizard' => $vUuid]),
+                    'path' => '/tarjetas-de-operacion/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
                     'permission' => 'operation_cards.create',
                     'aria_label' => "Registrar la tarjeta de operación del vehículo {$placa}",
                 ];
@@ -153,7 +169,7 @@ class NotificationsService extends BaseService
 
                 return [
                     'label' => $placa,
-                    'path' => '/vehiculos-documentos/RTM/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
+                    'path' => '/vehiculos-documentos/tecnomecanica/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
                     'permission' => 'vehicle_documents.create',
                     'aria_label' => "Registrar la RTM del vehículo {$placa}",
                 ];
