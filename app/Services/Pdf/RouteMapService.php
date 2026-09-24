@@ -22,6 +22,12 @@ class RouteMapService
 {
     private const MAX_POINTS_URL = 100;
 
+    /**
+     * Tope de puntos para el dibujo del respaldo GD (ARQ-002): una imagen de
+     * 900x380 no gana detalle con más puntos y el trazado es O(n).
+     */
+    private const MAX_POINTS_DRAW = 1000;
+
     private const MAP_WIDTH = 900;
 
     private const MAP_HEIGHT = 380;
@@ -69,8 +75,12 @@ class RouteMapService
             ];
         }
 
+        // El dibujo se diezma: más puntos no aportan detalle visible.
+        // Las estadísticas se calculan sobre el conjunto completo.
+        $dibujo = $this->simplificar($coords, self::MAX_POINTS_DRAW);
+
         try {
-            $base64 = $this->descargarMapaOsm($coords);
+            $base64 = $this->descargarMapaOsm($dibujo);
             if (! empty($base64)) {
                 return [
                     'imagen_base64' => $base64,
@@ -84,7 +94,7 @@ class RouteMapService
         }
 
         return [
-            'imagen_base64' => $this->generarPngRespaldo($coords),
+            'imagen_base64' => $this->generarPngRespaldo($dibujo),
             'mime' => 'image/png',
             'sin_datos' => false,
             'stats' => $stats,
@@ -167,7 +177,8 @@ class RouteMapService
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_FOLLOWLOCATION => true,
             CURLOPT_TIMEOUT => $timeout,
-            CURLOPT_CONNECTTIMEOUT => 4,
+            // Fallo rápido en conexión: el respaldo GD no debe esperar 4 s.
+            CURLOPT_CONNECTTIMEOUT => min(2, $timeout),
             CURLOPT_USERAGENT => 'NOA-Transportes/1.0 (reporte PDF recorrido GPS)',
         ]);
         $contenido = curl_exec($ch);

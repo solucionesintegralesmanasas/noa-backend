@@ -230,19 +230,27 @@ class LocationHistoryService extends BaseService
     }
 
     /**
+     * Tope de seguridad para el mapa del PDF diario (ARQ-002): un día rara vez
+     * supera unos miles de puntos y la imagen no representa más detalle.
+     */
+    public const PDF_MAPA_MAX_PUNTOS = 5000;
+
+    /**
      * Obtiene el recorrido GPS de un vehículo dentro de un proyecto para un día específico.
      * Filtro usado por el PDF diario de planilla: vehicle_uuid + project_uuid + fecha de servicio.
      *
      * @param  string|null  $vehicleUuid  UUID del vehículo (puede ser nulo para subcontratados sin uuid)
      * @param  string|null  $projectUuid  UUID del proyecto
-     * @param  string|\Illuminate\Support\Carbon  $serviceDate  Fecha del servicio (Y-m-d)
+     * @param  string|\Illuminate\Support\Carbon  $serviceDate  Fecha de servicio (Y-m-d)
      * @param  string|null  $companyUuid  UUID de la empresa (opcional)
+     * @param  int  $maxPoints  Tope de puntos cargados (solo lo usa el mapa del PDF)
      */
     public function getVehicleProjectDayHistory(
         ?string $vehicleUuid,
         ?string $projectUuid,
         mixed $serviceDate,
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        int $maxPoints = self::PDF_MAPA_MAX_PUNTOS
     ): \Illuminate\Support\Collection {
         $day = Carbon::parse($serviceDate);
 
@@ -262,6 +270,6 @@ class LocationHistoryService extends BaseService
             $query->where('company_uuid', $companyUuid);
         }
 
-        return $query->get(['latitude', 'longitude', 'speed', 'recorded_at', 'vehicle_uuid', 'project_uuid']);
+        return $query->limit($maxPoints)->get(['latitude', 'longitude', 'speed', 'recorded_at', 'vehicle_uuid', 'project_uuid']);
     }
 }
