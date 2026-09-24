@@ -896,6 +896,7 @@ Route::prefix('v1')->group(function () {
         // ─── MÓDULO NOTIFICACIONES ───
         Route::prefix('notifications')->group(function () {
             Route::get('/', [NotificationsController::class, 'index'])->name('api.v1.notifications.index');
+            Route::get('/counts', [NotificationsController::class, 'counts'])->name('api.v1.notifications.counts');
             Route::post('/sync', [NotificationsController::class, 'sync'])->name('api.v1.notifications.sync');
             Route::post('/read-all', [NotificationsController::class, 'markAllAsRead'])->name('api.v1.notifications.read-all');
             Route::patch('/{uuid}/toggle-status', [NotificationsController::class, 'toggleStatus'])->name('api.v1.notifications.toggle-status');

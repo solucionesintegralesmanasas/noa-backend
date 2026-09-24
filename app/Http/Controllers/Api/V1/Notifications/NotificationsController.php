@@ -68,6 +68,33 @@ class NotificationsController extends Controller
         }
     }
 
+    #[OA\Get(
+        path: '/api/v1/notifications/counts',
+        summary: 'Contar notificaciones pendientes agrupadas por prioridad',
+        operationId: 'countNotificationsByPriority',
+        tags: ['Notificaciones'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Conteos recuperados con éxito.'),
+            new OA\Response(response: 401, description: 'No autorizado.'),
+            new OA\Response(response: 500, description: 'Error interno del servidor.'),
+        ]
+    )]
+    public function counts(Request $request): JsonResponse
+    {
+        try {
+            $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
+            $data = $this->notificationsService->getUnreadCountsByPriority($companyUuid);
+
+            return $this->successResponse($data, 'Conteos de notificaciones recuperados con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     #[OA\Patch(
         path: '/api/v1/notifications/{uuid}/toggle-status',
         summary: 'Alternar el estado de lectura de una notificación',
