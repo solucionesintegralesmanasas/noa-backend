@@ -1614,6 +1614,10 @@ class PdfService
                 throw new ModelNotFoundException('Sin fechas cerradas para los filtros indicados.');
             }
 
+            // El tope de 500 nunca es silencioso: se cuenta el total con los mismos filtros.
+            $totalPlanillas = (clone $query)->count();
+            $truncado = $totalPlanillas > 500;
+
             $company = $sheets->first()->company;
             $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
             $empresaTransportadora = $company?->business_name ?? 'TRANSPORTES SIN BARRERAS S.A.S.';
@@ -1723,6 +1727,14 @@ class PdfService
             $firmaRec = collect($base64Sigs)->first(fn ($v, $k) => str_starts_with($k, 'rc_') && ! empty($v))
                 ?? collect(array_column($dias, 'firma_funcionario'))->first(fn ($v) => ! empty($v));
 
+            // El encabezado muestra TODOS los proyectos del rango, no solo el de
+            // la primera planilla: un rango puede cruzar varios proyectos.
+            $proyectosDistintos = $sheets->map(fn ($s) => $s->project?->project_name)
+                ->filter()->unique()->values();
+            $proyectoCabecera = $proyectosDistintos->count() === 1
+                ? $proyectosDistintos->first()
+                : 'VARIOS ('.$proyectosDistintos->count().'): '.$proyectosDistintos->implode(' / ');
+
             $data = [
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
@@ -1736,10 +1748,10 @@ class PdfService
                 'nit' => $company?->document_number ?? 'N/A',
                 'empresa' => $empresaTransportadora,
                 'dias' => $dias,
-                'observaciones' => 'Reporte '.strtoupper($tipo).' | Días cerrados: '.$sheets->count().' | Filas: '.count($dias),
+                'observaciones' => 'Reporte '.strtoupper($tipo).' | Días cerrados: '.$sheets->count().' | Filas: '.count($dias).($truncado ? ' | MOSTRANDO 500 DE '.$totalPlanillas : ''),
                 'firma_conductor' => $firmaCond,
                 'firma_recibido' => $firmaRec,
-                'proyecto' => $sheets->first()->project?->project_name,
+                'proyecto' => $proyectoCabecera,
                 'proyecto_vigencia' => null,
             ];
 
@@ -1750,6 +1762,8 @@ class PdfService
                 'pdf' => $pdf,
                 'file_name' => 'Reporte_Control_'.ucfirst($tipo).'_'.now()->format('Ymd_His').'.pdf',
                 'total_dias' => $sheets->count(),
+                'total_planillas' => $totalPlanillas,
+                'truncado' => $truncado,
             ];
         } catch (\Exception $e) {
             Logger::error('PdfService@generateFilteredServiceControlSheetPdf error: '.$e->getMessage(), $e);
