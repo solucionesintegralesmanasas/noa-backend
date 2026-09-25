@@ -120,4 +120,5 @@ cerradas empezará a fallar 422 —intencionado, pero probar antes de desplegar 
 
 1. **DECIDIDA — firmas por ruta incluidas:** la regla §5 evalúa cada recorrido con sus dos firmas
    (funcionario + conductor), además de las 3 de planilla/coordinador.
-2. **ABIERTA — rol para `CERRADA_CON_EXCEPCION`:** ¿`ADMIN_EMPRESA`, `SUPERADMIN`, o ambos?
+2. **DECIDIDA — `CERRADA_CON_EXCEPCION` la aprueban ambos roles:** `ADMIN_EMPRESA` y `SUPERADMIN`
+   (permiso dedicado `service_delivery_control_sheets.close_exception`, §7.6).

@@ -55,17 +55,37 @@ class SignatureService extends BaseService
 
     /**
      * Método store.
+     *
+     * SPEC-002 §7.3: si la firma trae signer_role, la anterior vigente del mismo
+     * rol se marca como 'reemplazada' en vez de duplicarse. Nunca se borra: la
+     * evidencia histórica debe conservarse.
      */
     public function store(array $data): Signature
     {
         return $this->transaction(function () use ($data) {
             $path = $this->savePng($data['signature']);
 
+            $rol = $data['signer_role'] ?? null;
+
+            if ($rol !== null && ! empty($data['entity_id'])) {
+                Signature::query()
+                    ->where('entity_type', $data['entity_type'])
+                    ->where('entity_id', $data['entity_id'])
+                    ->where('signer_role', $rol)
+                    ->where('status', Signature::STATUS_VIGENTE)
+                    ->update(['status' => Signature::STATUS_REEMPLAZADA]);
+            }
+
             /** @var Signature $signature */
             $signature = $this->model->create([
                 'uuid' => Str::uuid()->toString(),
                 'entity_type' => $data['entity_type'],
                 'entity_id' => $data['entity_id'],
+                'signer_role' => $rol,
+                'scope' => $data['scope'] ?? null,
+                'status' => Signature::STATUS_VIGENTE,
+                'signed_at' => $data['signed_at'] ?? now(),
+                'signer_uuid' => $data['signer_uuid'] ?? null,
                 'company_uuid' => $data['company_uuid'],
                 'path' => $path,
                 'disk' => self::DISK,

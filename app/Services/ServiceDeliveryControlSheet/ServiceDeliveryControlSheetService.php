@@ -120,6 +120,139 @@ class ServiceDeliveryControlSheetService extends BaseService
             ->get();
     }
 
+    /**
+     * SPEC-002 §7.1 — Firmas que faltan para que la evidencia esté completa.
+     *
+     * Se evalúa por unidad operativa, no por cantidad total de firmas:
+     * - Con recorridos (§5.1): cada recorrido exige funcionario y conductor, más
+     *   los datos operativos (hora fin, km final) o novedad que los excuse.
+     * - Sin recorridos (§5.2, disponibilidad): exige conductor y coordinador.
+     * - El coordinador siempre cuelga del conjunto (certificación administrativa).
+     *
+     * Las firmas se buscan por ROL vigente; nunca por posición ni por exists().
+     *
+     * @return array<int, array{clave: string, etiqueta: string, rol: string}>
+     */
+    public function firmasPendientes(ServiceDeliveryControlSheet $record): array
+    {
+        $pendientes = [];
+
+        $rolesPlanilla = $this->rolesVigentesDe($record->id, 'App\\Models\\ServiceDeliveryControlSheet');
+        $rolesCoordinador = $this->rolesVigentesDe($record->id, 'App\\Models\\ServiceDeliveryControlSheetCoordinator');
+
+        $routes = $record->relationLoaded('routes')
+            ? $record->routes
+            : $record->routes()->orderBy('order_index')->get();
+
+        if ($routes->isNotEmpty()) {
+            $rolesRuta = $this->rolesVigentesDeRutas($routes->pluck('id')->all());
+
+            foreach ($routes as $indice => $route) {
+                $n = $indice + 1;
+                $roles = $rolesRuta[$route->id] ?? [];
+
+                // Datos operativos: sin ellos la firma sola no certifica el recorrido.
+                if (empty($route->end_time)) {
+                    $pendientes[] = [
+                        'clave' => 'ruta:'.$route->uuid.':hora_fin',
+                        'etiqueta' => "Recorrido {$n}: falta hora de llegada",
+                        'rol' => null,
+                    ];
+                }
+                if (($route->ending_kilometer === null || $route->ending_kilometer === '') && empty($route->end_novelty)) {
+                    $pendientes[] = [
+                        'clave' => 'ruta:'.$route->uuid.':km_final',
+                        'etiqueta' => "Recorrido {$n}: falta kilometraje final (o novedad que lo excuse)",
+                        'rol' => null,
+                    ];
+                }
+                if (empty($route->funcionario_nombre) || empty($route->funcionario_cc)) {
+                    $pendientes[] = [
+                        'clave' => 'ruta:'.$route->uuid.':funcionario_datos',
+                        'etiqueta' => "Recorrido {$n}: falta identificar al funcionario",
+                        'rol' => null,
+                    ];
+                }
+                if (! isset($roles[Signature::ROL_FUNCIONARIO])) {
+                    $pendientes[] = [
+                        'clave' => 'ruta:'.$route->uuid.':'.Signature::ROL_FUNCIONARIO,
+                        'etiqueta' => "Recorrido {$n}: falta firma del funcionario",
+                        'rol' => Signature::ROL_FUNCIONARIO,
+                    ];
+                }
+                if (! isset($roles[Signature::ROL_CONDUCTOR])) {
+                    $pendientes[] = [
+                        'clave' => 'ruta:'.$route->uuid.':'.Signature::ROL_CONDUCTOR,
+                        'etiqueta' => "Recorrido {$n}: falta firma del conductor",
+                        'rol' => Signature::ROL_CONDUCTOR,
+                    ];
+                }
+            }
+        } else {
+            // Disponibilidad: no hay(funcionario/ruta) que firmar; el conductor sí.
+            if (! isset($rolesPlanilla[Signature::ROL_CONDUCTOR])) {
+                $pendientes[] = [
+                    'clave' => 'planilla:'.Signature::ROL_CONDUCTOR,
+                    'etiqueta' => 'Falta firma del conductor',
+                    'rol' => Signature::ROL_CONDUCTOR,
+                ];
+            }
+        }
+
+        if (! isset($rolesCoordinador[Signature::ROL_COORDINADOR])) {
+            $pendientes[] = [
+                'clave' => 'coordinador',
+                'etiqueta' => 'Falta firma del coordinador',
+                'rol' => Signature::ROL_COORDINADOR,
+            ];
+        }
+
+        return $pendientes;
+    }
+
+    /**
+     * Roles con firma vigente de una entidad (1 consulta por entidad).
+     *
+     * @return array<string, Signature>
+     */
+    private function rolesVigentesDe(int $entityId, string $entityType): array
+    {
+        return Signature::query()
+            ->where('entity_type', $entityType)
+            ->where('entity_id', $entityId)
+            ->where('status', Signature::STATUS_VIGENTE)
+            ->whereNotNull('signer_role')
+            ->get()
+            ->keyBy('signer_role')
+            ->all();
+    }
+
+    /**
+     * Roles vigentes de varias rutas en una sola consulta (evita N+1).
+     *
+     * @param  array<int>  $routeIds
+     * @return array<int, array<string, Signature>>
+     */
+    private function rolesVigentesDeRutas(array $routeIds): array
+    {
+        if (empty($routeIds)) {
+            return [];
+        }
+
+        $porRuta = [];
+        Signature::query()
+            ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetRoute')
+            ->whereIn('entity_id', $routeIds)
+            ->where('status', Signature::STATUS_VIGENTE)
+            ->whereNotNull('signer_role')
+            ->get()
+            ->each(function (Signature $sig) use (&$porRuta): void {
+                $porRuta[$sig->entity_id][$sig->signer_role] = $sig;
+            });
+
+        return $porRuta;
+    }
+
     private function resolveControlStatus(Model $record): string
     {
         $total = (int) ($record->children_total ?? 0);
@@ -519,18 +652,16 @@ class ServiceDeliveryControlSheetService extends BaseService
             'end_novelty' => $closure['end_novelty'] ?? null,
         ]);
 
-        if (! empty($closure['funcionario_signature']) || ! empty($closure['conductor_signature'])) {
-            \App\Models\Signature::where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetRoute')
-                ->where('entity_id', $route->id)
-                ->delete();
-        }
-
+        // SPEC-002 §7.3: ya no se borran las firmas anteriores. La firma que llega
+        // reemplaza solo la de SU rol; un reenvío parcial conserva la otra.
         if (! empty($closure['funcionario_signature'])) {
             $this->signatureService->store([
                 'signature' => $closure['funcionario_signature'],
                 'entity_type' => 'App\\Models\\ServiceDeliveryControlSheetRoute',
                 'entity_id' => $route->id,
                 'company_uuid' => $companyUuid,
+                'signer_role' => \App\Models\Signature::ROL_FUNCIONARIO,
+                'scope' => 'recorrido',
             ]);
         }
 
@@ -540,6 +671,8 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'entity_type' => 'App\\Models\\ServiceDeliveryControlSheetRoute',
                 'entity_id' => $route->id,
                 'company_uuid' => $companyUuid,
+                'signer_role' => \App\Models\Signature::ROL_CONDUCTOR,
+                'scope' => 'recorrido',
             ]);
         }
     }
@@ -767,6 +900,8 @@ class ServiceDeliveryControlSheetService extends BaseService
                     'entity_type' => 'App\\Models\\ServiceDeliveryControlSheet',
                     'entity_id' => $record->id,
                     'company_uuid' => $record->company_uuid,
+                    'signer_role' => \App\Models\Signature::ROL_FUNCIONARIO,
+                    'scope' => 'planilla',
                 ]);
             }
 
@@ -776,6 +911,8 @@ class ServiceDeliveryControlSheetService extends BaseService
                     'entity_type' => 'App\\Models\\ServiceDeliveryControlSheet',
                     'entity_id' => $record->id,
                     'company_uuid' => $record->company_uuid,
+                    'signer_role' => \App\Models\Signature::ROL_CONDUCTOR,
+                    'scope' => 'planilla',
                 ]);
             }
 
