@@ -121,6 +121,28 @@ class ServiceDeliveryControlSheetService extends BaseService
     }
 
     /**
+     * SPEC-002 §7.2 — Congelamiento de la evidencia al cerrar.
+     *
+     * Una planilla cerrada es la evidencia administrativa del día: si admite
+     * cambios, el PDF que se reimprime deja de coincidir con el que ya se entregó.
+     * La UI siempre ocultó la edición cuando is_active=false, pero nada lo
+     * garantizaba en el backend: estas guardas son el congelamiento real.
+     *
+     * Siguen permitidos después del cierre (ver §7.2): la firma del coordinador
+     * por enlace público y las firmas por recorrido vía closeRoute.
+     */
+    private function asegurarEditable(Model $record, string $campo): void
+    {
+        if ((bool) $record->is_active) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            $campo => 'La planilla está cerrada y su evidencia ya no puede modificarse.',
+        ]);
+    }
+
+    /**
      * SPEC-002 §5.2 — Reglas de una jornada declarada en disponibilidad.
      *
      * Exige motivo (no basta con "no tener recorridos") y prohíbe recorridos:
@@ -488,15 +510,22 @@ class ServiceDeliveryControlSheetService extends BaseService
             }
         }
 
-        if ($candidatas->isEmpty()) {
+        $binario = $this->decodificarImagenMapa($imageBase64);
+        // SPEC-002 §7.2: la evidencia de un día cerrado no se toca. Las candidatas
+        // cerradas se descartan; si solo había cerradas, se explica por qué.
+        $abiertas = $candidatas->filter(fn ($p) => (bool) $p->is_active)->values();
+        $cerradas = $candidatas->filter(fn ($p) => ! $p->is_active)->values();
+
+        if ($abiertas->isEmpty()) {
             throw ValidationException::withMessages([
-                'service_date' => 'No hay planilla del conductor para esa fecha; no se pudo pegar la captura.',
+                'service_date' => $cerradas->isNotEmpty()
+                    ? 'La planilla de esa fecha ya está cerrada; su evidencia no se puede modificar.'
+                    : 'No hay planilla del conductor para esa fecha; no se pudo pegar la captura.',
             ]);
         }
 
-        $binario = $this->decodificarImagenMapa($imageBase64);
         $pegadas = [];
-        foreach ($candidatas as $planilla) {
+        foreach ($abiertas as $planilla) {
             $this->guardarImagenMapa($planilla, $binario, $fecha);
             $pegadas[] = $planilla->uuid;
         }
@@ -841,6 +870,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
+            $this->asegurarEditable($record, 'update');
             $type = isset($data['type_of_control_sheet']) ? $this->normalizeType($data['type_of_control_sheet']) : $record->type_of_control_sheet;
 
             $newProject = $data['project_uuid'] ?? $record->project_uuid;
@@ -890,6 +920,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     public function deleteServiceDeliveryControlSheet(string $uuid): void
     {
         try {
+            $this->asegurarEditable($this->findByUuid($uuid), 'delete');
             $this->delete($uuid);
         } catch (\Exception $e) {
             Logger::error('ServiceDeliveryControlSheetService@deleteServiceDeliveryControlSheet: '.$e->getMessage());
@@ -922,6 +953,8 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
+            // Evita el doble cierre: reescribiría horas, km y volvería a firmar.
+            $this->asegurarEditable($record, 'close');
 
             $pendingChildren = ServiceDeliveryControlSheet::query()
                 ->where('parent_uuid', $record->uuid)
