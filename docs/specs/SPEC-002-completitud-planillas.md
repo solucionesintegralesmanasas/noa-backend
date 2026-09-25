@@ -108,6 +108,19 @@ Sin imports nuevos de `sweetalert2` (usar `utils/toast.js`).
 - PDF incompleto → 200 y contiene la banda; completo → sin banda.
 - `npm run test` en verde; `php -l` en archivos tocados; recorrido manual UI abierta→cerrada.
 
+### 9.1 Cobertura ejecutada (2026-09-25)
+
+`tests/Unit/PlanillaCerradaTest.php` y `tests/Unit/DisponibilidadDiaTest.php` cubren las reglas de §5.2 y
+§7.2 sin base de datos: congelamiento por campo, rechazo de doble cierre, motivo obligatorio, estados
+excluyentes, no invención de motivo y compatibilidad del histórico. `artisan test`: 19 tests verdes.
+
+**Pendiente de cobertura HTTP (Feature):** los criterios de la lista superior (código 422 real, descarga
+del PDF, firma del coordinador) exigen `RefreshDatabase`, y el esquema **no es compatible con SQLite**:
+`phpunit.xml` apunta a `sqlite :memory:` y hay ~36 sentencias MySQL (`ALTER TABLE ... COMMENT`,
+`MODIFY COLUMN`, `DROP INDEX`) en ~20 migraciones ya aplicadas en producción. Opciones a decidir:
+(a) base de datos de pruebas MySQL dedicada, o (b) hacer portables esas migraciones. No se alteraron
+migraciones aplicadas.
+
 ## 10. Fases
 
 1. Migración + backfill + `firmasPendientes`. 2. Congelamiento + pruebas §9. 3. Idempotencia +
