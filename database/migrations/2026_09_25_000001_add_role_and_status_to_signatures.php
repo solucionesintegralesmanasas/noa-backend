@@ -60,6 +60,21 @@ return new class extends Migration
             self::ENTITY_COORDINADOR => ['scope' => 'planilla', 'roles' => ['coordinador']],
         ];
 
+        // En el histórico, una planilla SIN recorridos era una jornada en
+        // disponibilidad: allí solo firmaba el conductor. Sin esto, su única firma
+        // quedaría rotulada como "funcionario" y el rol se leería al revés.
+        $planillasSinRecorridos = DB::table('service_delivery_control_sheet as s')
+            ->leftJoin(
+                'service_delivery_control_sheet_routes as r',
+                'r.service_delivery_control_sheet_uuid',
+                '=',
+                's.uuid'
+            )
+            ->whereNull('r.id')
+            ->pluck('s.id')
+            ->flip()
+            ->all();
+
         foreach ($tipos as $entityType => $conf) {
             $entidades = DB::table('signatures')
                 ->where('entity_type', $entityType)
@@ -74,12 +89,17 @@ return new class extends Migration
                 $porEntidad[$fila->entity_id][] = $fila;
             }
 
-            foreach ($porEntidad as $filas) {
+            foreach ($porEntidad as $entityId => $filas) {
+                $roles = $conf['roles'];
+                if ($entityType === self::ENTITY_PLANILLA && isset($planillasSinRecorridos[$entityId])) {
+                    $roles = ['conductor'];
+                }
+
                 // Posición -> rol. Solo las dos primeras son inequívocas.
                 $asignado = [];
                 foreach ($filas as $posicion => $fila) {
                     $asignado[$fila->id] = [
-                        'rol' => $conf['roles'][$posicion] ?? null,
+                        'rol' => $roles[$posicion] ?? null,
                         'signed_at' => $fila->created_at,
                     ];
                 }

@@ -74,6 +74,7 @@ class PlanillaCerradaTest extends TestCase
             'actualizar' => ['update'],
             'eliminar' => ['delete'],
             'volver a cerrar' => ['close'],
+            'iniciar de nuevo' => ['start'],
         ];
     }
 

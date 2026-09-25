@@ -71,6 +71,7 @@ class CongelamientoPlanillaTest extends TestCase
                 'update' => $this->servicio()->updateServiceDeliveryControlSheet($planilla->uuid, ['official_name_and_surname' => 'Intento de cambio']),
                 'delete' => $this->servicio()->deleteServiceDeliveryControlSheet($planilla->uuid),
                 'close' => $this->servicio()->closeServiceDeliveryControlSheet($planilla->uuid, []),
+                'start' => $this->servicio()->startServiceDeliveryControlSheet($planilla->uuid, ['start_time' => '08:00:00']),
             };
             $this->fail("La operación '{$operacion}' debía rechazarse sobre una planilla cerrada.");
         } catch (ValidationException $e) {
@@ -89,6 +90,7 @@ class CongelamientoPlanillaTest extends TestCase
             'actualizar' => ['update', 'update'],
             'eliminar' => ['delete', 'delete'],
             'volver a cerrar' => ['close', 'close'],
+            'volver a iniciar' => ['start', 'start'],
         ];
     }
 
