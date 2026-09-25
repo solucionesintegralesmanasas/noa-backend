@@ -74,6 +74,35 @@ class ServiceDeliveryControlSheetController extends Controller
     }
 
     #[OA\Get(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/project-summary',
+        summary: 'Resumen global de evidencia diaria de un proyecto',
+        operationId: 'getProjectServiceDeliveryEvidenceSummary',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Resumen de días y evidencia del proyecto.'),
+            new OA\Response(response: 422, description: 'UUID de proyecto inválido.'),
+        ]
+    )]
+    public function projectSummary(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'project_uuid' => ['required', 'uuid', 'exists:projects,uuid'],
+            ]);
+
+            $summary = $this->serviceDeliveryControlSheetService
+                ->getProjectEvidenceSummary($validated['project_uuid']);
+
+            return $this->successResponse($summary, 'Resumen de evidencia del proyecto recuperado.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/list',
         summary: 'Obtener catálogo de Hojas de Control de Entrega de Servicios',
         operationId: 'getAllServiceDeliveryControlSheets',
