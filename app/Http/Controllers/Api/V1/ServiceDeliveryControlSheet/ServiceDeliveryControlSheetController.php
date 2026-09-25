@@ -752,11 +752,15 @@ class ServiceDeliveryControlSheetController extends Controller
             $companyUuid = $record->company_uuid;
 
             $signatureService = app(SignatureService::class);
+            // SPEC-002 §7.3: rol explícito → una sola firma vigente del coordinador.
+            // Un reenvío del mismo enlace reemplaza la anterior, no la duplica.
             $signature = $signatureService->store([
                 'entity_type' => 'App\\Models\\ServiceDeliveryControlSheetCoordinator',
                 'entity_id' => $record->id,
                 'company_uuid' => $companyUuid,
                 'signature' => $request->input('signature'),
+                'signer_role' => \App\Models\Signature::ROL_COORDINADOR,
+                'scope' => 'planilla',
             ]);
 
             return $this->successResponse($signature, 'Hoja de control firmada por el coordinador con éxito.', 201);
