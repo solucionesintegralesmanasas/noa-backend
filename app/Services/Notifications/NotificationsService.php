@@ -48,6 +48,17 @@ class NotificationsService extends BaseService
     /** Documentos obligatorios para cada vehículo */
     private const MANDATORY_DOCUMENTS = ['SOAT', 'RTM', 'RCC', 'RCE'];
 
+    /** Tipos de alerta ligados a un vehículo (placa → ficha, menú contextual) */
+    private const TIPOS_VEHICULO = [
+        'VEHICLE_DOCUMENT',
+        'OPERATION_CARD',
+        'FIRST_RTM',
+        'AGREEMENT',
+        'AFFILIATE_CHARGE',
+        'VEHICLE_INSPECTION_PENDING',
+        'VEHICLE_MAINTENANCE_ALERT',
+    ];
+
     /**
      * @var array<string>
      */
@@ -62,6 +73,39 @@ class NotificationsService extends BaseService
     }
 
     /**
+     * Mapa uuid => Vehicle con tarjetas, precargado por sync para evitar N+1.
+     */
+    private ?Collection $vehiculosPrecargados = null;
+
+    /**
+     * Precarga de una vez los vehículos referenciados por las alertas.
+     */
+    private function precargarVehiculos(array $fuentes): Collection
+    {
+        $uuids = [];
+        $recorrer = function ($valor) use (&$uuids, &$recorrer) {
+            if (! is_array($valor)) {
+                return;
+            }
+            if (isset($valor['vehicle_uuid']) && is_string($valor['vehicle_uuid']) && $valor['vehicle_uuid'] !== '') {
+                $uuids[$valor['vehicle_uuid']] = true;
+
+                return;
+            }
+            foreach ($valor as $item) {
+                $recorrer($item);
+            }
+        };
+        $recorrer($fuentes);
+
+        if (empty($uuids)) {
+            return collect();
+        }
+
+        return Vehicle::query()->whereIn('uuid', array_keys($uuids))->with('operationCards')->get()->keyBy('uuid');
+    }
+
+    /**
      * Resuelve la prioridad de una alerta ligada a un vehículo.
      * Es PRIORITARIA cuando el vehículo opera con tarjeta de la empresa propia.
      */
@@ -71,7 +115,8 @@ class NotificationsService extends BaseService
             return 'NORMAL';
         }
 
-        $vehicle = Vehicle::query()->where('uuid', '=', $vehicleUuid, 'and')->with('operationCards')->first();
+        $vehicle = $this->vehiculosPrecargados?->get($vehicleUuid)
+            ?? Vehicle::query()->where('uuid', '=', $vehicleUuid, 'and')->with('operationCards')->first();
         if (! $vehicle) {
             return 'NORMAL';
         }
@@ -174,17 +219,7 @@ class NotificationsService extends BaseService
             return [];
         }
 
-        $documentales = [
-            'VEHICLE_DOCUMENT',
-            'OPERATION_CARD',
-            'FIRST_RTM',
-            'AGREEMENT',
-            'AFFILIATE_CHARGE',
-            'VEHICLE_INSPECTION_PENDING',
-            'VEHICLE_MAINTENANCE_ALERT',
-        ];
-
-        if (! in_array($type, $documentales, true)) {
+        if (! in_array($type, self::TIPOS_VEHICULO, true)) {
             return [];
         }
 
@@ -333,6 +368,19 @@ class NotificationsService extends BaseService
             $pendingInspections = $this->notificationsForPendingInspections($companyUuid, $thirdPartyUuid);
             $preventativeMaintenance = $this->notificationsForPreventativeMaintenance($companyUuid, $thirdPartyUuid);
             $socialSecurity = $this->notificationsForSocialSecurity($companyUuid, $thirdPartyUuid);
+
+            // Una sola consulta para clasificar prioridades (evita N+1).
+            $this->vehiculosPrecargados = $this->precargarVehiculos([
+                $vehicleDocs,
+                $operationCards,
+                $driverLicenses,
+                $firstRtm,
+                $agreements,
+                $affiliateCharges,
+                $pendingInspections,
+                $preventativeMaintenance,
+                $socialSecurity,
+            ]);
 
             $activeAlerts = [];
 
@@ -726,6 +774,8 @@ class NotificationsService extends BaseService
 
     /**
      * Método getLatestNotifications.
+     * Balanceado: mitad prioritarias y mitad normales para que el
+     * desplegable siempre muestre ambos grupos cuando existen.
      */
     public function getLatestNotifications(?string $companyUuid = null, int $limit = 10): Collection
     {
@@ -739,11 +789,12 @@ class NotificationsService extends BaseService
             $this->applyCompanyFilter($query, $companyUuid);
         }
 
-        // Las prioritarias (vehículos de la empresa propia) siempre primero.
-        return $query->orderByRaw("CASE WHEN priority = 'PRIORITARIA' THEN 0 ELSE 1 END")
-            ->latest()
-            ->limit($limit)
-            ->get();
+        $mitad = (int) ceil($limit / 2);
+
+        $prioritarias = (clone $query)->where('priority', 'PRIORITARIA')->latest()->limit($mitad)->get();
+        $normales = (clone $query)->where('priority', 'NORMAL')->latest()->limit($limit - $prioritarias->count())->get();
+
+        return $prioritarias->merge($normales);
     }
 
     /**

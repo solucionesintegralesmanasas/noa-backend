@@ -18,7 +18,7 @@ class VehicleExpiryDigestMail extends Mailable
     use Queueable, SerializesModels;
 
     /**
-     * Create a new message instance.
+     * Crea una nueva instancia del mensaje.
      *
      * @param  array<int, array{placa: string, documento: string, fecha: string, days_left: int, estado: string}>  $items
      */
@@ -30,7 +30,7 @@ class VehicleExpiryDigestMail extends Mailable
     ) {}
 
     /**
-     * Get the message envelope.
+     * Obtiene la envoltura del mensaje.
      */
     public function envelope(): Envelope
     {
@@ -40,7 +40,7 @@ class VehicleExpiryDigestMail extends Mailable
     }
 
     /**
-     * Get the message content definition.
+     * Obtiene la definición del contenido del mensaje.
      */
     public function content(): Content
     {
@@ -55,7 +55,7 @@ class VehicleExpiryDigestMail extends Mailable
     }
 
     /**
-     * Get the attachments for the message.
+     * Obtiene los adjuntos del mensaje.
      *
      * @return array<int, Attachment>
      */
