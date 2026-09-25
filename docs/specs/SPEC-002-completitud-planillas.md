@@ -81,12 +81,15 @@ Unicidad lógica: una sola `vigente` por (entidad + rol); el reemplazo marca la 
 **7.1 `firmasPendientes($record): array`.** Devuelve etiquetas (`conductor`, `funcionario`,
 `coordinador`, `ruta:{uuid}`) calculadas por rol vigente, no por posición ni `exists()` simple. Incluye
 rutas cerradas sin firma propia y marca las heredadas como tales.
-**7.2 Congelamiento.** `asegurarEditable()` con 422 en `update…(ServiceDeliveryControlSheetService.php:680)`,
-`delete…(:708)`, `close…(:740)` y `attachRouteMapByDriverDate()` filtrando solo abiertas (`:284-330`).
-Siguen abiertos: firma del coordinador (`ServiceDeliveryControlSheetController.php:621`) y firmas por
-ruta en `closeRoute`.
-**7.3 Idempotencia.** La firma pública del coordinador reemplaza (una vigente). `closeRoute` ya no borra
-las firmas omitidas en un envío parcial (`:522-525`).
+**7.2 Congelamiento.** `asegurarEditable()` con 422 en **cinco** rutas que mutan la planilla:
+`update…(ServiceDeliveryControlSheetService.php:888)`, `delete…(:938)`, `start…(:951)`,
+`close…(:974)` y `attachRouteMapByDriverDate()` filtrando solo abiertas (`:516`; si solo había
+cerradas, explica por qué). `start` se añadió en la revisión posterior: reescribía hora, km y FUEC
+de una planilla cerrada. Siguen abiertos después del cierre: firma del coordinador
+(`ServiceDeliveryControlSheetController.php:621`) y firmas por recorrido en `closeRoute`.
+**7.3 Idempotencia.** La firma pública del coordinador reemplaza (una vigente). `closeRoute` ya no
+borra las firmas omitidas (`:738`) y un envío parcial tampoco borra los datos de cierre ya
+persistidos del recorrido (`:711`: cada campo se escribe solo si llega en el payload).
 **7.4 PDF.** `generateDailyServiceControlSheetPdf()` pasa `firmas_pendientes`; la vista
 (`resources/views/pdf/service-control-sheet.blade.php`) renderiza la banda *"EVIDENCIA INCOMPLETA —
 faltan N firma(s)"*. La descarga nunca se bloquea.
@@ -101,7 +104,7 @@ Sin imports nuevos de `sweetalert2` (usar `utils/toast.js`).
 
 ## 9. Pruebas (criterios de aceptación)
 
-- Cerrada + `PUT`/`DELETE`/re-`close` → 422 con clave de error (`update`/`delete`/`close`); abierta + `PUT` → 200.
+- Cerrada + `PUT`/`DELETE`/re-`close`/`start` → 422 con clave de error (`update`/`delete`/`close`/`start`); abierta + `PUT` → 200.
 - `attachRouteMap` en cerrada → 422; en abierta → 200.
 - Firma de coordinador sobre cerrada → 200.
 - Envío parcial de firmas por ruta no borra la firma existente.
@@ -115,7 +118,7 @@ congelamiento por campo, rechazo de doble cierre, motivo obligatorio, estados ex
 motivo y compatibilidad del histórico.
 
 **Feature contra MySQL** (`tests/Feature/CongelamientoPlanillaTest.php`): el registro existe de verdad y el
-rechazo atraviesa Eloquent — `update`, `delete` y doble `close` sobre planilla cerrada lanzan 422 con la
+rechazo atraviesa Eloquent — `update`, `delete`, `close` y `start` sobre planilla cerrada lanzan 422 con la
 clave correcta y la fila queda intacta; una planilla abierta sí admite edición y cierre.
 
 **Infraestructura de pruebas:** `phpunit.xml` apunta a **MySQL** con la base `noa_test` (no SQLite). El
@@ -123,7 +126,12 @@ esquema usa ~36 sentencias MySQL (`ALTER TABLE ... COMMENT`, `MODIFY COLUMN`, `D
 migraciones ya aplicadas en producción, así que SQLite no es viable y no se alteraron migraciones
 aplicadas. La base de pruebas se recrea en cada ejecución (`RefreshDatabase`).
 
-`php artisan test`: **25 tests verdes**.
+**Backfill de firmas verificado con datos sintéticos** sobre `noa_medicion` (rollback + re-migración):
+disponibilidad legada con 1 firma → `conductor` vigente; con 2 → `conductor` + sin rol reemplazada;
+planilla con recorridos → orden `funcionario`/`conductor` conservado; coordinador → `coordinador`.
+Filas de prueba eliminadas después.
+
+`php artisan test`: **27 tests verdes**. Frontend: `npm run test` en verde (9 tests + a11y + perf + lint).
 
 **Pendiente de cobertura:** el endpoint HTTP (autenticación Sanctum + permisos Spatie) y la descarga real
 del PDF con la banda de evidencia incompleta (§7.4), todavía no implementada.

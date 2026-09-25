@@ -190,9 +190,6 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         $pendientes = [];
 
-        $rolesPlanilla = $this->rolesVigentesDe($record->id, 'App\\Models\\ServiceDeliveryControlSheet');
-        $rolesCoordinador = $this->rolesVigentesDe($record->id, 'App\\Models\\ServiceDeliveryControlSheetCoordinator');
-
         $routes = $record->relationLoaded('routes')
             ? $record->routes
             : $record->routes()->orderBy('order_index')->get();
@@ -251,6 +248,9 @@ class ServiceDeliveryControlSheetService extends BaseService
                     'rol' => null,
                 ];
             }
+            // Las firmas de planilla solo importan en disponibilidad: en operación
+            // la regla §5.1 vive en cada recorrido.
+            $rolesPlanilla = $this->rolesVigentesDe($record->id, 'App\\Models\\ServiceDeliveryControlSheet');
             if (! isset($rolesPlanilla[Signature::ROL_CONDUCTOR])) {
                 $pendientes[] = [
                     'clave' => 'planilla:'.Signature::ROL_CONDUCTOR,
@@ -708,17 +708,32 @@ class ServiceDeliveryControlSheetService extends BaseService
             throw ValidationException::withMessages(['funcionario_cc' => 'El número de CC del funcionario es obligatorio para cada recorrido.']);
         }
 
-        $route->update([
+        // SPEC-002 §7.3: un envío parcial NO debe borrar lo ya cerrado. Antes cada
+        // campo ausente se escribía como null/0, así que reenviar solo las firmas
+        // dejaba el recorrido sin hora ni kilometraje de llegada.
+        $cambios = [
             'funcionario_nombre' => $funcionarioNombre,
             'funcionario_cc' => $funcionarioCc,
-            'end_time' => $closure['end_time'] ?? null,
-            'ending_kilometer' => $closure['ending_kilometer'] !== null && $closure['ending_kilometer'] !== ''
+        ];
+        if (array_key_exists('end_time', $closure)) {
+            $cambios['end_time'] = $closure['end_time'] ?: null;
+        }
+        if (array_key_exists('ending_kilometer', $closure)) {
+            $cambios['ending_kilometer'] = ($closure['ending_kilometer'] !== null && $closure['ending_kilometer'] !== '')
                 ? $closure['ending_kilometer']
-                : null,
-            'number_of_tolls' => $closure['number_of_tolls'] ?? 0,
-            'total_toll_value' => $closure['total_toll_value'] ?? 0,
-            'end_novelty' => $closure['end_novelty'] ?? null,
-        ]);
+                : null;
+        }
+        if (array_key_exists('number_of_tolls', $closure)) {
+            $cambios['number_of_tolls'] = $closure['number_of_tolls'] ?: 0;
+        }
+        if (array_key_exists('total_toll_value', $closure)) {
+            $cambios['total_toll_value'] = $closure['total_toll_value'] ?: 0;
+        }
+        if (array_key_exists('end_novelty', $closure)) {
+            $cambios['end_novelty'] = $closure['end_novelty'] ?: null;
+        }
+
+        $route->update($cambios);
 
         // SPEC-002 §7.3: ya no se borran las firmas anteriores. La firma que llega
         // reemplaza solo la de SU rol; un reenvío parcial conserva la otra.
@@ -932,6 +947,8 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
+            // SPEC-002 §7.2: /start también muta la planilla (hora, km, FUEC).
+            $this->asegurarEditable($record, 'start');
             $record->update([
                 'start_time' => $data['start_time'] ?? $record->start_time,
                 'starting_kilometer' => $data['starting_kilometer'] ?? $record->starting_kilometer,
