@@ -426,6 +426,7 @@ class PermissionSeeder extends Seeder
             'service_delivery_control_sheets.history_pdf' => ['module' => 'Hojas de Entrega', 'description' => 'Generar PDF del historial de entrega'],
             'service_delivery_control_sheets.technical_sheet_pdf' => ['module' => 'Hojas de Entrega', 'description' => 'Generar PDF de la ficha técnica de entrega'],
             'service_delivery_control_sheets.cold_chain_pdf' => ['module' => 'Hojas de Entrega', 'description' => 'Generar PDF de cadena de frío de entrega'],
+            'service_delivery_control_sheets.close_exception' => ['module' => 'Hojas de Entrega', 'description' => 'Cerrar una hoja de control con excepción aprobada (evidencia incompleta)'],
 
             // --- Configuración del Asistente ---
             'assistant_configuration.index'  => ['module' => 'Configuración del Asistente', 'description' => 'Listar todas las configuraciones del asistente'],

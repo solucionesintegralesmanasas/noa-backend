@@ -366,6 +366,61 @@ class ServiceDeliveryControlSheetController extends Controller
         }
     }
 
+    /**
+     * SPEC-002 §4 — Cierre con excepción aprobada.
+     *
+     * Solo ADMIN_EMPRESA y SUPERADMIN (permiso close_exception): deja constancia
+     * de que la evidencia se cerró incompleta y por qué, en vez de inventar datos
+     * o dejar la planilla abierta para siempre.
+     */
+    #[OA\Post(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/{uuid}/close-exception',
+        summary: 'Cerrar la hoja de control con excepción (motivo obligatorio)',
+        operationId: 'closeExceptionServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['exception_reason'],
+                properties: [
+                    new OA\Property(property: 'exception_reason', type: 'string', maxLength: 255, description: 'Motivo por el que la evidencia no pudo completarse'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Cerrada con excepción.'),
+            new OA\Response(response: 403, description: 'Sin permiso para aprobar excepciones.'),
+            new OA\Response(response: 404, description: 'Registro no encontrado.'),
+            new OA\Response(response: 422, description: 'Motivo vacío o planilla ya cerrada.'),
+        ]
+    )]
+    public function closeException(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'exception_reason' => ['required', 'string', 'max:255'],
+            ], [
+                'exception_reason.required' => 'Indique el motivo por el que la planilla no pudo completarse.',
+                'exception_reason.max' => 'El motivo no debe exceder los 255 caracteres.',
+            ]);
+
+            $record = $this->serviceDeliveryControlSheetService->getServiceDeliveryControlSheetByUuid($uuid);
+            if (! $record) {
+                return $this->notFoundResponse('La planilla que desea cerrar no existe.');
+            }
+
+            $aprobador = $request->user()?->uuid;
+            $cerrada = $this->serviceDeliveryControlSheetService->cerrarConExcepcion($uuid, $validated, (string) $aprobador);
+
+            return $this->successResponse($cerrada, 'Planilla cerrada con excepción registrada.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     #[OA\Post(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/route-map-capture',
         summary: 'Pegar captura del mapa del recorrido en la planilla del día del conductor',

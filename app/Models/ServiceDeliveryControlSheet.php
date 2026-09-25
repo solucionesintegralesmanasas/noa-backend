@@ -53,6 +53,9 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         'type_of_control_sheet',
         'day_kind',
         'availability_reason',
+        'exception_reason',
+        'exception_approved_by',
+        'exception_approved_at',
         'is_active',
     ];
 
@@ -66,6 +69,7 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         'number_of_tolls' => 'integer',
         'total_toll_value' => 'decimal:2',
         'is_active' => 'boolean',
+        'exception_approved_at' => 'datetime',
     ];
 
     protected $appends = ['vehicle_license_plate', 'driver_name'];
@@ -74,6 +78,89 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
     public const DIA_OPERACION = 'operacion';
 
     public const DIA_DISPONIBILIDAD = 'disponibilidad';
+
+    /** Estados administrativos derivados (SPEC-002 §4). */
+    public const ESTADO_BORRADOR = 'BORRADOR';
+
+    public const ESTADO_EN_CURSO = 'EN_CURSO';
+
+    public const ESTADO_PARCIAL = 'PARCIAL';
+
+    public const ESTADO_CERRADA_OPERATIVAMENTE = 'CERRADA_OPERATIVAMENTE';
+
+    public const ESTADO_CERTIFICADA = 'CERTIFICADA';
+
+    public const ESTADO_CERRADA_CON_EXCEPCION = 'CERRADA_CON_EXCEPCION';
+
+    /**
+     * ¿Se cerró con excepción aprobada? (§4)
+     */
+    public function esCerradaConExcepcion(): bool
+    {
+        return ! $this->is_active && $this->motivoExcepcion() !== null;
+    }
+
+    /**
+     * Motivo de la excepción, si se registró.
+     */
+    public function motivoExcepcion(): ?string
+    {
+        $motivo = trim((string) $this->exception_reason);
+
+        return $motivo !== '' ? $motivo : null;
+    }
+
+    /**
+     * SPEC-002 §4 — Estado administrativo derivado.
+     *
+     * No reemplaza a `is_active` (que se conserva como bandera de compatibilidad):
+     * lo enriquece para distinguir en qué punto del ciclo está la evidencia.
+     *
+     * @param  bool|null  $certificada  Pasa el resultado ya calculado para evitar
+     *                                  una consulta por fila en listados (§7.5).
+     */
+    public function estadoAdministrativo(?bool $certificada = null): string
+    {
+        if ($this->is_active) {
+            $total = (int) ($this->children_total ?? 0);
+            $abiertos = (int) ($this->children_open ?? 0);
+
+            if ($total > 0 && $abiertos < $total) {
+                return self::ESTADO_PARCIAL;
+            }
+
+            $sinRutas = $this->relationLoaded('routes')
+                ? $this->routes->isEmpty()
+                : $this->routes()->count() === 0;
+
+            if (empty($this->start_time) && $sinRutas) {
+                return self::ESTADO_BORRADOR;
+            }
+
+            return self::ESTADO_EN_CURSO;
+        }
+
+        if ($this->esCerradaConExcepcion()) {
+            return self::ESTADO_CERRADA_CON_EXCEPCION;
+        }
+
+        $certificada ??= $this->tieneCertificacionVigente();
+
+        return $certificada ? self::ESTADO_CERTIFICADA : self::ESTADO_CERRADA_OPERATIVAMENTE;
+    }
+
+    /**
+     * ¿Tiene firma vigente del coordinador? Consulta de 1 fila; en listados se
+     * evita pasando el valor calculado en lote.
+     */
+    public function tieneCertificacionVigente(): bool
+    {
+        return Signature::query()
+            ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
+            ->where('entity_id', $this->id)
+            ->where('status', Signature::STATUS_VIGENTE)
+            ->exists();
+    }
 
     /**
      * ¿El día es una jornada en disponibilidad?

@@ -101,10 +101,43 @@ class ServiceDeliveryControlSheetService extends BaseService
 
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
-        $paginator->getCollection()->transform(function ($item) {
+        // SPEC-002 §7.5: antes esto hacía un exists() por fila (N+1). Ahora las
+        // firmas de toda la página (padres Y días hijos) se cargan en 3 consultas
+        // y se calculan en memoria.
+        $coleccion = $paginator->getCollection();
+        $todas = $coleccion->flatMap(function ($padre) {
+            return collect([$padre])->concat($padre->relationLoaded('children') ? $padre->children : collect());
+        })->values();
+        $planillaIds = $todas->map(fn ($h) => $h->id)->filter()->values()->all();
+        $rutaIds = $todas->flatMap(fn ($hoja) => $hoja->relationLoaded('routes')
+            ? $hoja->routes->map(fn ($r) => $r->id)->all()
+            : [])->all();
+        $mapa = $this->mapaFirmas($planillaIds, $rutaIds);
+
+        $decorar = function (ServiceDeliveryControlSheet $item) use ($mapa): void {
+            $certificada = (bool) ($mapa['coordinador'][$item->id] ?? false);
+            $rutas = $item->relationLoaded('routes')
+                ? $item->routes
+                : $item->routes()->orderBy('order_index')->get();
+
+            $item->setAttribute('estado', $item->estadoAdministrativo($certificada));
+            $item->setAttribute('firmas_pendientes', $this->calcularPendientes($item, $rutas, $mapa));
+        };
+
+        $coleccion->transform(function (ServiceDeliveryControlSheet $item) use ($mapa, $decorar) {
+            $decorar($item);
             $item->setAttribute('control_status', $this->resolveControlStatus($item));
             $item->setAttribute('routes_total', $item->routes ? $item->routes->count() : 0);
-            $item->setAttribute('has_coordinator_signature', Signature::query()->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')->where('entity_id', $item->id)->exists());
+            $item->setAttribute('has_coordinator_signature', (bool) ($mapa['coordinador'][$item->id] ?? false));
+
+            // Los días hijos también llevan su propio estado: es lo que muestran
+            // las tablas del listado y la ficha de proyecto (§8).
+            if ($item->relationLoaded('children')) {
+                $item->children->each(fn ($hijo) => $decorar($hijo));
+                $item->setAttribute('dias_pendientes', $item->children->sum(
+                    fn ($hijo) => count($hijo->firmas_pendientes ?? [])
+                ));
+            }
 
             return $item;
         });
@@ -188,28 +221,92 @@ class ServiceDeliveryControlSheetService extends BaseService
      */
     public function firmasPendientes(ServiceDeliveryControlSheet $record): array
     {
-        $pendientes = [];
-
         $routes = $record->relationLoaded('routes')
             ? $record->routes
             : $record->routes()->orderBy('order_index')->get();
 
-        if (! $record->esDisponibilidad()) {
-            $rolesRuta = $this->rolesVigentesDeRutas($routes->pluck('id')->all());
+        $mapa = $this->mapaFirmas([$record->id], $routes->pluck('id')->all());
 
+        return $this->calcularPendientes($record, $routes, $mapa);
+    }
+
+    /**
+     * Carga en 3 consultas las firmas vigentes de varias planillas a la vez.
+     * Evita el N+1 del listado (§7.5): 15 filas pasan de ~45 consultas a 3.
+     *
+     * @param  array<int>  $planillaIds
+     * @param  array<int>  $rutaIds
+     * @return array{planilla: array<int, array<string, mixed>>, coordinador: array<int, bool>, ruta: array<int, array<string, mixed>>}
+     */
+    private function mapaFirmas(array $planillaIds, array $rutaIds): array
+    {
+        $mapa = ['planilla' => [], 'coordinador' => [], 'ruta' => []];
+
+        if (! empty($planillaIds)) {
+            Signature::query()
+                ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheet')
+                ->whereIn('entity_id', $planillaIds)
+                ->where('status', Signature::STATUS_VIGENTE)
+                ->whereNotNull('signer_role')
+                ->get()
+                ->each(function (Signature $sig) use (&$mapa): void {
+                    $mapa['planilla'][$sig->entity_id][$sig->signer_role] = true;
+                });
+
+            Signature::query()
+                ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
+                ->whereIn('entity_id', $planillaIds)
+                ->where('status', Signature::STATUS_VIGENTE)
+                ->get(['entity_id'])
+                ->each(function (Signature $sig) use (&$mapa): void {
+                    $mapa['coordinador'][$sig->entity_id] = true;
+                });
+        }
+
+        if (! empty($rutaIds)) {
+            Signature::query()
+                ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetRoute')
+                ->whereIn('entity_id', $rutaIds)
+                ->where('status', Signature::STATUS_VIGENTE)
+                ->whereNotNull('signer_role')
+                ->get()
+                ->each(function (Signature $sig) use (&$mapa): void {
+                    $mapa['ruta'][$sig->entity_id][$sig->signer_role] = true;
+                });
+        }
+
+        return $mapa;
+    }
+
+    /**
+     * SPEC-002 §7.1 — Reglas de completitud sobre firmas ya cargadas en lote.
+     *
+     * @param  array  $mapa  Salida de mapaFirmas()
+     * @return array<int, array{clave: string, etiqueta: string, rol: ?string}>
+     */
+    private function calcularPendientes(ServiceDeliveryControlSheet $record, $routes, array $mapa): array
+    {
+        $pendientes = [];
+
+        $rolesPlanilla = $mapa['planilla'][$record->id] ?? [];
+        $certificada = (bool) ($mapa['coordinador'][$record->id] ?? false);
+
+        if (! $record->esDisponibilidad()) {
             foreach ($routes as $indice => $route) {
                 $n = $indice + 1;
-                $roles = $rolesRuta[$route->id] ?? [];
+                $roles = $mapa['ruta'][$route->id] ?? [];
+                $tieneNovedad = ! empty($route->end_novelty);
 
                 // Datos operativos: sin ellos la firma sola no certifica el recorrido.
-                if (empty($route->end_time)) {
+                // La novedad tipificada los excuse (§5.1).
+                if (empty($route->end_time) && ! $tieneNovedad) {
                     $pendientes[] = [
                         'clave' => 'ruta:'.$route->uuid.':hora_fin',
-                        'etiqueta' => "Recorrido {$n}: falta hora de llegada",
+                        'etiqueta' => "Recorrido {$n}: falta hora de llegada (o novedad que la excuse)",
                         'rol' => null,
                     ];
                 }
-                if (($route->ending_kilometer === null || $route->ending_kilometer === '') && empty($route->end_novelty)) {
+                if (($route->ending_kilometer === null || $route->ending_kilometer === '') && ! $tieneNovedad) {
                     $pendientes[] = [
                         'clave' => 'ruta:'.$route->uuid.':km_final',
                         'etiqueta' => "Recorrido {$n}: falta kilometraje final (o novedad que lo excuse)",
@@ -239,7 +336,14 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
         } else {
-            // Disponibilidad (§5.2): no hay funcionario ni ruta que firmar; el conductor sí.
+            // Disponibilidad (§5.2): inicio operativo, responsable, motivo, conductor.
+            if (empty($record->start_time)) {
+                $pendientes[] = [
+                    'clave' => 'disponibilidad:inicio',
+                    'etiqueta' => 'Falta la hora de inicio del servicio',
+                    'rol' => null,
+                ];
+            }
             if ($record->day_kind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
                 && $record->motivoDisponibilidad() === null) {
                 $pendientes[] = [
@@ -248,9 +352,6 @@ class ServiceDeliveryControlSheetService extends BaseService
                     'rol' => null,
                 ];
             }
-            // Las firmas de planilla solo importan en disponibilidad: en operación
-            // la regla §5.1 vive en cada recorrido.
-            $rolesPlanilla = $this->rolesVigentesDe($record->id, 'App\\Models\\ServiceDeliveryControlSheet');
             if (! isset($rolesPlanilla[Signature::ROL_CONDUCTOR])) {
                 $pendientes[] = [
                     'clave' => 'planilla:'.Signature::ROL_CONDUCTOR,
@@ -260,7 +361,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             }
         }
 
-        if (! isset($rolesCoordinador[Signature::ROL_COORDINADOR])) {
+        if (! $certificada) {
             $pendientes[] = [
                 'clave' => 'coordinador',
                 'etiqueta' => 'Falta firma del coordinador',
@@ -272,48 +373,34 @@ class ServiceDeliveryControlSheetService extends BaseService
     }
 
     /**
-     * Roles con firma vigente de una entidad (1 consulta por entidad).
+     * SPEC-002 §7.5 — Firma del coordinador por fila sin N+1.
      *
-     * @return array<string, Signature>
+     * @param  array<int>  $planillaIds
+     * @return array<int, bool>
      */
-    private function rolesVigentesDe(int $entityId, string $entityType): array
+    private function mapaCertificacion(array $planillaIds): array
     {
-        return Signature::query()
-            ->where('entity_type', $entityType)
-            ->where('entity_id', $entityId)
-            ->where('status', Signature::STATUS_VIGENTE)
-            ->whereNotNull('signer_role')
-            ->get()
-            ->keyBy('signer_role')
-            ->all();
-    }
-
-    /**
-     * Roles vigentes de varias rutas en una sola consulta (evita N+1).
-     *
-     * @param  array<int>  $routeIds
-     * @return array<int, array<string, Signature>>
-     */
-    private function rolesVigentesDeRutas(array $routeIds): array
-    {
-        if (empty($routeIds)) {
+        if (empty($planillaIds)) {
             return [];
         }
 
-        $porRuta = [];
+        $mapa = [];
         Signature::query()
-            ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetRoute')
-            ->whereIn('entity_id', $routeIds)
+            ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
+            ->whereIn('entity_id', $planillaIds)
             ->where('status', Signature::STATUS_VIGENTE)
-            ->whereNotNull('signer_role')
-            ->get()
-            ->each(function (Signature $sig) use (&$porRuta): void {
-                $porRuta[$sig->entity_id][$sig->signer_role] = $sig;
+            ->get(['entity_id'])
+            ->each(function (Signature $sig) use (&$mapa): void {
+                $mapa[$sig->entity_id] = true;
             });
 
-        return $porRuta;
+        return $mapa;
     }
 
+    /**
+     * SPEC-002 §7.5 — Listado sin N+1: las firmas de la página entera se cargan
+     * en 3 consultas y se calculan en memoria.
+     */
     private function resolveControlStatus(Model $record): string
     {
         $total = (int) ($record->children_total ?? 0);
@@ -1061,6 +1148,63 @@ class ServiceDeliveryControlSheetService extends BaseService
             }
 
             return $record->fresh();
+        });
+    }
+
+    /**
+     * SPEC-002 §4 — Cierre con excepción aprobada.
+     *
+     * Es la salida legítima para una unidad operativa que no pudo completarse:
+     * exige motivo y queda con el mismo congelamiento que un cierre normal, pero
+     * con distintivo propio en UI y PDF para no pasar por "cerrada normal".
+     *
+     * A diferencia de close(), NO exige completar recorridos ni firmas: ese es
+     * precisamente el motivo de la excepción. Solo ADMIN_EMPRESA y SUPERADMIN
+     * pueden invocarlo (permiso service_delivery_control_sheets.close_exception).
+     *
+     * @param  string  $approvedByUuid  UUID del usuario que aprueba.
+     */
+    public function cerrarConExcepcion(string $uuid, array $data, string $approvedByUuid): Model
+    {
+        return $this->transaction(function () use ($uuid, $data, $approvedByUuid) {
+            $record = $this->findByUuid($uuid);
+
+            // La excepción no es una puerta trasera al congelamiento (§7.2): solo
+            // aplica a una planilla abierta. Una ya cerrada (con o sin excepción)
+            // conserva su evidencia y no se puede volver a marcar.
+            $this->asegurarEditable($record, 'close_exception');
+
+            $motivo = trim((string) ($data['exception_reason'] ?? ''));
+            if ($motivo === '') {
+                throw ValidationException::withMessages([
+                    'exception_reason' => 'Indique el motivo por el que la planilla no pudo completarse.',
+                ]);
+            }
+
+            $cambios = [
+                'exception_reason' => mb_substr($motivo, 0, 255),
+                'exception_approved_by' => $approvedByUuid ?: null,
+                'exception_approved_at' => now(),
+                'is_active' => false,
+            ];
+
+            // Si es día-hijo, el padre se cierra cuando ya no quedan días abiertos.
+            $record->update($cambios);
+
+            if (! empty($record->parent_uuid)) {
+                $pendientes = ServiceDeliveryControlSheet::query()
+                    ->where('parent_uuid', $record->parent_uuid)
+                    ->where('is_active', true)
+                    ->count();
+
+                if ($pendientes === 0) {
+                    ServiceDeliveryControlSheet::query()
+                        ->where('uuid', $record->parent_uuid)
+                        ->update(['is_active' => false]);
+                }
+            }
+
+            return $record->fresh(['project', 'routes']);
         });
     }
 }
