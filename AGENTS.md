@@ -51,6 +51,12 @@ Cuando te pida analizar, verificar la conexión de las APIs o diseñar component
 - **Plan de rendimiento pendiente:** `Documentos\plan-mejora-rendimiento-noa.md` — bloqueado hasta poder medir en producción (nunca contra `localhost:5173`).
 - **Registro externo:** error de consola `reportAllChanges/startTime` (origen externo probable, pendiente de verificar) guardado en `Documentos\error-consola-reportAllChanges-NOA.md`.
 
+## Convención de Commits
+
+- Mensajes directos en español, en una sola línea, formato `tipo(scope): descripción corta`.
+- Sin cuerpo ni bullets, salvo que el cambio lo exija para entenderse.
+- Tipos: feat, fix, refactor, perf, style, docs, test, build, ci, chore.
+
 ## Agent skills
 
 ### Issue tracker
