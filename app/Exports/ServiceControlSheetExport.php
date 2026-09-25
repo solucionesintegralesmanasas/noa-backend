@@ -71,8 +71,9 @@ class ServiceControlSheetExport implements FromCollection, WithHeadings
             $fecha = Carbon::parse($sheet->service_date)->format('d/m/Y');
             $rutas = $sheet->routes->where('is_active', true);
             if ($rutas->isEmpty()) {
+                // SPEC-002 §5.2: se imprime el motivo declarado, no un texto fijo.
                 $filas[] = [
-                    $fecha, 'VEHÍCULO EN DISPONIBILIDAD',
+                    $fecha, $sheet->textoDisponibilidad(),
                     $sheet->start_time?->format('H:i'), '', '',
                     $sheet->end_time?->format('H:i'), $sheet->total_hours?->format('H:i'),
                     $sheet->starting_kilometer, $sheet->ending_kilometer, '',

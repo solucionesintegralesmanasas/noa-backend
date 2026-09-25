@@ -986,14 +986,19 @@ class PdfService
                         ]);
                     }
                 } else {
-                    $esDisponibilidad = $routes->isEmpty();
+                    $esDisponibilidad = $hojaDia->esDisponibilidad();
+                    $textoDisponibilidad = $esDisponibilidad ? $hojaDia->textoDisponibilidad() : '';
                     $dias[] = array_merge($baseFila, [
-                        'ruta' => $esDisponibilidad ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
-                        'ruta_unica' => $esDisponibilidad ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
+                        'ruta' => $esDisponibilidad ? $textoDisponibilidad : $rutasTexto,
+                        'ruta_unica' => $esDisponibilidad ? $textoDisponibilidad : $rutasTexto,
                         'rutas' => $rutasLista,
                         'hora_fin_recorrido' => '',
                         'km_final_recorrido' => '',
-                        'detalle_cierre' => $esDisponibilidad ? 'Vehículo en disponibilidad — sin recorridos asignados' : '',
+                        'detalle_cierre' => $esDisponibilidad
+                            ? 'Vehículo en disponibilidad'.($hojaDia->motivoDisponibilidad() !== null
+                                ? ' — '.$hojaDia->motivoDisponibilidad()
+                                : ' — sin recorridos asignados')
+                            : '',
                         // En disponibilidad no hay funcionario: solo firman conductor y coordinador (pie).
                         'firma_funcionario' => $esDisponibilidad ? null : ($base64Images["func_{$hojaDia->id}"] ?? null),
                         'firma_conductor_recorrido' => null,
@@ -1013,7 +1018,9 @@ class PdfService
             if ($totalRecorridos > 0) {
                 $obsPartes[] = "Recorridos del día: {$totalRecorridos}";
             } else {
-                $obsPartes[] = 'Estado: DISPONIBILIDAD (vehículo y conductor disponibles, sin recorridos asignados)';
+                $motivos = $hojasDias->map(fn ($h) => $h->motivoDisponibilidad())->filter()->unique();
+                $obsPartes[] = 'Estado: DISPONIBILIDAD (vehículo y conductor disponibles, sin recorridos asignados)'
+                    .($motivos->isNotEmpty() ? ' | Motivo: '.$motivos->implode(' / ') : '');
             }
             if ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date) {
                 $obsPartes[] = 'Vigencia proyecto: '.Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y');
@@ -1405,14 +1412,19 @@ class PdfService
                         ]);
                     }
                 } else {
-                    $esDisponibilidadMes = $routes->isEmpty();
+                    $esDisponibilidadMes = $sheet->esDisponibilidad();
+                    $textoDispMes = $esDisponibilidadMes ? $sheet->textoDisponibilidad() : '';
                     $dias[] = array_merge($baseFila, [
-                        'ruta' => $esDisponibilidadMes ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
-                        'ruta_unica' => $esDisponibilidadMes ? 'VEHÍCULO EN DISPONIBILIDAD' : $rutasTexto,
+                        'ruta' => $esDisponibilidadMes ? $textoDispMes : $rutasTexto,
+                        'ruta_unica' => $esDisponibilidadMes ? $textoDispMes : $rutasTexto,
                         'rutas' => $rutasLista,
                         'hora_fin_recorrido' => '',
                         'km_final_recorrido' => '',
-                        'detalle_cierre' => $esDisponibilidadMes ? 'Vehículo en disponibilidad — sin recorridos asignados' : '',
+                        'detalle_cierre' => $esDisponibilidadMes
+                            ? 'Vehículo en disponibilidad'.($sheet->motivoDisponibilidad() !== null
+                                ? ' — '.$sheet->motivoDisponibilidad()
+                                : ' — sin recorridos asignados')
+                            : '',
                         'clave_recorrido' => null,
                         'firma_funcionario' => null,
                         'firma_conductor_recorrido' => null,
@@ -1707,10 +1719,13 @@ class PdfService
                         ]);
                     }
                 } else {
+                    $textoDispReporte = $sheet->esDisponibilidad() ? $sheet->textoDisponibilidad() : 'VEHÍCULO EN DISPONIBILIDAD';
                     $dias[] = array_merge($base, [
-                        'ruta' => 'VEHÍCULO EN DISPONIBILIDAD',
-                        'ruta_unica' => 'VEHÍCULO EN DISPONIBILIDAD',
-                        'detalle_cierre' => 'Vehículo en disponibilidad — sin recorridos asignados',
+                        'ruta' => $textoDispReporte,
+                        'ruta_unica' => $textoDispReporte,
+                        'detalle_cierre' => 'Vehículo en disponibilidad'.($sheet->motivoDisponibilidad() !== null
+                            ? ' — '.$sheet->motivoDisponibilidad()
+                            : ' — sin recorridos asignados'),
                         'firma_funcionario' => null,
                     ]);
                 }
