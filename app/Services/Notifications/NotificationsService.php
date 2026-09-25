@@ -97,8 +97,8 @@ class NotificationsService extends BaseService
     }
 
     /**
-     * Construye el enlace útil de una alerta: el dato que la ata (placa,
-     * licencia o nombre) apunta a la vista donde se corrige o se registra.
+     * Destino neutral de una alerta: la ficha de la entidad (vehículo o
+     * persona). Nunca un formulario, para no confundir editar con agregar.
      * El label devuelto es siempre un substring exacto del mensaje.
      * Retorna null cuando no hay destino resoluble.
      */
@@ -106,72 +106,23 @@ class NotificationsService extends BaseService
     {
         switch ($type) {
             case 'VEHICLE_DOCUMENT':
-                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
-                $docType = (string) ($alert['document_type'] ?? '');
-                $slug = $this->slugDocumento($docType);
-                if ($placa === '' || $slug === null) {
-                    return null;
-                }
-                $docUuid = $alert['document_uuid'] ?? null;
-                if ($docUuid) {
-                    return [
-                        'label' => $placa,
-                        'path' => '/vehiculos-documentos/'.$slug.'/editar/'.$docUuid,
-                        'permission' => 'vehicle_documents.update',
-                        'aria_label' => "Editar el documento {$docType} del vehículo {$placa}",
-                    ];
-                }
-                $vUuid = $alert['vehicle_uuid'] ?? null;
-                if (! $vUuid) {
-                    return null;
-                }
-
-                return [
-                    'label' => $placa,
-                    'path' => '/vehiculos-documentos/'.$slug.'/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
-                    'permission' => 'vehicle_documents.create',
-                    'aria_label' => "Registrar el documento {$docType} del vehículo {$placa}",
-                ];
-
             case 'OPERATION_CARD':
-                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
-                if ($placa === '') {
-                    return null;
-                }
-                $cardUuid = $alert['operation_card_uuid'] ?? null;
-                $numero = (string) ($alert['operating_card_number'] ?? '');
-                if ($cardUuid) {
-                    return [
-                        'label' => $placa,
-                        'path' => '/tarjetas-de-operacion/editar/'.$cardUuid,
-                        'permission' => 'operation_cards.update',
-                        'aria_label' => "Editar la tarjeta de operación {$numero} del vehículo {$placa}",
-                    ];
-                }
-                $vUuid = $alert['vehicle_uuid'] ?? null;
-                if (! $vUuid) {
-                    return null;
-                }
-
-                return [
-                    'label' => $placa,
-                    'path' => '/tarjetas-de-operacion/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
-                    'permission' => 'operation_cards.create',
-                    'aria_label' => "Registrar la tarjeta de operación del vehículo {$placa}",
-                ];
-
             case 'FIRST_RTM':
-                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
+            case 'AGREEMENT':
+            case 'AFFILIATE_CHARGE':
+            case 'VEHICLE_INSPECTION_PENDING':
+            case 'VEHICLE_MAINTENANCE_ALERT':
                 $vUuid = $alert['vehicle_uuid'] ?? null;
-                if ($placa === '' || ! $vUuid) {
+                $placa = (string) ($alert['vehicle_license_plate'] ?? $alert['license_plate'] ?? '');
+                if (! $vUuid || $placa === '') {
                     return null;
                 }
 
                 return [
                     'label' => $placa,
-                    'path' => '/vehiculos-documentos/tecnomecanica/crear?'.http_build_query(['wizard' => $vUuid, 'retorno' => '/notificaciones']),
-                    'permission' => 'vehicle_documents.create',
-                    'aria_label' => "Registrar la RTM del vehículo {$placa}",
+                    'path' => '/vehiculos/perfil/'.$vUuid,
+                    'permission' => 'vehicles.profile',
+                    'aria_label' => "Ver la ficha del vehículo {$placa}",
                 ];
 
             case 'DRIVER_LICENSE':
@@ -187,62 +138,6 @@ class NotificationsService extends BaseService
                     'path' => '/terceros/conductor/perfil/'.$tpUuid,
                     'permission' => 'driver.profile',
                     'aria_label' => "Ver la ficha del conductor {$conductor} (licencia #{$numero})",
-                ];
-
-            case 'AGREEMENT':
-                $placa = (string) ($alert['license_plate'] ?? '');
-                $agUuid = $alert['agreement_uuid'] ?? null;
-                if ($placa === '' || ! $agUuid) {
-                    return null;
-                }
-
-                return [
-                    'label' => $placa,
-                    'path' => '/convenios-colaboracion/editar/'.$agUuid,
-                    'permission' => 'business_collaboration_agreements.update',
-                    'aria_label' => "Editar el convenio del vehículo {$placa}",
-                ];
-
-            case 'AFFILIATE_CHARGE':
-                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
-                $chUuid = $alert['charge_uuid'] ?? null;
-                if ($placa === '' || ! $chUuid) {
-                    return null;
-                }
-
-                return [
-                    'label' => $placa,
-                    'path' => '/pagos-de-administracion/perfil/'.$chUuid,
-                    'permission' => 'affiliate_admin_charges.profile',
-                    'aria_label' => "Ver el cobro de administración del vehículo {$placa}",
-                ];
-
-            case 'VEHICLE_INSPECTION_PENDING':
-                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
-                $vUuid = $alert['vehicle_uuid'] ?? null;
-                if ($placa === '' || ! $vUuid) {
-                    return null;
-                }
-
-                return [
-                    'label' => $placa,
-                    'path' => '/inspeccion-vehiculos/crear?'.http_build_query(['vehicle_uuid' => $vUuid, 'return_to' => '/notificaciones']),
-                    'permission' => 'vehicle_inspections.create',
-                    'aria_label' => "Registrar la inspección del vehículo {$placa}",
-                ];
-
-            case 'VEHICLE_MAINTENANCE_ALERT':
-                $placa = (string) ($alert['vehicle_license_plate'] ?? '');
-                $vUuid = $alert['vehicle_uuid'] ?? null;
-                if ($placa === '' || ! $vUuid) {
-                    return null;
-                }
-
-                return [
-                    'label' => $placa,
-                    'path' => '/mantenimiento/crear?'.http_build_query(['vehicle' => $vUuid, 'type' => 'PREVENTIVA']),
-                    'permission' => 'maintenance.create',
-                    'aria_label' => "Registrar el mantenimiento del vehículo {$placa}",
                 ];
 
             case 'SOCIAL_SECURITY_MORA':
@@ -262,6 +157,165 @@ class NotificationsService extends BaseService
             default:
                 return null;
         }
+    }
+
+    /**
+     * Opciones contextuales de una alerta. Réplica exacta del menú de
+     * documentos del perfil del vehículo: Completar (falta), Editar
+     * documento (existe) y Registrar nuevo (reemplazo con &nuevo=1, que
+     * entra al historial). El retorno vuelve al perfil con el panel abierto.
+     *
+     * @return array<int, array{key: string, label: string, path: string, permission: string}>
+     */
+    private function construirAcciones(string $type, array $alert): array
+    {
+        $vUuid = $alert['vehicle_uuid'] ?? null;
+        if (! $vUuid) {
+            return [];
+        }
+
+        $documentales = [
+            'VEHICLE_DOCUMENT',
+            'OPERATION_CARD',
+            'FIRST_RTM',
+            'AGREEMENT',
+            'AFFILIATE_CHARGE',
+            'VEHICLE_INSPECTION_PENDING',
+            'VEHICLE_MAINTENANCE_ALERT',
+        ];
+
+        if (! in_array($type, $documentales, true)) {
+            return [];
+        }
+
+        $retorno = '/vehiculos/perfil/'.$vUuid.'?panel=documentos';
+        $conRetorno = fn (array $extra = []) => http_build_query(array_merge(['wizard' => $vUuid, 'retorno' => $retorno], $extra));
+
+        $acciones = [
+            [
+                'key' => 'documentos',
+                'label' => 'Ver documentos',
+                'path' => '/vehiculos/perfil/'.$vUuid.'?panel=documentos',
+                'permission' => 'vehicle_documents.index',
+            ],
+        ];
+
+        switch ($type) {
+            case 'VEHICLE_DOCUMENT':
+                $slug = $this->slugDocumento((string) ($alert['document_type'] ?? ''));
+                if ($slug === null) {
+                    break;
+                }
+                $docUuid = $alert['document_uuid'] ?? null;
+                if ($docUuid) {
+                    $acciones[] = [
+                        'key' => 'editar_documento',
+                        'label' => 'Editar documento',
+                        'path' => "/vehiculos-documentos/{$slug}/editar/{$docUuid}?".$conRetorno(),
+                        'permission' => 'vehicle_documents.update',
+                    ];
+                    $acciones[] = [
+                        'key' => 'registrar_nuevo',
+                        'label' => 'Registrar nuevo',
+                        'path' => "/vehiculos-documentos/{$slug}/crear?".$conRetorno(['nuevo' => '1']),
+                        'permission' => 'vehicle_documents.create',
+                    ];
+                } else {
+                    $acciones[] = [
+                        'key' => 'completar',
+                        'label' => 'Completar',
+                        'path' => "/vehiculos-documentos/{$slug}/crear?".$conRetorno(),
+                        'permission' => 'vehicle_documents.create',
+                    ];
+                }
+                break;
+
+            case 'OPERATION_CARD':
+                $cardUuid = $alert['operation_card_uuid'] ?? null;
+                if ($cardUuid) {
+                    $acciones[] = [
+                        'key' => 'editar_documento',
+                        'label' => 'Editar documento',
+                        'path' => "/tarjetas-de-operacion/editar/{$cardUuid}?".$conRetorno(),
+                        'permission' => 'operation_cards.update',
+                    ];
+                    $acciones[] = [
+                        'key' => 'registrar_nuevo',
+                        'label' => 'Registrar nuevo',
+                        'path' => '/tarjetas-de-operacion/crear?'.$conRetorno(['nuevo' => '1']),
+                        'permission' => 'operation_cards.create',
+                    ];
+                } else {
+                    $acciones[] = [
+                        'key' => 'completar',
+                        'label' => 'Completar',
+                        'path' => '/tarjetas-de-operacion/crear?'.$conRetorno(),
+                        'permission' => 'operation_cards.create',
+                    ];
+                }
+                break;
+
+            case 'FIRST_RTM':
+                $acciones[] = [
+                    'key' => 'completar',
+                    'label' => 'Completar',
+                    'path' => '/vehiculos-documentos/tecnomecanica/crear?'.$conRetorno(),
+                    'permission' => 'vehicle_documents.create',
+                ];
+                break;
+
+            case 'AGREEMENT':
+                $agUuid = $alert['agreement_uuid'] ?? null;
+                if (! $agUuid) {
+                    break;
+                }
+                $acciones[] = [
+                    'key' => 'editar_documento',
+                    'label' => 'Editar documento',
+                    'path' => "/convenios-colaboracion/editar/{$agUuid}?".$conRetorno(),
+                    'permission' => 'business_collaboration_agreements.update',
+                ];
+                $acciones[] = [
+                    'key' => 'registrar_nuevo',
+                    'label' => 'Registrar nuevo',
+                    'path' => '/convenios-colaboracion/crear?'.$conRetorno(['nuevo' => '1']),
+                    'permission' => 'business_collaboration_agreements.create',
+                ];
+                break;
+
+            case 'AFFILIATE_CHARGE':
+                $chUuid = $alert['charge_uuid'] ?? null;
+                if (! $chUuid) {
+                    break;
+                }
+                $acciones[] = [
+                    'key' => 'ver_cobro',
+                    'label' => 'Ver cobro',
+                    'path' => '/pagos-de-administracion/perfil/'.$chUuid,
+                    'permission' => 'affiliate_admin_charges.profile',
+                ];
+                break;
+
+            case 'VEHICLE_INSPECTION_PENDING':
+                $acciones[] = [
+                    'key' => 'registrar_inspeccion',
+                    'label' => 'Registrar inspección',
+                    'path' => '/inspeccion-vehiculos/crear?'.http_build_query(['vehicle_uuid' => $vUuid, 'return_to' => '/notificaciones']),
+                    'permission' => 'vehicle_inspections.create',
+                ];
+                break;
+
+            case 'VEHICLE_MAINTENANCE_ALERT':
+                $acciones[] = [
+                    'key' => 'registrar_mantenimiento',
+                    'label' => 'Registrar mantenimiento',
+                    'path' => '/mantenimiento/crear?'.http_build_query(['vehicle' => $vUuid, 'type' => 'PREVENTIVA']),
+                    'permission' => 'maintenance.create',
+                ];
+                break;
+        }
+
+        return $acciones;
     }
 
     /**
@@ -314,6 +368,7 @@ class NotificationsService extends BaseService
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'document_type' => $alert['document_type'] ?? null,
                         'action' => $this->construirAction('VEHICLE_DOCUMENT', $alert),
+                        'actions' => $this->construirAcciones('VEHICLE_DOCUMENT', $alert),
                     ],
                 ];
             }
@@ -342,6 +397,7 @@ class NotificationsService extends BaseService
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'operating_card_number' => $alert['operating_card_number'] ?? null,
                         'action' => $this->construirAction('OPERATION_CARD', $alert),
+                        'actions' => $this->construirAcciones('OPERATION_CARD', $alert),
                     ],
                 ];
             }
@@ -397,6 +453,7 @@ class NotificationsService extends BaseService
                         'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'action' => $this->construirAction('FIRST_RTM', $alert),
+                        'actions' => $this->construirAcciones('FIRST_RTM', $alert),
                     ],
                 ];
             }
@@ -431,6 +488,7 @@ class NotificationsService extends BaseService
                         'entity_name' => $alert['entity_name'] ?? null,
                         'license_plate' => $alert['license_plate'] ?? null,
                         'action' => $this->construirAction('AGREEMENT', $alert),
+                        'actions' => $this->construirAcciones('AGREEMENT', $alert),
                     ],
                 ];
             }
@@ -460,6 +518,7 @@ class NotificationsService extends BaseService
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'amount' => $alert['amount'] ?? null,
                         'action' => $this->construirAction('AFFILIATE_CHARGE', $alert),
+                        'actions' => $this->construirAcciones('AFFILIATE_CHARGE', $alert),
                     ],
                 ];
             }
@@ -486,6 +545,7 @@ class NotificationsService extends BaseService
                         'vehicle_uuid' => $vUuid,
                         'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
                         'action' => $this->construirAction('VEHICLE_INSPECTION_PENDING', $alert),
+                        'actions' => $this->construirAcciones('VEHICLE_INSPECTION_PENDING', $alert),
                     ],
                 ];
             }
@@ -525,6 +585,7 @@ class NotificationsService extends BaseService
                         'status' => $alert['status'] ?? null,
                         'km_left' => $alert['km_left'] ?? null,
                         'action' => $this->construirAction('VEHICLE_MAINTENANCE_ALERT', $alert),
+                        'actions' => $this->construirAcciones('VEHICLE_MAINTENANCE_ALERT', $alert),
                     ],
                 ];
             }
@@ -1336,6 +1397,7 @@ class NotificationsService extends BaseService
                 if ($dueDate->lt($today)) {
                     $expired[] = [
                         'charge_uuid' => $charge->uuid,
+                        'vehicle_uuid' => $charge->vehicle_uuid,
                         'vehicle_license_plate' => $vehiclePlate,
                         'amount' => $charge->amount,
                         'due_date' => $dueDate->toDateString(),
@@ -1347,6 +1409,7 @@ class NotificationsService extends BaseService
                     $daysLeft = (int) $today->diffInDays($dueDate, false);
                     $expiringSoon[] = [
                         'charge_uuid' => $charge->uuid,
+                        'vehicle_uuid' => $charge->vehicle_uuid,
                         'vehicle_license_plate' => $vehiclePlate,
                         'amount' => $charge->amount,
                         'due_date' => $dueDate->toDateString(),
