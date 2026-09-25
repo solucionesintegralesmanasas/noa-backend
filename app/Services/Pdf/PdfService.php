@@ -1134,6 +1134,27 @@ class PdfService
                 Logger::warning('No se pudo generar el mapa del recorrido GPS: '.$e->getMessage());
             }
 
+            // SPEC-002 §7.4 — La evidencia incompleta se AVISA, nunca se bloquea.
+            // Se calcula por día una sola vez y se agrupa en la banda del pie.
+            $servicioCompletitud = app(\App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService::class);
+            $firmasPendientesPdf = [];
+            $diasConExcepcion = [];
+            foreach ($hojasDias as $hojaDia) {
+                $pendientesDia = $servicioCompletitud->firmasPendientes($hojaDia);
+                if ($pendientesDia !== []) {
+                    $firmasPendientesPdf[] = [
+                        'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
+                        'pendientes' => array_column($pendientesDia, 'etiqueta'),
+                    ];
+                }
+                if ($hojaDia->esCerradaConExcepcion()) {
+                    $diasConExcepcion[] = [
+                        'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
+                        'motivo' => $hojaDia->motivoExcepcion(),
+                    ];
+                }
+            }
+
             $data = [
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
@@ -1160,6 +1181,9 @@ class PdfService
                 'mapa_stats' => $mapaRecorrido['stats'],
                 'mapa_fecha' => $mapaFecha,
                 'mapa_es_captura' => $mapaEsCaptura,
+                'evidencia_incompleta' => $firmasPendientesPdf !== [],
+                'firmas_pendientes' => $firmasPendientesPdf,
+                'dias_con_excepcion' => $diasConExcepcion,
             ];
 
             $pdf = Pdf::loadView('pdf.service-control-sheet', $data);

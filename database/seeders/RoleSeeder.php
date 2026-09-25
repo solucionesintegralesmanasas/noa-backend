@@ -367,6 +367,9 @@ class RoleSeeder extends Seeder
             'service_delivery_control_sheets.history_pdf',
             'service_delivery_control_sheets.technical_sheet_pdf',
             'service_delivery_control_sheets.cold_chain_pdf',
+            // SPEC-002 §4: excepción al cierre, para que una planilla incompleta
+            // no quede abierta para siempre ni exija inventar evidencia.
+            'service_delivery_control_sheets.close_exception',
 
             'assistant_configuration.index',
             'assistant_configuration.create',

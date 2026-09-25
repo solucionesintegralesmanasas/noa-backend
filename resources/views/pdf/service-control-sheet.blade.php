@@ -302,6 +302,28 @@
             width: 100%;
         }
 
+        /* SPEC-002 §7.4 — Banda de evidencia incompleta */
+        .banda-evidencia {
+            border: 0.75pt solid #b45309;
+            background: #fffbeb;
+            color: #78350f;
+            padding: 4px 8px;
+            margin: 4px 0;
+            font-size: 7pt;
+            line-height: 1.35;
+        }
+
+        .banda-excepcion {
+            border-color: #991b1b;
+            background: #fef2f2;
+            color: #7f1d1d;
+        }
+
+        .banda-evidencia-detalle {
+            margin-top: 1px;
+            padding-left: 6px;
+        }
+
         .footer-firma-left,
         .footer-firma-right {
             display: table-cell;
@@ -584,6 +606,33 @@
             @endforeach
         </tbody>
     </table>
+
+    <!-- SPEC-002 §7.4 — Banda de evidencia incompleta (avisa, no bloquea) -->
+    @if (!empty($evidencia_incompleta))
+        <div class="banda-evidencia">
+            <strong>EVIDENCIA INCOMPLETA.</strong>
+            Este documento se generó con firmas o datos pendientes. No invalida el cierre
+            operativo, pero debe completarse antes de entregarse como evidencia final.
+            @foreach (($firmas_pendientes ?? []) as $diaIncompleto)
+                <div class="banda-evidencia-detalle">
+                    &bull; {{ $diaIncompleto['fecha'] }}: {{ implode(' · ', $diaIncompleto['pendientes']) }}
+                </div>
+            @endforeach
+        </div>
+    @endif
+
+    @if (!empty($dias_con_excepcion))
+        <div class="banda-evidencia banda-excepcion">
+            <strong>CERRADA CON EXCEPCIÓN.</strong>
+            Algún día no pudo completarse por motivos justificados y fue aprobado por
+            un administrador; no equivale a un día con evidencia completa.
+            @foreach ($dias_con_excepcion as $diaExc)
+                <div class="banda-evidencia-detalle">
+                    &bull; {{ $diaExc['fecha'] }}: {{ $diaExc['motivo'] }}
+                </div>
+            @endforeach
+        </div>
+    @endif
 
     <!-- PIE / FIRMAS -->
     <div class="footer-section">

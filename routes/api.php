@@ -829,6 +829,9 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{uuid}/start', [ServiceDeliveryControlSheetController::class, 'start'])->name('api.v1.fleet.service-delivery-control-sheets.start');
                 Route::post('/{uuid}/close', [ServiceDeliveryControlSheetController::class, 'close'])->name('api.v1.fleet.service-delivery-control-sheets.close');
                 Route::post('/{uuid}/close-route', [ServiceDeliveryControlSheetController::class, 'closeRoute'])->name('api.v1.fleet.service-delivery-control-sheets.close-route');
+                // SPEC-002 §4: cerrar con excepción es una excepción a la regla, así
+                // que exige permiso propio (solo ADMIN_EMPRESA y SUPERADMIN).
+                Route::post('/{uuid}/close-exception', [ServiceDeliveryControlSheetController::class, 'closeException'])->middleware('permission:service_delivery_control_sheets.close_exception')->name('api.v1.fleet.service-delivery-control-sheets.close-exception');
                 Route::post('/{uuid}/generate-sign-url', [ServiceDeliveryControlSheetController::class, 'generateSignUrl'])->name('api.v1.fleet.service-delivery-control-sheets.generate-sign-url');
             });
         });

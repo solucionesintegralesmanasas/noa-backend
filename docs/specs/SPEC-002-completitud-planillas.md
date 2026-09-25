@@ -90,21 +90,31 @@ de una planilla cerrada. Siguen abiertos después del cierre: firma del coordina
 **7.3 Idempotencia.** La firma pública del coordinador reemplaza (una vigente). `closeRoute` ya no
 borra las firmas omitidas (`:738`) y un envío parcial tampoco borra los datos de cierre ya
 persistidos del recorrido (`:711`: cada campo se escribe solo si llega en el payload).
-**7.4 PDF.** `generateDailyServiceControlSheetPdf()` pasa `firmas_pendientes`; la vista
-(`resources/views/pdf/service-control-sheet.blade.php`) renderiza la banda *"EVIDENCIA INCOMPLETA —
-faltan N firma(s)"*. La descarga nunca se bloquea.
-**7.5 Listado.** Reemplazar el `exists()` por fila (`:107`, N+1) por `withCount` por rol; exponer
-`firmas_pendientes` por fila para la UI.
+**7.4 PDF.** `generateDailyServiceControlSheetPdf()` pasa `firmas_pendientes` y `dias_con_excepcion`;
+la vista (`resources/views/pdf/service-control-sheet.blade.php`) renderiza dos bandas: *"EVIDENCIA
+INCOMPLETA"* (lista día a día qué falta) y *"CERRADA CON EXCEPCIÓN"* (motivo aprobado). La descarga nunca
+se bloquea. Los demás PDF (mensual, reporte) y el Excel no llevan banda: solo el diario es evidencia
+certificable día a día.
+**7.5 Listado.** Reemplazado el `exists()` por fila por 3 consultas en lote (`mapaFirmas`) para padres **y**
+días hijos: 12 filas → 9 consultas constantes (antes ~21 y creciendo). Cada fila y cada día exponen `estado`,
+`firmas_pendientes` y `dias_pendientes`.
+**7.6 Permiso `close_exception`.** `POST /{uuid}/close-exception` con
+`permission:service_delivery_control_sheets.close_exception`, asignado a `ADMIN_EMPRESA` (SUPERADMIN recibe
+todos). Reutiliza la guarda de congelamiento: no es puerta trasera a una evidencia ya cerrada.
 
 ## 8. Frontend
 
-Matriz visible por planilla (días × recorridos × firmas) en listado y ficha de proyecto; badge `2/3`
-warning por día; botón PDF siempre activo; `title`/`aria-label` descriptivos; errores con `role="alert"`.
-Sin imports nuevos de `sweetalert2` (usar `utils/toast.js`).
+Badge de estado administrativo (`estado` del backend) en la fila del listado y en cada día de la tabla
+expandible y de la ficha de proyecto, con `title` que **enumera qué falta** (no depende solo del color).
+En el listado, contador de días con evidencia incompleta; en la ficha del proyecto, resumen
+*"N con evidencia incompleta"* o *"Evidencia completa"*, que es la lectura rápida para un proyecto de meses.
+Botón PDF siempre activo; `title`/`aria-label` descriptivos; iconos con `aria-hidden`. Sin imports nuevos
+de `sweetalert2` (usar `utils/toast.js`).
 
 ## 9. Pruebas (criterios de aceptación)
 
 - Cerrada + `PUT`/`DELETE`/re-`close`/`start` → 422 con clave de error (`update`/`delete`/`close`/`start`); abierta + `PUT` → 200.
+- `close-exception` sin permiso → 403; sin sesión → 401; sin motivo → 422; sobre planilla ya cerrada → 422.
 - `attachRouteMap` en cerrada → 422; en abierta → 200.
 - Firma de coordinador sobre cerrada → 200.
 - Envío parcial de firmas por ruta no borra la firma existente.
@@ -131,7 +141,14 @@ disponibilidad legada con 1 firma → `conductor` vigente; con 2 → `conductor`
 planilla con recorridos → orden `funcionario`/`conductor` conservado; coordinador → `coordinador`.
 Filas de prueba eliminadas después.
 
-`php artisan test`: **27 tests verdes**. Frontend: `npm run test` en verde (9 tests + a11y + perf + lint).
+`php artisan test`: **34 tests verdes** (antes 27). Frontend: `npm run test` en verde (9 tests + a11y + perf + lint).
+
+**Tests nuevos de esta fase:**
+- `tests/Feature/CierreExcepcionTest.php` — cobertura HTTP real con **Sanctum + Spatie**: 403 sin permiso,
+  401 sin sesión, 200 con permiso (y comprueba motivo/aprobación/estado), 422 sin motivo y 422 sobre cerrada.
+  Nota: la API envuelve la validación en `error.details[].field`, no en `errors`.
+- `tests/Feature/FirmasRecorridoTest.php` — §7.3 E2E: el reenvío parcial **conserva** la firma omitida y el
+  reenvío de un rol marca la anterior como `reemplazada` sin borrarla.
 
 **Pendiente de cobertura:** el endpoint HTTP (autenticación Sanctum + permisos Spatie) y la descarga real
 del PDF con la banda de evidencia incompleta (§7.4), todavía no implementada.
