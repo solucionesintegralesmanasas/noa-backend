@@ -791,8 +791,10 @@ class NotificationsService extends BaseService
 
         $mitad = (int) ceil($limit / 2);
 
-        $prioritarias = (clone $query)->where('priority', 'PRIORITARIA')->latest()->limit($mitad)->get();
-        $normales = (clone $query)->where('priority', 'NORMAL')->latest()->limit($limit - $prioritarias->count())->get();
+        // Tiebreaker por id: evita que empates en created_at (inserciones
+        // masivas del sync) devuelvan orden distinto y hagan oscilar el SSE.
+        $prioritarias = (clone $query)->where('priority', 'PRIORITARIA')->latest()->orderByDesc('id')->limit($mitad)->get();
+        $normales = (clone $query)->where('priority', 'NORMAL')->latest()->orderByDesc('id')->limit($limit - $prioritarias->count())->get();
 
         return $prioritarias->merge($normales);
     }
