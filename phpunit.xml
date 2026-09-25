@@ -23,8 +23,14 @@
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
+        <!--
+            Las pruebas corren contra MySQL, no SQLite: el esquema usa sentencias
+            MySQL (COMMENT, MODIFY COLUMN, DROP INDEX) que SQLite no entiende.
+            Credenciales y host vienen de .env; aquí solo se fija la base de datos
+            de pruebas, que se recrea en cada ejecución (RefreshDatabase).
+        -->
+        <env name="DB_CONNECTION" value="mysql"/>
+        <env name="DB_DATABASE" value="noa_test"/>
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

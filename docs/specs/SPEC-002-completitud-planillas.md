@@ -110,16 +110,23 @@ Sin imports nuevos de `sweetalert2` (usar `utils/toast.js`).
 
 ### 9.1 Cobertura ejecutada (2026-09-25)
 
-`tests/Unit/PlanillaCerradaTest.php` y `tests/Unit/DisponibilidadDiaTest.php` cubren las reglas de §5.2 y
-§7.2 sin base de datos: congelamiento por campo, rechazo de doble cierre, motivo obligatorio, estados
-excluyentes, no invención de motivo y compatibilidad del histórico. `artisan test`: 19 tests verdes.
+**Unitarias sin base de datos** (`tests/Unit/PlanillaCerradaTest.php`, `tests/Unit/DisponibilidadDiaTest.php`):
+congelamiento por campo, rechazo de doble cierre, motivo obligatorio, estados excluyentes, no invención de
+motivo y compatibilidad del histórico.
 
-**Pendiente de cobertura HTTP (Feature):** los criterios de la lista superior (código 422 real, descarga
-del PDF, firma del coordinador) exigen `RefreshDatabase`, y el esquema **no es compatible con SQLite**:
-`phpunit.xml` apunta a `sqlite :memory:` y hay ~36 sentencias MySQL (`ALTER TABLE ... COMMENT`,
-`MODIFY COLUMN`, `DROP INDEX`) en ~20 migraciones ya aplicadas en producción. Opciones a decidir:
-(a) base de datos de pruebas MySQL dedicada, o (b) hacer portables esas migraciones. No se alteraron
-migraciones aplicadas.
+**Feature contra MySQL** (`tests/Feature/CongelamientoPlanillaTest.php`): el registro existe de verdad y el
+rechazo atraviesa Eloquent — `update`, `delete` y doble `close` sobre planilla cerrada lanzan 422 con la
+clave correcta y la fila queda intacta; una planilla abierta sí admite edición y cierre.
+
+**Infraestructura de pruebas:** `phpunit.xml` apunta a **MySQL** con la base `noa_test` (no SQLite). El
+esquema usa ~36 sentencias MySQL (`ALTER TABLE ... COMMENT`, `MODIFY COLUMN`, `DROP INDEX`) en ~20
+migraciones ya aplicadas en producción, así que SQLite no es viable y no se alteraron migraciones
+aplicadas. La base de pruebas se recrea en cada ejecución (`RefreshDatabase`).
+
+`php artisan test`: **25 tests verdes**.
+
+**Pendiente de cobertura:** el endpoint HTTP (autenticación Sanctum + permisos Spatie) y la descarga real
+del PDF con la banda de evidencia incompleta (§7.4), todavía no implementada.
 
 ## 10. Fases
 
