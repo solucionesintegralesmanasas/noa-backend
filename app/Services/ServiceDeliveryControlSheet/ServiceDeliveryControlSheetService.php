@@ -121,6 +121,37 @@ class ServiceDeliveryControlSheetService extends BaseService
     }
 
     /**
+     * SPEC-002 §5.2 — Reglas de una jornada declarada en disponibilidad.
+     *
+     * Exige motivo (no basta con "no tener recorridos") y prohíbe recorridos:
+     * son estados excluyentes y mezclarlos deja evidencia inconsistente.
+     */
+    private function validarDisponibilidad(ServiceDeliveryControlSheet $record, ?string $dayKind, mixed $motivo): void
+    {
+        if ($dayKind !== ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD) {
+            return;
+        }
+
+        $motivo = is_string($motivo) ? trim($motivo) : '';
+
+        if ($motivo === '') {
+            throw ValidationException::withMessages([
+                'availability_reason' => 'Indique el motivo por el que el vehículo queda en disponibilidad.',
+            ]);
+        }
+
+        $tieneRutas = $record->relationLoaded('routes')
+            ? $record->routes->isNotEmpty()
+            : $record->routes()->exists();
+
+        if ($tieneRutas) {
+            throw ValidationException::withMessages([
+                'day_kind' => 'No se puede declarar en disponibilidad una planilla que tiene recorridos.',
+            ]);
+        }
+    }
+
+    /**
      * SPEC-002 §7.1 — Firmas que faltan para que la evidencia esté completa.
      *
      * Se evalúa por unidad operativa, no por cantidad total de firmas:
@@ -144,7 +175,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             ? $record->routes
             : $record->routes()->orderBy('order_index')->get();
 
-        if ($routes->isNotEmpty()) {
+        if (! $record->esDisponibilidad()) {
             $rolesRuta = $this->rolesVigentesDeRutas($routes->pluck('id')->all());
 
             foreach ($routes as $indice => $route) {
@@ -189,7 +220,15 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
         } else {
-            // Disponibilidad: no hay(funcionario/ruta) que firmar; el conductor sí.
+            // Disponibilidad (§5.2): no hay funcionario ni ruta que firmar; el conductor sí.
+            if ($record->day_kind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
+                && $record->motivoDisponibilidad() === null) {
+                $pendientes[] = [
+                    'clave' => 'disponibilidad:motivo',
+                    'etiqueta' => 'Falta el motivo de la jornada en disponibilidad',
+                    'rol' => null,
+                ];
+            }
             if (! isset($rolesPlanilla[Signature::ROL_CONDUCTOR])) {
                 $pendientes[] = [
                     'clave' => 'planilla:'.Signature::ROL_CONDUCTOR,
@@ -814,6 +853,12 @@ class ServiceDeliveryControlSheetService extends BaseService
                 $data['routes'] ?? null
             );
 
+            // SPEC-002 §5.2: la declaración de disponibilidad se valida contra
+            // el estado resultante (motivo + ausencia de recorridos).
+            $dayKind = $data['day_kind'] ?? $record->day_kind;
+            $availabilityReason = $data['availability_reason'] ?? $record->availability_reason;
+            $this->validarDisponibilidad($record, $dayKind, $availabilityReason);
+
             $record->update([
                 'official_name_and_surname' => $data['official_name_and_surname'] ?? $record->official_name_and_surname,
                 'service_date' => $data['service_date'] ?? $record->service_date,
@@ -826,6 +871,10 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'number_of_tolls' => $data['number_of_tolls'] ?? $record->number_of_tolls,
                 'total_toll_value' => $data['total_toll_value'] ?? $record->total_toll_value,
                 'type_of_control_sheet' => $type,
+                'day_kind' => $dayKind,
+                'availability_reason' => $dayKind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
+                    ? mb_substr(trim((string) $availabilityReason), 0, 255)
+                    : null,
                 'is_active' => $data['is_active'] ?? $record->is_active,
                 'project_uuid' => $newProject,
             ]);
@@ -885,12 +934,22 @@ class ServiceDeliveryControlSheetService extends BaseService
                 ]);
             }
 
+            // SPEC-002 §5.2: al cerrar se persiste la declaración del día.
+            // La UI envía day_kind/availability_reason cuando no hubo recorridos.
+            $dayKind = $data['day_kind'] ?? $record->day_kind ?? ServiceDeliveryControlSheet::DIA_OPERACION;
+            $availabilityReason = $data['availability_reason'] ?? $record->availability_reason;
+            $this->validarDisponibilidad($record, $dayKind, $availabilityReason);
+
             $record->update([
                 'end_time' => $data['end_time'] ?? $record->end_time,
                 'ending_kilometer' => $data['ending_kilometer'] ?? $record->ending_kilometer,
                 'total_hours' => $data['total_hours'] ?? $record->total_hours,
                 'number_of_tolls' => $data['number_of_tolls'] ?? $record->number_of_tolls,
                 'total_toll_value' => $data['total_toll_value'] ?? $record->total_toll_value,
+                'day_kind' => $dayKind,
+                'availability_reason' => $dayKind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
+                    ? mb_substr(trim((string) $availabilityReason), 0, 255)
+                    : null,
                 'is_active' => false,
             ]);
 

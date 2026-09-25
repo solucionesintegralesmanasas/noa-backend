@@ -51,6 +51,8 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         'number_of_tolls',
         'total_toll_value',
         'type_of_control_sheet',
+        'day_kind',
+        'availability_reason',
         'is_active',
     ];
 
@@ -67,6 +69,50 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
     ];
 
     protected $appends = ['vehicle_license_plate', 'driver_name'];
+
+    /** Modalidad del día (SPEC-002 §5.2). */
+    public const DIA_OPERACION = 'operacion';
+
+    public const DIA_DISPONIBILIDAD = 'disponibilidad';
+
+    /**
+     * ¿El día es una jornada en disponibilidad?
+     *
+     * Se toma la declaración explícita (day_kind) y, para no romper el histórico,
+     * se cae a la inferencia antigua (sin recorridos) cuando no se declaró nada.
+     * Esto evita que un día al que aún no se le cargaron rutas se reporte como
+     * disponibilidad declarada.
+     */
+    public function esDisponibilidad(): bool
+    {
+        if ($this->day_kind === self::DIA_DISPONIBILIDAD) {
+            return true;
+        }
+
+        return $this->relationLoaded('routes') ? $this->routes->isEmpty() : $this->routes()->count() === 0;
+    }
+
+    /**
+     * Motivo declarado de la jornada en disponibilidad (SPEC-002 §5.2).
+     */
+    public function motivoDisponibilidad(): ?string
+    {
+        $motivo = trim((string) $this->availability_reason);
+
+        return $motivo !== '' ? $motivo : null;
+    }
+
+    /**
+     * Texto listo para PDF/Excel: nunca inventa un motivo que no se registró.
+     */
+    public function textoDisponibilidad(): string
+    {
+        $motivo = $this->motivoDisponibilidad();
+
+        return $motivo !== null
+            ? 'VEHÍCULO EN DISPONIBILIDAD — '.$motivo
+            : 'VEHÍCULO EN DISPONIBILIDAD';
+    }
 
     protected $with = ['project:id,uuid,project_name,start_date,completion_date', 'routes', 'internalControl.vehicle', 'internalControl.thirdParty', 'subcontractedControl.vehicleClass'];
 

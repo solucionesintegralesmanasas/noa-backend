@@ -56,7 +56,11 @@ congelamiento backend que al cierre operativo.
 kilometraje final · firma del funcionario · firma del conductor. Si falta un dato operativo, exige
 novedad tipificada; sin ella queda **incompleto**.
 **5.2 Disponibilidad / día sin recorrido.** No se inventa ruta. Exige: inicio operativo · responsable ·
-motivo · firma del conductor. La firma del coordinador la eleva a certificada.
+**motivo declarado** (`availability_reason`) · firma del conductor. La firma del coordinador la eleva a
+certificada. La modalidad se declara explícitamente con `day_kind` (`operacion|disponibilidad`): declararla
+exige motivo y prohíbe recorridos. Para el histórico sin `day_kind`, se conserva la inferencia anterior
+("sin recorridos = disponibilidad") para no exigir datos que nunca se capturaron, pero **sin exigir
+motivo** en esos casos.
 **5.3 Planilla multi-ruta.** Completa cuando todos sus recorridos cumplen §5.1. El cierre global no
 re-pide firmas ya guardadas por ruta.
 **5.4 Planilla multi-día.** Cada hijo se evalúa independiente (§5.1/§5.2). El padre muestra días
@@ -114,7 +118,8 @@ actualizado.
 
 Backfill ambiguo en firmas antiguas (mitigación: `NULL` explícito) · algún flujo operativo que hoy edite
 cerradas empezará a fallar 422 —intencionado, pero probar antes de desplegar · subcontratados sin UUID
-(mitigación: `signer_uuid` nullable + texto libre conservado).
+(mitigación: `signer_uuid` nullable + texto libre conservado) · el motivo de disponibilidad solo aplica a
+días declarados a partir de la migración; el histórico queda sin motivo y así se muestra.
 
 ## 12. Decisiones (estado 2026-09-25)
 
