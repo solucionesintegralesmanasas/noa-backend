@@ -816,6 +816,7 @@ Route::prefix('v1')->group(function () {
             Route::prefix('service-delivery-control-sheets')->group(function () {
                 Route::get('/', [ServiceDeliveryControlSheetController::class, 'index'])->name('api.v1.fleet.service-delivery-control-sheets.index');
                 Route::get('/list', [ServiceDeliveryControlSheetController::class, 'list'])->name('api.v1.fleet.service-delivery-control-sheets.list');
+                Route::get('/project-summary', [ServiceDeliveryControlSheetController::class, 'projectSummary'])->name('api.v1.fleet.service-delivery-control-sheets.project-summary');
                 Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
                 Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
                 Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');

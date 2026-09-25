@@ -58,7 +58,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     ): LengthAwarePaginator {
         $query = $this->query()
             ->whereNull('parent_uuid')
-            ->with(['project', 'routes', 'children'])
+            ->with(['project', 'routes', 'children.routes'])
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => function ($q) {
                 $q->where('is_active', true);
@@ -114,35 +114,164 @@ class ServiceDeliveryControlSheetService extends BaseService
             : [])->all();
         $mapa = $this->mapaFirmas($planillaIds, $rutaIds);
 
-        $decorar = function (ServiceDeliveryControlSheet $item) use ($mapa): void {
+        $decorar = function (ServiceDeliveryControlSheet $item) use ($mapa): array {
             $certificada = (bool) ($mapa['coordinador'][$item->id] ?? false);
             $rutas = $item->relationLoaded('routes')
                 ? $item->routes
                 : $item->routes()->orderBy('order_index')->get();
+            $pendientes = $this->calcularPendientes($item, $rutas, $mapa);
+            $pendientesOperativos = array_filter(
+                $pendientes,
+                fn (array $pendiente) => ($pendiente['rol'] ?? null) !== Signature::ROL_COORDINADOR
+            );
+            $item->setAttribute('operativamente_completa', $pendientesOperativos === []);
+            $item->setAttribute('firmas_pendientes', $pendientes);
 
-            $item->setAttribute('estado', $item->estadoAdministrativo($certificada));
-            $item->setAttribute('firmas_pendientes', $this->calcularPendientes($item, $rutas, $mapa));
+            return $pendientes;
         };
 
         $coleccion->transform(function (ServiceDeliveryControlSheet $item) use ($mapa, $decorar) {
-            $decorar($item);
+            $pendientesPadre = $decorar($item);
             $item->setAttribute('control_status', $this->resolveControlStatus($item));
             $item->setAttribute('routes_total', $item->routes ? $item->routes->count() : 0);
-            $item->setAttribute('has_coordinator_signature', (bool) ($mapa['coordinador'][$item->id] ?? false));
+            $certificadaPadre = (bool) ($mapa['coordinador'][$item->id] ?? false);
+            $item->setAttribute('has_coordinator_signature', $certificadaPadre);
 
             // Los días hijos también llevan su propio estado: es lo que muestran
             // las tablas del listado y la ficha de proyecto (§8).
             if ($item->relationLoaded('children')) {
-                $item->children->each(fn ($hijo) => $decorar($hijo));
-                $item->setAttribute('dias_pendientes', $item->children->sum(
-                    fn ($hijo) => count($hijo->firmas_pendientes ?? [])
-                ));
+                $item->children->each(function ($hijo) use ($decorar, $mapa): void {
+                    $pendientes = $decorar($hijo);
+                    $pendientesOperativos = array_filter(
+                        $pendientes,
+                        fn (array $pendiente) => ($pendiente['rol'] ?? null) !== Signature::ROL_COORDINADOR
+                    );
+                    $hijo->setAttribute(
+                        'estado',
+                        $hijo->estadoAdministrativo(
+                            (bool) ($mapa['coordinador'][$hijo->id] ?? false),
+                            $pendientesOperativos === []
+                        )
+                    );
+                });
+                $pendientesHijos = $item->children->flatMap(function ($hijo) {
+                    $fecha = $hijo->service_date
+                        ? Carbon::parse($hijo->service_date)->format('d/m/Y')
+                        : 'Fecha desconocida';
+
+                    return collect($hijo->firmas_pendientes ?? [])->map(function (array $pendiente) use ($fecha) {
+                        $pendiente['clave'] = 'dia:'.$fecha.':'.$pendiente['clave'];
+                        $pendiente['etiqueta'] = $fecha.' — '.$pendiente['etiqueta'];
+
+                        return $pendiente;
+                    });
+                })->values()->all();
+                $item->setAttribute('firmas_pendientes', $pendientesHijos);
+                $operativamenteCompletaPadre = $item->children->every(
+                    fn ($hijo) => ($hijo->operativamente_completa ?? false)
+                        || $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION
+                );
+                $item->setAttribute('operativamente_completa', $operativamenteCompletaPadre);
+                $item->setAttribute('dias_evidencia_incompleta', $item->children->filter(
+                    fn ($hijo) => ! ($hijo->operativamente_completa ?? false)
+                        && ! $hijo->esCerradaConExcepcion()
+                )->count());
+                $item->setAttribute('dias_pendientes_certificacion', $item->children->filter(
+                    fn ($hijo) => $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_OPERATIVAMENTE
+                )->count());
+                $item->setAttribute('dias_excepcion', $item->children->filter(
+                    fn ($hijo) => $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION
+                )->count());
+                $estadosHijos = $item->children->pluck('estado')->all();
+                $item->setAttribute(
+                    'estado',
+                    $item->estadoAdministrativo(
+                        $certificadaPadre,
+                        $operativamenteCompletaPadre,
+                        $estadosHijos
+                    )
+                );
+            } else {
+                $item->setAttribute('dias_evidencia_incompleta', 0);
+                $item->setAttribute('dias_pendientes_certificacion', 0);
+                $item->setAttribute('dias_excepcion', 0);
+                $item->setAttribute(
+                    'estado',
+                    $item->estadoAdministrativo(
+                        $certificadaPadre,
+                        count(array_filter($pendientesPadre, fn (array $p) => ($p['rol'] ?? null) !== Signature::ROL_COORDINADOR)) === 0
+                    )
+                );
             }
 
             return $item;
         });
 
         return $paginator;
+    }
+
+    /**
+     * Resumen global por día de un proyecto, independiente de la página visible.
+     * Lee en bloques para no cargar en memoria el historial completo.
+     *
+     * @return array{total_dias: int, cerrados: int, en_curso: int, evidencia_incompleta: int, pendiente_certificacion: int, excepciones: int, certificados: int}
+     */
+    public function getProjectEvidenceSummary(string $projectUuid): array
+    {
+        $summary = [
+            'total_dias' => 0,
+            'cerrados' => 0,
+            'en_curso' => 0,
+            'evidencia_incompleta' => 0,
+            'pendiente_certificacion' => 0,
+            'excepciones' => 0,
+            'certificados' => 0,
+        ];
+
+        $query = ServiceDeliveryControlSheet::query()
+            ->whereNull('parent_uuid')
+            ->where('project_uuid', $projectUuid)
+            ->with(['routes', 'children.routes'])
+            ->withCount(['children as children_total'])
+            ->withCount(['children as children_open' => fn ($q) => $q->where('is_active', true)]);
+
+        $query->chunkById(100, function ($parents) use (&$summary): void {
+            $units = $parents->flatMap(
+                fn (ServiceDeliveryControlSheet $parent) => $parent->children->isNotEmpty()
+                    ? $parent->children
+                    : collect([$parent])
+            )->values();
+
+            $planillaIds = $units->pluck('id')->all();
+            $routeIds = $units->flatMap(fn ($unit) => $unit->routes->pluck('id'))->all();
+            $map = $this->mapaFirmas($planillaIds, $routeIds);
+
+            foreach ($units as $unit) {
+                $pending = $this->calcularPendientes($unit, $unit->routes, $map);
+                $operationalPending = array_filter(
+                    $pending,
+                    fn (array $item) => ($item['rol'] ?? null) !== Signature::ROL_COORDINADOR
+                );
+                $operationallyComplete = $operationalPending === [];
+                $certified = (bool) ($map['coordinador'][$unit->id] ?? false);
+                $state = $unit->estadoAdministrativo($certified, $operationallyComplete);
+
+                $summary['total_dias']++;
+                $unit->is_active ? $summary['en_curso']++ : $summary['cerrados']++;
+
+                if ($state === ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION) {
+                    $summary['excepciones']++;
+                } elseif (! $operationallyComplete) {
+                    $summary['evidencia_incompleta']++;
+                } elseif (! $unit->is_active && ! $certified) {
+                    $summary['pendiente_certificacion']++;
+                } elseif ($state === ServiceDeliveryControlSheet::ESTADO_CERTIFICADA) {
+                    $summary['certificados']++;
+                }
+            }
+        }, 'id');
+
+        return $summary;
     }
 
     public function getAllServiceDeliveryControlSheets(): Collection
@@ -221,13 +350,45 @@ class ServiceDeliveryControlSheetService extends BaseService
      */
     public function firmasPendientes(ServiceDeliveryControlSheet $record): array
     {
-        $routes = $record->relationLoaded('routes')
-            ? $record->routes
-            : $record->routes()->orderBy('order_index')->get();
+        return $this->firmasPendientesEnLote([$record])[$record->id] ?? [];
+    }
 
-        $mapa = $this->mapaFirmas([$record->id], $routes->pluck('id')->all());
+    /**
+     * Calcula pendientes para varias planillas con un lote de rutas y 3 consultas
+     * de firmas. Lo usan el listado, proyectos y PDF multi-día para evitar N+1.
+     *
+     * @param  iterable<ServiceDeliveryControlSheet>  $records
+     * @return array<int, array<int, array{clave: string, etiqueta: string, rol: ?string}>>
+     */
+    public function firmasPendientesEnLote(iterable $records): array
+    {
+        $records = collect($records)->values();
+        if ($records->isEmpty()) {
+            return [];
+        }
 
-        return $this->calcularPendientes($record, $routes, $mapa);
+        $sinRelaciones = $records->filter(fn (ServiceDeliveryControlSheet $record) => ! $record->relationLoaded('routes'));
+        if ($sinRelaciones->isNotEmpty()) {
+            $porPlanilla = ServiceDeliveryControlSheetRoute::query()
+                ->whereIn('service_delivery_control_sheet_uuid', $sinRelaciones->pluck('uuid')->all())
+                ->orderBy('order_index')
+                ->get()
+                ->groupBy('service_delivery_control_sheet_uuid');
+
+            foreach ($sinRelaciones as $record) {
+                $record->setRelation('routes', $porPlanilla->get($record->uuid, collect()));
+            }
+        }
+
+        $routeIds = $records->flatMap(fn ($record) => $record->routes->pluck('id'))->all();
+        $mapa = $this->mapaFirmas($records->pluck('id')->all(), $routeIds);
+
+        $pendientes = [];
+        foreach ($records as $record) {
+            $pendientes[$record->id] = $this->calcularPendientes($record, $record->routes, $mapa);
+        }
+
+        return $pendientes;
     }
 
     /**
@@ -256,6 +417,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             Signature::query()
                 ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
                 ->whereIn('entity_id', $planillaIds)
+                ->where('signer_role', Signature::ROL_COORDINADOR)
                 ->where('status', Signature::STATUS_VIGENTE)
                 ->get(['entity_id'])
                 ->each(function (Signature $sig) use (&$mapa): void {
@@ -287,6 +449,12 @@ class ServiceDeliveryControlSheetService extends BaseService
     private function calcularPendientes(ServiceDeliveryControlSheet $record, $routes, array $mapa): array
     {
         $pendientes = [];
+
+        // La excepción aprobada justifica precisamente estos faltantes: se
+        // muestra como estado propio, no simultáneamente como evidencia incompleta.
+        if ($record->esCerradaConExcepcion()) {
+            return [];
+        }
 
         $rolesPlanilla = $mapa['planilla'][$record->id] ?? [];
         $certificada = (bool) ($mapa['coordinador'][$record->id] ?? false);
@@ -344,6 +512,13 @@ class ServiceDeliveryControlSheetService extends BaseService
                     'rol' => null,
                 ];
             }
+            if (trim((string) $record->driver_name) === '') {
+                $pendientes[] = [
+                    'clave' => 'disponibilidad:responsable',
+                    'etiqueta' => 'Falta identificar al conductor responsable',
+                    'rol' => null,
+                ];
+            }
             if ($record->day_kind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
                 && $record->motivoDisponibilidad() === null) {
                 $pendientes[] = [
@@ -370,31 +545,6 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
 
         return $pendientes;
-    }
-
-    /**
-     * SPEC-002 §7.5 — Firma del coordinador por fila sin N+1.
-     *
-     * @param  array<int>  $planillaIds
-     * @return array<int, bool>
-     */
-    private function mapaCertificacion(array $planillaIds): array
-    {
-        if (empty($planillaIds)) {
-            return [];
-        }
-
-        $mapa = [];
-        Signature::query()
-            ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
-            ->whereIn('entity_id', $planillaIds)
-            ->where('status', Signature::STATUS_VIGENTE)
-            ->get(['entity_id'])
-            ->each(function (Signature $sig) use (&$mapa): void {
-                $mapa[$sig->entity_id] = true;
-            });
-
-        return $mapa;
     }
 
     /**

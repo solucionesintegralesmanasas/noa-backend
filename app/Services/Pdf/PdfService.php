@@ -12,6 +12,7 @@ use App\Services\ContractExtraction\FuecService;
 use App\Services\Fleet\AffiliateAdminChargeService;
 use App\Services\Fleet\BusinessCollaborationAgreementService;
 use App\Services\Fleet\VehicleService;
+use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
 use App\Services\ThirdParties\ThirdPartyService;
 use App\Utils\Logger;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
@@ -38,7 +39,8 @@ class PdfService
     public function __construct(
         private readonly VehicleService $vehicleService,
         private readonly CompanyService $companyService,
-        private readonly AffiliateAdminChargeService $affiliateAdminChargeService
+        private readonly AffiliateAdminChargeService $affiliateAdminChargeService,
+        private readonly ServiceDeliveryControlSheetService $serviceDeliveryControlSheetService
     ) {}
 
     /**
@@ -1136,22 +1138,38 @@ class PdfService
 
             // SPEC-002 §7.4 — La evidencia incompleta se AVISA, nunca se bloquea.
             // Se calcula por día una sola vez y se agrupa en la banda del pie.
-            $servicioCompletitud = app(\App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService::class);
             $firmasPendientesPdf = [];
+            $certificacionesPendientesPdf = [];
             $diasConExcepcion = [];
+            $pendientesPorDia = $this->serviceDeliveryControlSheetService->firmasPendientesEnLote($hojasDias);
             foreach ($hojasDias as $hojaDia) {
-                $pendientesDia = $servicioCompletitud->firmasPendientes($hojaDia);
-                if ($pendientesDia !== []) {
-                    $firmasPendientesPdf[] = [
-                        'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
-                        'pendientes' => array_column($pendientesDia, 'etiqueta'),
-                    ];
-                }
                 if ($hojaDia->esCerradaConExcepcion()) {
                     $diasConExcepcion[] = [
                         'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
                         'motivo' => $hojaDia->motivoExcepcion(),
                     ];
+                    continue;
+                }
+
+                $pendientesDia = $pendientesPorDia[$hojaDia->id] ?? [];
+                $pendientesOperativos = array_values(array_filter(
+                    $pendientesDia,
+                    fn (array $item) => ($item['rol'] ?? null) !== \App\Models\Signature::ROL_COORDINADOR
+                ));
+                $faltaCoordinador = collect($pendientesDia)->contains(
+                    fn (array $item) => ($item['rol'] ?? null) === \App\Models\Signature::ROL_COORDINADOR
+                );
+                if ($pendientesOperativos !== []) {
+                    $firmasPendientesPdf[] = [
+                        'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
+                        'pendientes' => array_column($pendientesOperativos, 'etiqueta'),
+                    ];
+                }
+                if ($pendientesOperativos === []
+                    && $faltaCoordinador
+                    && ! $hojaDia->is_active
+                    && ! $hojaDia->esCerradaConExcepcion()) {
+                    $certificacionesPendientesPdf[] = Carbon::parse($hojaDia->service_date)->format('d/m/Y');
                 }
             }
 
@@ -1183,6 +1201,7 @@ class PdfService
                 'mapa_es_captura' => $mapaEsCaptura,
                 'evidencia_incompleta' => $firmasPendientesPdf !== [],
                 'firmas_pendientes' => $firmasPendientesPdf,
+                'certificaciones_pendientes' => $certificacionesPendientesPdf,
                 'dias_con_excepcion' => $diasConExcepcion,
             ];
 

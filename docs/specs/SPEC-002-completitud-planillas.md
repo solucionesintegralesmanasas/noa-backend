@@ -28,14 +28,16 @@ cola local móvil, rediseño del flujo de captura diaria.
 | Cerrada operativamente | Todas sus unidades operativas cumplen su regla (§5); admite firma tardía del coordinador |
 | Certificada | Cerrada operativamente + firma vigente del coordinador |
 | Firma propia / heredada | Propia: `entity_type` + `entity_id` + `signer_role` corresponden a la unidad; heredada: tomada de la planilla padre por respaldo (`PdfService.php:972-975`) |
-| Evidencia incompleta | Cerrada operativamente pero con `firmas_pendientes` no vacío |
+| Evidencia operativa incompleta | Una ruta/día tiene datos o firmas operativas pendientes; una firma tardía del coordinador no hace que la operación sea incompleta |
+| Pendiente de certificación | Cerrada operativamente, sin faltantes operativos, pero aún sin firma vigente del coordinador |
 
 ## 4. Modelo de estados
 
 `BORRADOR → EN_CURSO → PARCIAL → CERRADA_OPERATIVAMENTE → CERTIFICADA`, más `CERRADA_CON_EXCEPCION`
-como rama lateral. Transiciones permitidas: solo hacia adelante. El campo actual `is_active` se conserva
-como bandera de compatibilidad (`false` = `CERRADA_OPERATIVAMENTE` o superior) para no romper reportes
-ni el PDF.
+como rama lateral. Los estados son derivados de operación, hijos, completitud y firma coordinadora; `is_active`
+se conserva como bandera de compatibilidad, pero **no basta por sí sola** para llamar certificada una planilla.
+`PARCIAL` también cubre una planilla ya inactiva que todavía tiene faltantes operativos; `CERRADA_OPERATIVAMENTE`
+significa operación completa con certificación administrativa pendiente; `CERTIFICADA` exige ambas cosas.
 
 **Qué significa `CERRADA_CON_EXCEPCION`:** es el estado para una unidad operativa (recorrido, día-hijo o
 planilla) que **no pudo completarse por la vía normal pero tiene un motivo justificado y aprobado**. Sin
@@ -55,7 +57,8 @@ congelamiento backend que al cierre operativo.
 **5.1 Recorrido ejecutado.** Completo si y solo si: funcionario con nombre + CC · hora final ·
 kilometraje final · firma del funcionario · firma del conductor. Si falta un dato operativo, exige
 novedad tipificada; sin ella queda **incompleto**.
-**5.2 Disponibilidad / día sin recorrido.** No se inventa ruta. Exige: inicio operativo · responsable ·
+**5.2 Disponibilidad / día sin recorrido.** No se inventa ruta. Exige: hora de inicio operativa · conductor
+responsable identificable ·
 **motivo declarado** (`availability_reason`) · firma del conductor. La firma del coordinador la eleva a
 certificada. La modalidad se declara explícitamente con `day_kind` (`operacion|disponibilidad`): declararla
 exige motivo y prohíbe recorridos. Para el histórico sin `day_kind`, se conserva la inferencia anterior
@@ -90,24 +93,25 @@ de una planilla cerrada. Siguen abiertos después del cierre: firma del coordina
 **7.3 Idempotencia.** La firma pública del coordinador reemplaza (una vigente). `closeRoute` ya no
 borra las firmas omitidas (`:738`) y un envío parcial tampoco borra los datos de cierre ya
 persistidos del recorrido (`:711`: cada campo se escribe solo si llega en el payload).
-**7.4 PDF.** `generateDailyServiceControlSheetPdf()` pasa `firmas_pendientes` y `dias_con_excepcion`;
-la vista (`resources/views/pdf/service-control-sheet.blade.php`) renderiza dos bandas: *"EVIDENCIA
-INCOMPLETA"* (lista día a día qué falta) y *"CERRADA CON EXCEPCIÓN"* (motivo aprobado). La descarga nunca
-se bloquea. Los demás PDF (mensual, reporte) y el Excel no llevan banda: solo el diario es evidencia
-certificable día a día.
-**7.5 Listado.** Reemplazado el `exists()` por fila por 3 consultas en lote (`mapaFirmas`) para padres **y**
-días hijos: 12 filas → 9 consultas constantes (antes ~21 y creciendo). Cada fila y cada día exponen `estado`,
-`firmas_pendientes` y `dias_pendientes`.
+**7.4 PDF.** `generateDailyServiceControlSheetPdf()` pasa faltantes operativos, certificaciones pendientes y
+excepciones a `resources/views/pdf/partials/evidence-status.blade.php`. Renderiza bandas distintas: *"EVIDENCIA
+OPERATIVA INCOMPLETA"*, *"PENDIENTE DE CERTIFICACIÓN ADMINISTRATIVA"* y *"CERRADA CON EXCEPCIÓN"*. Una firma
+coordinadora tardía no etiqueta como incompleta una operación ya completa. Una excepción aprobada no se
+duplica como evidencia incompleta. La descarga nunca se bloquea.
+**7.5 Listado.** Padres y días hijos cargan `routes` en lote y sus firmas se agrupan en 3 consultas; no hay
+consulta por hijo. Una prueba con 12 días hijos confirma que el total de SELECT queda acotado (≤20),
+independiente del número de hijos. Cada fila y día exponen `estado`, `firmas_pendientes` y completitud
+operativa; los padres agregan los faltantes con la fecha de cada hijo.
 **7.6 Permiso `close_exception`.** `POST /{uuid}/close-exception` con
 `permission:service_delivery_control_sheets.close_exception`, asignado a `ADMIN_EMPRESA` (SUPERADMIN recibe
 todos). Reutiliza la guarda de congelamiento: no es puerta trasera a una evidencia ya cerrada.
 
 ## 8. Frontend
 
-Badge de estado administrativo (`estado` del backend) en la fila del listado y en cada día de la tabla
-expandible y de la ficha de proyecto, con `title` que **enumera qué falta** (no depende solo del color).
-En el listado, contador de días con evidencia incompleta; en la ficha del proyecto, resumen
-*"N con evidencia incompleta"* o *"Evidencia completa"*, que es la lectura rápida para un proyecto de meses.
+Badge de estado administrativo (`estado` del backend) en la fila del listado y cada día de la tabla expandible
+y ficha del proyecto; ya no se duplica con el badge legado `Cerrado/En curso`. El `title` enumera faltantes.
+El listado y la ficha distinguen días operativamente incompletos, pendientes de certificación y cerrados con
+excepción. La ficha obtiene los totales globales del proyecto desde `project-summary`, no de la página visible.
 Botón PDF siempre activo; `title`/`aria-label` descriptivos; iconos con `aria-hidden`. Sin imports nuevos
 de `sweetalert2` (usar `utils/toast.js`).
 
@@ -115,10 +119,12 @@ de `sweetalert2` (usar `utils/toast.js`).
 
 - Cerrada + `PUT`/`DELETE`/re-`close`/`start` → 422 con clave de error (`update`/`delete`/`close`/`start`); abierta + `PUT` → 200.
 - `close-exception` sin permiso → 403; sin sesión → 401; sin motivo → 422; sobre planilla ya cerrada → 422.
+- Día-hijo con todas sus firmas → `CERTIFICADA`; si tiene faltantes operativos aunque el coordinador firmó → `PARCIAL`; el padre resume los estados de sus hijos.
+- Resumen de proyecto cuenta fechas completas globalmente y el listado precarga rutas/firmas de hijos sin N+1.
 - `attachRouteMap` en cerrada → 422; en abierta → 200.
 - Firma de coordinador sobre cerrada → 200.
 - Envío parcial de firmas por ruta no borra la firma existente.
-- PDF incompleto → 200 y contiene la banda; completo → sin banda.
+- Faltantes operativos → banda `EVIDENCIA OPERATIVA INCOMPLETA`; solo coordinador pendiente → banda de certificación, no la operativa; excepción aprobada → banda de excepción, no la de incompleta.
 - `npm run test` en verde; `php -l` en archivos tocados; recorrido manual UI abierta→cerrada.
 
 ### 9.1 Cobertura ejecutada (2026-09-25)
@@ -141,7 +147,7 @@ disponibilidad legada con 1 firma → `conductor` vigente; con 2 → `conductor`
 planilla con recorridos → orden `funcionario`/`conductor` conservado; coordinador → `coordinador`.
 Filas de prueba eliminadas después.
 
-`php artisan test`: **34 tests verdes** (antes 27). Frontend: `npm run test` en verde (9 tests + a11y + perf + lint).
+`php artisan test`: **42 tests verdes** (antes de la última tanda: 34). Frontend: `npm run test` en verde (9 tests + a11y + perf + lint).
 
 **Tests nuevos de esta fase:**
 - `tests/Feature/CierreExcepcionTest.php` — cobertura HTTP real con **Sanctum + Spatie**: 403 sin permiso,
@@ -149,15 +155,21 @@ Filas de prueba eliminadas después.
   Nota: la API envuelve la validación en `error.details[].field`, no en `errors`.
 - `tests/Feature/FirmasRecorridoTest.php` — §7.3 E2E: el reenvío parcial **conserva** la firma omitida y el
   reenvío de un rol marca la anterior como `reemplazada` sin borrarla.
+- `tests/Feature/EvidenciaListadoTest.php` — hijos con rutas/firmas cargadas en lote, estado padre/hijo sin
+  certificar operaciones incompletas, resumen global del proyecto y cota de consultas independiente del
+  número de días hijos.
+- `tests/Feature/EvidenceStatusPdfTest.php` — las bandas de evidencia operativa, certificación tardía y
+  excepción son distintas y no se muestran cuando no hay advertencias.
 
-**Pendiente de cobertura:** el endpoint HTTP (autenticación Sanctum + permisos Spatie) y la descarga real
-del PDF con la banda de evidencia incompleta (§7.4), todavía no implementada.
+**Pendiente de cobertura:** render end-to-end del PDF completo con DomPDF y firmas/relaciones persistidas. La
+vista parcial que contiene las bandas sí se renderiza y prueba directamente; las respuestas serializadas de
+listado/proyecto se verifican desde el servicio Feature.
 
 ## 10. Fases
 
 1. Migración + backfill + `firmasPendientes`. 2. Congelamiento + pruebas §9. 3. Idempotencia +
-no-borrado parcial. 4. PDF + listado + badges. 5. ADR-001 a ACEPTADO, plan §7 (`ARQ-004R/005R`)
-actualizado.
+no-borrado parcial. 4. PDF + listado + badges. **Fases 1-4 implementadas y verificadas** (commits de
+2026-09-25). 5. ADR-001 a ACEPTADO y plan §7 (`ARQ-004R/005R`) actualizado.
 
 ## 11. Riesgos
 

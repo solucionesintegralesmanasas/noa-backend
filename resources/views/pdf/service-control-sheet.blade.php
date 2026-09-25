@@ -319,6 +319,12 @@
             color: #7f1d1d;
         }
 
+        .banda-certificacion {
+            border-color: #0369a1;
+            background: #f0f9ff;
+            color: #0c4a6e;
+        }
+
         .banda-evidencia-detalle {
             margin-top: 1px;
             padding-left: 6px;
@@ -607,32 +613,7 @@
         </tbody>
     </table>
 
-    <!-- SPEC-002 §7.4 — Banda de evidencia incompleta (avisa, no bloquea) -->
-    @if (!empty($evidencia_incompleta))
-        <div class="banda-evidencia">
-            <strong>EVIDENCIA INCOMPLETA.</strong>
-            Este documento se generó con firmas o datos pendientes. No invalida el cierre
-            operativo, pero debe completarse antes de entregarse como evidencia final.
-            @foreach (($firmas_pendientes ?? []) as $diaIncompleto)
-                <div class="banda-evidencia-detalle">
-                    &bull; {{ $diaIncompleto['fecha'] }}: {{ implode(' · ', $diaIncompleto['pendientes']) }}
-                </div>
-            @endforeach
-        </div>
-    @endif
-
-    @if (!empty($dias_con_excepcion))
-        <div class="banda-evidencia banda-excepcion">
-            <strong>CERRADA CON EXCEPCIÓN.</strong>
-            Algún día no pudo completarse por motivos justificados y fue aprobado por
-            un administrador; no equivale a un día con evidencia completa.
-            @foreach ($dias_con_excepcion as $diaExc)
-                <div class="banda-evidencia-detalle">
-                    &bull; {{ $diaExc['fecha'] }}: {{ $diaExc['motivo'] }}
-                </div>
-            @endforeach
-        </div>
-    @endif
+    @include('pdf.partials.evidence-status')
 
     <!-- PIE / FIRMAS -->
     <div class="footer-section">

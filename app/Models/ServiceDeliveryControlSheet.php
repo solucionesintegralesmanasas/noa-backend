@@ -119,21 +119,47 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
      * @param  bool|null  $certificada  Pasa el resultado ya calculado para evitar
      *                                  una consulta por fila en listados (§7.5).
      */
-    public function estadoAdministrativo(?bool $certificada = null): string
+    public function estadoAdministrativo(
+        ?bool $certificada = null,
+        bool $operativamenteCompleta = true,
+        array $estadosHijos = []
+    ): string
     {
-        if ($this->is_active) {
-            $total = (int) ($this->children_total ?? 0);
-            $abiertos = (int) ($this->children_open ?? 0);
+        $total = (int) ($this->children_total ?? 0);
+        $abiertos = (int) ($this->children_open ?? 0);
 
-            if ($total > 0 && $abiertos < $total) {
-                return self::ESTADO_PARCIAL;
+        if ($total > 0) {
+            if ($abiertos > 0) {
+                if ($abiertos < $total) {
+                    return self::ESTADO_PARCIAL;
+                }
+
+                return empty($this->start_time)
+                    ? self::ESTADO_BORRADOR
+                    : self::ESTADO_EN_CURSO;
             }
 
-            $sinRutas = $this->relationLoaded('routes')
-                ? $this->routes->isEmpty()
-                : $this->routes()->count() === 0;
+            // Un padre multi-día resume a sus unidades hijas. No se certifica
+            // por la firma del padre si un día hijo sigue incompleto.
+            if (in_array(self::ESTADO_CERRADA_CON_EXCEPCION, $estadosHijos, true)
+                || $this->esCerradaConExcepcion()) {
+                return self::ESTADO_CERRADA_CON_EXCEPCION;
+            }
+            if (in_array(self::ESTADO_PARCIAL, $estadosHijos, true)) {
+                return self::ESTADO_PARCIAL;
+            }
+            if ($estadosHijos !== [] && count(array_filter(
+                $estadosHijos,
+                fn (string $estado) => $estado === self::ESTADO_CERTIFICADA
+            )) === count($estadosHijos)) {
+                return self::ESTADO_CERTIFICADA;
+            }
 
-            if (empty($this->start_time) && $sinRutas) {
+            return self::ESTADO_CERRADA_OPERATIVAMENTE;
+        }
+
+        if ($this->is_active) {
+            if (empty($this->start_time)) {
                 return self::ESTADO_BORRADOR;
             }
 
@@ -142,6 +168,10 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
 
         if ($this->esCerradaConExcepcion()) {
             return self::ESTADO_CERRADA_CON_EXCEPCION;
+        }
+
+        if (! $operativamenteCompleta) {
+            return self::ESTADO_PARCIAL;
         }
 
         $certificada ??= $this->tieneCertificacionVigente();
@@ -158,6 +188,7 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         return Signature::query()
             ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
             ->where('entity_id', $this->id)
+            ->where('signer_role', Signature::ROL_COORDINADOR)
             ->where('status', Signature::STATUS_VIGENTE)
             ->exists();
     }
