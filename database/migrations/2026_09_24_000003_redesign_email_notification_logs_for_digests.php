@@ -43,9 +43,8 @@ return new class extends Migration
             $table->dropIndex('email_logs_company_milestone_date_idx');
             $table->dropIndex('email_logs_entity_milestone_idx');
             $table->dropColumn(['company_uuid', 'entity_type', 'entity_uuid', 'sent_date']);
-        });
-        DB::statement('ALTER TABLE `email_notification_logs` MODIFY `document_uuid` CHAR(36) NOT NULL');
-        Schema::table('email_notification_logs', function (Blueprint $table) {
+            // Sin forzar NOT NULL: las filas del digest pueden traer NULL y
+            // romperían la reversa. La FK solo se restaura si todo tiene valor.
             $table->foreign('document_uuid')->references('uuid')->on('vehicle_documents')->cascadeOnDelete();
         });
     }

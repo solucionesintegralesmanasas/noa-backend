@@ -176,6 +176,11 @@ class EmailLogService extends BaseService
                         if (! $document->expiry_date) {
                             continue;
                         }
+                        // Los reemplazados quedan INACTIVA al registrar el nuevo;
+                        // incluirlos reviviría historial ya superado en el correo.
+                        if (strtoupper((string) ($document->status ?? '')) === 'INACTIVA') {
+                            continue;
+                        }
                         // Los reemplazados quedan INACTIVA al crear el nuevo;
                         // avisar por ellos sería revivir historial superado.
                         if (strtoupper((string) ($document->status ?? '')) === 'INACTIVA') {
