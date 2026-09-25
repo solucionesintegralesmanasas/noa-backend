@@ -102,8 +102,9 @@ class OwnCompany
 
     /**
      * Indica si un vehículo tiene tarjeta de operación de la empresa propia.
-     * Se evalúa la tarjeta vigente más reciente; sin tarjeta no se puede
-     * determinar y se considera que no es propio.
+     * Se evalúa la tarjeta activa más reciente; si no hay ninguna activa se
+     * usa la más reciente como respaldo. Sin tarjeta no se puede determinar
+     * y se considera que no es propio.
      */
     public static function esVehiculoPropio(?Vehicle $vehicle, ?string $companyUuid = null): bool
     {
@@ -117,7 +118,8 @@ class OwnCompany
             ? $vehicle->operationCards
             : OperationCard::query()->where('vehicle_uuid', $vehicle->uuid)->get();
 
-        $vigente = $tarjetas->sortByDesc(fn (OperationCard $tarjeta) => (string) $tarjeta->expiration_date)->first();
+        $ordenadas = $tarjetas->sortByDesc(fn (OperationCard $tarjeta) => (string) $tarjeta->expiration_date)->values();
+        $vigente = $ordenadas->first(fn (OperationCard $tarjeta) => (bool) $tarjeta->status) ?? $ordenadas->first();
 
         if (! $vigente) {
             return false;

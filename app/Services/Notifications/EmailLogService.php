@@ -176,6 +176,11 @@ class EmailLogService extends BaseService
                         if (! $document->expiry_date) {
                             continue;
                         }
+                        // Los reemplazados quedan INACTIVA al crear el nuevo;
+                        // avisar por ellos sería revivir historial superado.
+                        if (strtoupper((string) ($document->status ?? '')) === 'INACTIVA') {
+                            continue;
+                        }
                         $items[] = $this->armarItem(
                             (string) $vehicle->vehicle_license_plate,
                             (string) ($document->document_type ?? 'Documento'),
@@ -293,46 +298,103 @@ class EmailLogService extends BaseService
             Mail::to($email)->send(new VehicleExpiryDigestMail($companyName, $items, $asunto, $intro));
             Log::info("Digest de vencimientos enviado a {$email} | Empresa: {$config->company_uuid} | Slot: {$slot} | Items: ".count($items));
 
-            try {
-                if ($porEntidad) {
-                    foreach ($items as $item) {
-                        EmailNotificationLog::create([
-                            'company_uuid' => $config->company_uuid,
-                            'entity_type' => $item['entity_type'],
-                            'entity_uuid' => $item['entity_uuid'],
-                            'recipient_email' => $email,
-                            'milestone' => $slot,
-                            'sent_date' => Carbon::today(),
-                            'status' => 'sent',
-                        ]);
-                    }
-                } else {
-                    EmailNotificationLog::create([
-                        'company_uuid' => $config->company_uuid,
+            if ($porEntidad) {
+                // Clave por entidad (sin empresa ni fecha): el recordatorio es
+                // único y el índice (entity, milestone) lo garantiza.
+                foreach ($items as $item) {
+                    $this->registrarEnvio([
+                        'company_uuid' => null,
+                        'entity_type' => $item['entity_type'],
+                        'entity_uuid' => $item['entity_uuid'],
                         'recipient_email' => $email,
                         'milestone' => $slot,
-                        'sent_date' => Carbon::today(),
+                        'sent_date' => null,
                         'status' => 'sent',
-                    ]);
+                    ], true);
                 }
-            } catch (QueryException $e) {
-                // Otra ejecución registró el mismo slot/entidad primero:
-                // el correo ya salió y el constraint evitó el duplicado.
-                if (($e->errorInfo[1] ?? null) !== 1062) {
-                    throw $e;
-                }
-                Log::info("Digest {$slot} ya registrado para {$email}; se evita el duplicado.");
+            } else {
+                $this->registrarEnvio([
+                    'company_uuid' => $config->company_uuid,
+                    'recipient_email' => $email,
+                    'milestone' => $slot,
+                    'sent_date' => Carbon::today(),
+                    'status' => 'sent',
+                ], true);
             }
         } catch (\Exception $e) {
             Log::error("Error enviando digest de vencimientos a {$email}: ".$e->getMessage());
 
-            EmailNotificationLog::create([
-                'company_uuid' => $config->company_uuid,
-                'recipient_email' => $email,
-                'milestone' => $slot,
-                'sent_date' => Carbon::today(),
-                'status' => 'failed',
+            // El fallo se registra sin pisar un envío exitoso concurrente.
+            if ($porEntidad) {
+                foreach ($items as $item) {
+                    $this->registrarEnvio([
+                        'company_uuid' => null,
+                        'entity_type' => $item['entity_type'],
+                        'entity_uuid' => $item['entity_uuid'],
+                        'recipient_email' => $email,
+                        'milestone' => $slot,
+                        'sent_date' => null,
+                        'status' => 'failed',
+                    ], false);
+                }
+            } else {
+                $this->registrarEnvio([
+                    'company_uuid' => $config->company_uuid,
+                    'recipient_email' => $email,
+                    'milestone' => $slot,
+                    'sent_date' => Carbon::today(),
+                    'status' => 'failed',
+                ], false);
+            }
+        }
+    }
+
+    /**
+     * Registra un envío de forma idempotente ante carreras o reintentos.
+     * Si la clave ya existe como enviada, no hace nada; si existe como
+     * fallida y el envío actual fue exitoso, la promueve a enviada.
+     */
+    private function registrarEnvio(array $atributos, bool $promoverFallido): void
+    {
+        try {
+            EmailNotificationLog::create($atributos);
+        } catch (QueryException $e) {
+            if (($e->errorInfo[1] ?? null) !== 1062) {
+                throw $e;
+            }
+            $existente = $this->buscarRegistro($atributos);
+            if (! $existente) {
+                throw $e;
+            }
+            if ($existente->status === 'sent' || ! $promoverFallido) {
+                Log::info("Digest {$atributos['milestone']} ya registrado para {$atributos['recipient_email']}; se evita el duplicado.");
+
+                return;
+            }
+            $existente->update([
+                'recipient_email' => $atributos['recipient_email'],
+                'sent_date' => $atributos['sent_date'] ?? $existente->sent_date,
+                'status' => 'sent',
             ]);
         }
+    }
+
+    /**
+     * Localiza el registro dueño de una clave de idempotencia.
+     */
+    private function buscarRegistro(array $atributos): ?EmailNotificationLog
+    {
+        $query = EmailNotificationLog::query()->where('milestone', $atributos['milestone']);
+        if (! empty($atributos['entity_uuid'])) {
+            $query->where('entity_type', $atributos['entity_type'])
+                ->where('entity_uuid', $atributos['entity_uuid']);
+        } elseif (! empty($atributos['company_uuid']) && ! empty($atributos['sent_date'])) {
+            $query->where('company_uuid', $atributos['company_uuid'])
+                ->whereDate('sent_date', $atributos['sent_date']);
+        } else {
+            return null;
+        }
+
+        return $query->first();
     }
 }
