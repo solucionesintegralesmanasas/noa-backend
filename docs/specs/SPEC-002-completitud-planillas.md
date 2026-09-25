@@ -33,10 +33,22 @@ cola local móvil, rediseño del flujo de captura diaria.
 ## 4. Modelo de estados
 
 `BORRADOR → EN_CURSO → PARCIAL → CERRADA_OPERATIVAMENTE → CERTIFICADA`, más `CERRADA_CON_EXCEPCION`
-(ausencia justificada + rol autorizado) como rama lateral. Transiciones permitidas: solo hacia adelante,
-excepto `CERRADA_CON_EXCEPCION` que requiere permiso explícito. El campo actual `is_active` se conserva
+como rama lateral. Transiciones permitidas: solo hacia adelante. El campo actual `is_active` se conserva
 como bandera de compatibilidad (`false` = `CERRADA_OPERATIVAMENTE` o superior) para no romper reportes
 ni el PDF.
+
+**Qué significa `CERRADA_CON_EXCEPCION`:** es el estado para una unidad operativa (recorrido, día-hijo o
+planilla) que **no pudo completarse por la vía normal pero tiene un motivo justificado y aprobado**. Sin
+este estado solo hay dos salidas malas: dejarla `EN_CURSO` para siempre (contamina la evidencia con
+pendientes eternos) o inventar datos para poder cerrarla (falsifica la evidencia).
+
+Ejemplos: ruta no ejecutada por vía cerrada · funcionario ausente que impidió recoger la firma · día-hijo
+no operado por mantenimiento del vehículo · recorrido interrumpido por fuerza mayor.
+
+Requisitos: motivo/novedad tipificada obligatorio + aprobación de rol autorizado (§12.2) + fecha de la
+decisión. Efectos: cuenta como cerrada para los totales del padre y del proyecto, pero se muestra con
+distintivo propio en UI y PDF (no pasa por "cerrada normal"); una vez marcada, aplica el mismo
+congelamiento backend que al cierre operativo.
 
 ## 5. Reglas de completitud por unidad operativa
 
@@ -104,7 +116,8 @@ Backfill ambiguo en firmas antiguas (mitigación: `NULL` explícito) · algún f
 cerradas empezará a fallar 422 —intencionado, pero probar antes de desplegar · subcontratados sin UUID
 (mitigación: `signer_uuid` nullable + texto libre conservado).
 
-## 12. Decisiones abiertas (confirmar antes de implementar)
+## 12. Decisiones (estado 2026-09-25)
 
-1. ¿La regla §5 incluye firmas por ruta (recomendado) o solo las 3 fijas?
-2. ¿`CERRADA_CON_EXCEPCION` requiere qué rol: `ADMIN_EMPRESA`, `SUPERADMIN`, o ambos?
+1. **DECIDIDA — firmas por ruta incluidas:** la regla §5 evalúa cada recorrido con sus dos firmas
+   (funcionario + conductor), además de las 3 de planilla/coordinador.
+2. **ABIERTA — rol para `CERRADA_CON_EXCEPCION`:** ¿`ADMIN_EMPRESA`, `SUPERADMIN`, o ambos?
