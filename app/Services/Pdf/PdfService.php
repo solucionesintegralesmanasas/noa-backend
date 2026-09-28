@@ -1552,23 +1552,6 @@ class PdfService
     }
 
     /**
-     * Formatea kilómetros sin ceros innecesarios: 12300.00 → 12300, 12300.50 → 12300.5.
-     */
-    private function formatKilometer(mixed $valor): string
-    {
-        if ($valor === null || $valor === '') {
-            return '';
-        }
-        if (! is_numeric($valor)) {
-            return (string) $valor;
-        }
-        $numero = number_format((float) $valor, 2, '.', '');
-        $numero = rtrim(rtrim($numero, '0'), '.');
-
-        return $numero === '' ? '0' : $numero;
-    }
-
-    /**
      * Resuelve el logo de la empresa con respaldo en disco cuando MediaLibrary no tiene imagen.
      * Retorna el base64 ya codificado y el mime para usar en el data-uri del PDF.
      *
