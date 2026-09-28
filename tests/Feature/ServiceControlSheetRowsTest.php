@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use App\Models\ServiceDeliveryControlSheet;
 use App\Models\ServiceDeliveryControlSheetRoute;
 use App\Services\Pdf\ServiceControlSheetRows;
+use App\Services\Pdf\ServiceControlSheetRowsOptions;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -61,16 +62,16 @@ class ServiceControlSheetRowsTest extends TestCase
         return $ruta;
     }
 
-    private function opciones(array $extras = []): array
+    private function opciones(array $extras = []): ServiceControlSheetRowsOptions
     {
-        return array_merge([
-            'proyecto' => fn () => 'Proyecto Prueba',
-            'rutasDe' => fn ($hoja) => $hoja->routes,
-            'firmaHoja' => fn () => 'BASE64_HOJA',
-            'firmasRuta' => fn ($hoja, $route) => ['funcionario' => 'BASE64_RUTA', 'conductor' => null],
-            'numeroEntero' => true,
-            'conRutasDetalle' => true,
-        ], $extras);
+        return new ServiceControlSheetRowsOptions(
+            proyecto: $extras['proyecto'] ?? fn () => 'Proyecto Prueba',
+            rutasDe: $extras['rutasDe'] ?? fn ($hoja) => $hoja->routes,
+            firmaHoja: $extras['firmaHoja'] ?? fn () => 'BASE64_HOJA',
+            firmasRuta: $extras['firmasRuta'] ?? fn ($hoja, $route) => ['funcionario' => 'BASE64_RUTA', 'conductor' => null],
+            numeroEntero: $extras['numeroEntero'] ?? true,
+            conRutasDetalle: $extras['conRutasDetalle'] ?? true,
+        );
     }
 
     public function test_recorrido_completo_usa_cierre_propio_y_respaldo_de_hoja(): void
