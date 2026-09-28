@@ -58,7 +58,13 @@ class LocationTrackingService extends BaseService
         }
 
         return $this->transaction(function () use ($data) {
-            $location = DriverLocation::create([
+            $recordedAt = $data['recorded_at'] ?? now();
+
+            // La distancia se calcula antes de insertar: el punto anterior del
+            // conductor ya existe y así el nuevo se guarda una sola vez.
+            $anterior = $this->puntoAnterior($data['third_party_uuid'], $recordedAt);
+
+            $location = new DriverLocation([
                 'uuid' => (string) Str::uuid(),
                 'company_uuid' => $data['company_uuid'],
                 'third_party_uuid' => $data['third_party_uuid'],
@@ -73,9 +79,17 @@ class LocationTrackingService extends BaseService
                 'battery_level' => $data['battery_level'] ?? null,
                 'is_moving' => $data['is_moving'] ?? false,
                 'source' => $data['source'] ?? 'gps',
-                'recorded_at' => $data['recorded_at'] ?? now(),
+                'recorded_at' => $recordedAt,
             ]);
 
+            // La distancia la calcula el servidor: no es asignable en masa.
+            $location->distance_meters = $anterior
+                ? $this->distanciaEntrePuntos($anterior, $location)
+                : 0.0;
+
+            $location->save();
+
+            $this->recalcularPuntoSiguiente($location);
             $this->updateActiveSession($location);
             $this->processGeofences($location);
 
@@ -359,7 +373,109 @@ class LocationTrackingService extends BaseService
     }
 
     /**
+     * Punto anterior del conductor antes de insertar el nuevo.
+     *
+     * El id del punto nuevo todavía no existe y será el mayor, así que cualquier
+     * registro con la misma marca de tiempo es anterior: basta el rango simple.
+     */
+    private function puntoAnterior(string $driverUuid, mixed $recordedAt): ?DriverLocation
+    {
+        return $this->consultaVecino($driverUuid)
+            ->where('recorded_at', '<=', $recordedAt)
+            ->orderByDesc('recorded_at')
+            ->orderByDesc('id')
+            ->first();
+    }
+
+    /**
+     * Recalcula la distancia del punto siguiente cuando el nuevo llegó desordenado.
+     *
+     * El orden real es (recorded_at, id): primero los puntos con marca posterior
+     * y, entre los que comparten marca, los de id mayor. Si no hay siguiente, el
+     * punto era el último y no hay nada que corregir. El tramo que ese punto
+     * medía cambia, así que la sesión activa corrige su acumulado con la
+     * diferencia para no dejarlo desfasado.
+     */
+    private function recalcularPuntoSiguiente(DriverLocation $location): void
+    {
+        $siguiente = $this->consultaVecino($location->third_party_uuid)
+            ->where('id', '!=', $location->id)
+            ->where('recorded_at', '>', $location->recorded_at)
+            ->orderBy('recorded_at')
+            ->orderBy('id')
+            ->first()
+            ?? $this->consultaVecino($location->third_party_uuid)
+                ->where('recorded_at', $location->recorded_at)
+                ->where('id', '>', $location->id)
+                ->orderBy('id')
+                ->first();
+
+        if (! $siguiente) {
+            return;
+        }
+
+        $distanciaPrevia = (float) $siguiente->distance_meters;
+        $distanciaNueva = $this->distanciaEntrePuntos($location, $siguiente);
+
+        if ($distanciaNueva === $distanciaPrevia) {
+            return;
+        }
+
+        $siguiente->distance_meters = $distanciaNueva;
+        $siguiente->save();
+
+        $this->ajustarSesionActiva($siguiente->third_party_uuid, $distanciaNueva - $distanciaPrevia);
+    }
+
+    /**
+     * Consulta base del vecino, con el índice por conductor forzado.
+     *
+     * El vecino es del mismo conductor, sin filtrar por empresa: un conductor
+     * pertenece a una sola empresa y el filtro de empresa hacía que el
+     * optimizador recorriera todo el histórico de la compañía en cada punto.
+     * Sin el hint, con un histórico grande, el optimizador elige un plan con
+     * filesort que recorre el conductor completo.
+     */
+    private function consultaVecino(string $driverUuid): Builder
+    {
+        return DriverLocation::withoutGlobalScope('company')
+            ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
+            ->where('third_party_uuid', $driverUuid);
+    }
+
+    /**
+     * Distancia en metros entre dos puntos, redondeada a centímetros.
+     */
+    private function distanciaEntrePuntos(DriverLocation $desde, DriverLocation $hasta): float
+    {
+        return round($this->haversineDistance(
+            (float) $desde->latitude,
+            (float) $desde->longitude,
+            (float) $hasta->latitude,
+            (float) $hasta->longitude
+        ), 2);
+    }
+
+    /**
+     * Corrige el acumulado de la sesión activa cuando la distancia de un punto
+     * ya contabilizado cambia por la llegada de un punto desordenado.
+     */
+    private function ajustarSesionActiva(string $driverUuid, float $deltaMeters): void
+    {
+        if ($deltaMeters === 0.0) {
+            return;
+        }
+
+        DriverLocationSession::where('third_party_uuid', $driverUuid)
+            ->where('status', 'active')
+            ->increment('total_distance_km', round($deltaMeters / 1000, 4));
+    }
+
+    /**
      * Actualiza la sesión activa con la nueva ubicación recibida.
+     *
+     * La distancia usa la ya calculada para el punto, sin repetir la consulta
+     * del vecino anterior.
      */
     private function updateActiveSession(DriverLocation $location): void
     {
@@ -368,20 +484,7 @@ class LocationTrackingService extends BaseService
             ->first();
 
         if ($session) {
-            $lastPoint = DriverLocation::where('third_party_uuid', $location->third_party_uuid)
-                ->where('id', '!=', $location->id)
-                ->orderByDesc('recorded_at')
-                ->first();
-
-            $distanceKm = 0;
-            if ($lastPoint) {
-                $distanceKm = $this->haversineDistance(
-                    (float) $lastPoint->latitude,
-                    (float) $lastPoint->longitude,
-                    (float) $location->latitude,
-                    (float) $location->longitude
-                ) / 1000;
-            }
+            $distanceKm = ((float) ($location->distance_meters ?? 0)) / 1000;
 
             $session->increment('total_distance_km', round($distanceKm, 4));
             $session->increment('total_points');

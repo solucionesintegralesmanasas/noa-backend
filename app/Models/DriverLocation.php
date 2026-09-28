@@ -69,6 +69,7 @@ class DriverLocation extends Model
         'accuracy' => 'decimal:2',
         'battery_level' => 'integer',
         'is_moving' => 'boolean',
+        'distance_meters' => 'decimal:2',
         'recorded_at' => 'datetime',
     ];
 

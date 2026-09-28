@@ -43,6 +43,9 @@ class LocationHistoryService extends BaseService
     /**
      * Base del historial: conductor + empresa + rango, sin relaciones.
      * El trazado solo necesita latitud, longitud, velocidad y fecha.
+     *
+     * Se fuerza el índice por conductor: con un histórico grande el optimizador
+     * elige el índice de empresa y examina todos los puntos de la compañía.
      */
     private function rangoQuery(
         string $driverUuid,
@@ -50,7 +53,9 @@ class LocationHistoryService extends BaseService
         Carbon $start,
         Carbon $end
     ): Builder {
-        $query = DriverLocation::where('third_party_uuid', $driverUuid)
+        $query = DriverLocation::query()
+            ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
+            ->where('third_party_uuid', $driverUuid)
             ->whereBetween('recorded_at', [$start, $end]);
 
         if ($companyUuid) {
@@ -172,8 +177,9 @@ class LocationHistoryService extends BaseService
     /**
      * Agregados de un rango sin hidratar filas (ARQ-002).
      *
-     * La distancia usa ventana LAG() + haversine en SQL: mismo resultado que el
-     * cálculo anterior en PHP, sin cargar los puntos en memoria.
+     * La distancia es la suma de la distancia guardada en cada punto. Al primer
+     * punto del rango se le descuenta su tramo: su distancia es la que recorrió
+     * desde un punto anterior al rango, que no debe contar en el periodo.
      */
     private function calculateStats(
         string $driverUuid,
@@ -191,6 +197,7 @@ class LocationHistoryService extends BaseService
         $agg = DB::selectOne(
             'SELECT COUNT(*) AS total_points, MAX(speed) AS max_speed, ' .
             'AVG(CASE WHEN speed > 0 THEN speed END) AS avg_speed, ' .
+            'COALESCE(SUM(distance_meters), 0) AS total_distance_meters, ' .
             'MIN(recorded_at) AS start_time, MAX(recorded_at) AS end_time ' .
             "FROM driver_locations WHERE {$where}",
             $bindings
@@ -208,18 +215,16 @@ class LocationHistoryService extends BaseService
             ];
         }
 
-        $dist = DB::selectOne(
-            'SELECT COALESCE(SUM(6371000 * 2 * ATAN2(SQRT(a), SQRT(GREATEST(1 - a, 0)))), 0) AS m FROM (' .
-            'SELECT LEAST(POW(SIN(RADIANS(lat - prev_lat) / 2), 2) + COS(RADIANS(prev_lat)) * COS(RADIANS(lat)) * POW(SIN(RADIANS(lng - prev_lng) / 2), 2), 1) AS a FROM (' .
-            'SELECT latitude AS lat, longitude AS lng, ' .
-            'LAG(latitude) OVER (ORDER BY recorded_at, id) AS prev_lat, ' .
-            'LAG(longitude) OVER (ORDER BY recorded_at, id) AS prev_lng ' .
-            "FROM driver_locations WHERE {$where}) p WHERE prev_lat IS NOT NULL) d",
+        $primerPunto = DB::selectOne(
+            "SELECT distance_meters FROM driver_locations WHERE {$where} " .
+            'ORDER BY recorded_at ASC, id ASC LIMIT 1',
             $bindings
         );
 
+        $distancia = max(0.0, (float) $agg->total_distance_meters - (float) ($primerPunto->distance_meters ?? 0));
+
         return [
-            'total_distance_km' => round(((float) $dist->m) / 1000, 2),
+            'total_distance_km' => round($distancia / 1000, 2),
             'avg_speed_kmh' => $agg->avg_speed !== null ? round((float) $agg->avg_speed, 1) : 0,
             'max_speed_kmh' => $agg->max_speed !== null ? round((float) $agg->max_speed, 1) : 0,
             'total_points' => (int) $agg->total_points,
