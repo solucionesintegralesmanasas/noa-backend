@@ -54,10 +54,7 @@ final class PcpEvidence
                 ? $item->routes
                 : $item->routes()->orderBy('order_index')->get();
             $pendientes = $this->calcularPendientes($item, $rutas, $mapa);
-            $pendientesOperativos = array_filter(
-                $pendientes,
-                fn (array $pendiente) => ($pendiente['rol'] ?? null) !== Signature::ROL_COORDINADOR
-            );
+            $pendientesOperativos = $this->pendientesOperativos($pendientes);
             $item->setAttribute('operativamente_completa', $pendientesOperativos === []);
             $item->setAttribute('firmas_pendientes', $pendientes);
 
@@ -75,10 +72,7 @@ final class PcpEvidence
             if ($item->relationLoaded('children')) {
                 $item->children->each(function ($hijo) use ($decorar, $mapa): void {
                     $pendientes = $decorar($hijo);
-                    $pendientesOperativos = array_filter(
-                        $pendientes,
-                        fn (array $pendiente) => ($pendiente['rol'] ?? null) !== Signature::ROL_COORDINADOR
-                    );
+                    $pendientesOperativos = $this->pendientesOperativos($pendientes);
                     $hijo->setAttribute(
                         'estado',
                         $this->estado(
@@ -125,7 +119,7 @@ final class PcpEvidence
                 $estadoPadre = $this->estado(
                     $item,
                     $certificadaPadre,
-                    count(array_filter($pendientesPadre, fn (array $p) => ($p['rol'] ?? null) !== Signature::ROL_COORDINADOR)) === 0
+                    count($this->pendientesOperativos($pendientesPadre)) === 0
                 );
             }
 
@@ -145,6 +139,38 @@ final class PcpEvidence
     public function pendientes(ServiceDeliveryControlSheet $record): array
     {
         return $this->pendientesEnLote([$record])[$record->id] ?? [];
+    }
+
+    /**
+     * Faltantes operativos: todo lo pendiente salvo la firma tardía del
+     * coordinador. Es la definición que separa "evidencia incompleta" de
+     * "pendiente de certificación" en listados, resumen, PDF y bandas.
+     *
+     * @param  array<int, array{clave: string, etiqueta: string, rol: ?string}>  $pendientes
+     * @return array<int, array{clave: string, etiqueta: string, rol: ?string}>
+     */
+    public function pendientesOperativos(array $pendientes): array
+    {
+        return array_values(array_filter(
+            $pendientes,
+            fn (array $pendiente) => ($pendiente['rol'] ?? null) !== Signature::ROL_COORDINADOR
+        ));
+    }
+
+    /**
+     * ¿Falta la firma del coordinador entre los pendientes?
+     *
+     * @param  array<int, array{clave: string, etiqueta: string, rol: ?string}>  $pendientes
+     */
+    public function faltaCoordinador(array $pendientes): bool
+    {
+        foreach ($pendientes as $pendiente) {
+            if (($pendiente['rol'] ?? null) === Signature::ROL_COORDINADOR) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -219,16 +245,13 @@ final class PcpEvidence
 
             $planillaIds = $units->pluck('id')->all();
             $routeIds = $units->flatMap(fn ($unit) => $unit->routes->pluck('id'))->all();
-            $map = $this->mapaFirmas($planillaIds, $routeIds);
+            $mapa = $this->mapaFirmas($planillaIds, $routeIds);
 
             foreach ($units as $unit) {
-                $pending = $this->calcularPendientes($unit, $unit->routes, $map);
-                $operationalPending = array_filter(
-                    $pending,
-                    fn (array $item) => ($item['rol'] ?? null) !== Signature::ROL_COORDINADOR
-                );
+                $pending = $this->calcularPendientes($unit, $unit->routes, $mapa);
+                $operationalPending = $this->pendientesOperativos($pending);
                 $operationallyComplete = $operationalPending === [];
-                $certified = (bool) ($map['coordinador'][$unit->id] ?? false);
+                $certified = (bool) ($mapa['coordinador'][$unit->id] ?? false);
                 $state = $this->estado($unit, $certified, $operationallyComplete);
 
                 $summary['total_dias']++;

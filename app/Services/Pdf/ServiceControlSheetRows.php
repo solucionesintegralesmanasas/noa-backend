@@ -25,25 +25,23 @@ final class ServiceControlSheetRows
 {
     /**
      * @param iterable $hojasDias planillas del reporte
-     * @param array $opciones [
-     *   'proyecto' => callable($hoja): ?string,
-     *   'rutasDe' => callable($hoja): iterable,
-     *   'firmaHoja' => callable($hoja): ?string,  // base64 del funcionario, respaldo
-     *   'firmasRuta' => callable($hoja, $route): array{funcionario: ?string, conductor: ?string},
-     *   'numeroEntero' => bool,    // diario: (int); mensual/filtrado: "05"
-     *   'conRutasDetalle' => bool, // diario: devuelve el detalle por ruta para el pie
-     * ]
+     * @param ServiceControlSheetRowsOptions $opciones resoluciones por reporte
      * @return array{dias: array, totalRecorridos: int, rutasDetalle: array}
      */
-    public function armarDias(iterable $hojasDias, array $opciones): array
+    public function armarDias(iterable $hojasDias, ServiceControlSheetRowsOptions $opciones): array
     {
         $dias = [];
         $rutasDetalle = [];
         $totalRecorridos = 0;
 
+        $proyectoDe = $opciones->proyecto;
+        $rutasDe = $opciones->rutasDe;
+        $firmaHoja = $opciones->firmaHoja;
+        $firmasRuta = $opciones->firmasRuta;
+
         foreach ($hojasDias as $hojaDia) {
             $fechaDia = Carbon::parse($hojaDia->service_date);
-            $routes = collect(($opciones['rutasDe'])($hojaDia))->values();
+            $routes = collect($rutasDe($hojaDia))->values();
             $rutasLista = $this->formatRoutesList($routes);
             $rutasTexto = $rutasLista !== []
                 ? implode(' · ', $rutasLista)
@@ -61,7 +59,7 @@ final class ServiceControlSheetRows
                 : '';
 
             $baseFila = [
-                'numero' => $opciones['numeroEntero'] ? (int) $fechaDia->format('d') : $fechaDia->format('d'),
+                'numero' => $opciones->numeroEntero ? (int) $fechaDia->format('d') : $fechaDia->format('d'),
                 'fecha_completa' => $fechaDia->format('d/m/Y'),
                 'hora_inicio' => $horaInicio,
                 'descanso_inicio' => $restHours['inicio'],
@@ -72,14 +70,14 @@ final class ServiceControlSheetRows
                 'km_final' => $kmFinalGlobalFmt,
                 'km_total' => $kmTotalGlobal,
                 'conductor' => $hojaDia->driver_name,
-                'proyecto' => ($opciones['proyecto'])($hojaDia),
+                'proyecto' => $proyectoDe($hojaDia),
                 'estado' => $hojaDia->is_active ? 'ABIERTA' : 'FINALIZADA',
                 'is_closed' => ! (bool) $hojaDia->is_active,
             ];
 
             if ($routes->isNotEmpty()) {
                 foreach ($routes as $route) {
-                    $firmas = ($opciones['firmasRuta'])($hojaDia, $route);
+                    $firmas = $firmasRuta($hojaDia, $route);
                     $rutaUnica = trim(($route->origin ?? '').' - '.($route->destination ?? ''), ' -');
                     if ($rutaUnica === '' || $rutaUnica === '-') {
                         $rutaUnica = $hojaDia->daily_route ?? 'Sin ruta definida';
@@ -111,11 +109,11 @@ final class ServiceControlSheetRows
                     if (! empty($partesCierre)) {
                         $detalleCierre = implode(' | ', $partesCierre);
                     }
-                    if ($opciones['conRutasDetalle']) {
-                        $arr = $route->toArray();
-                        $arr['firma_funcionario'] = $firmas['funcionario'] ?? null;
-                        $arr['firma_conductor'] = $firmas['conductor'] ?? null;
-                        $rutasDetalle[] = $arr;
+                    if ($opciones->conRutasDetalle) {
+                        $detalleRuta = $route->toArray();
+                        $detalleRuta['firma_funcionario'] = $firmas['funcionario'] ?? null;
+                        $detalleRuta['firma_conductor'] = $firmas['conductor'] ?? null;
+                        $rutasDetalle[] = $detalleRuta;
                     }
                     // La firma de cada fila es la del funcionario del recorrido; si el recorrido
                     // no tiene firma propia se usa la del funcionario de la hoja como respaldo.
@@ -129,7 +127,7 @@ final class ServiceControlSheetRows
                         'hora_fin_recorrido' => $horaFinRec,
                         'km_final_recorrido' => $kmFinRec !== null ? $this->formatKilometer($kmFinRec) : '',
                         'detalle_cierre' => $detalleCierre,
-                        'firma_funcionario' => ($firmas['funcionario'] ?? null) ?: ($opciones['firmaHoja'])($hojaDia),
+                        'firma_funcionario' => ($firmas['funcionario'] ?? null) ?: $firmaHoja($hojaDia),
                         'firma_conductor_recorrido' => null,
                     ]);
                 }
@@ -149,7 +147,7 @@ final class ServiceControlSheetRows
                             : ' — sin recorridos asignados')
                         : '',
                     // En disponibilidad no hay funcionario: solo firman conductor y coordinador (pie).
-                    'firma_funcionario' => $esDisponibilidad ? null : ($opciones['firmaHoja'])($hojaDia),
+                        'firma_funcionario' => $esDisponibilidad ? null : $firmaHoja($hojaDia),
                     'firma_conductor_recorrido' => null,
                 ]);
             }

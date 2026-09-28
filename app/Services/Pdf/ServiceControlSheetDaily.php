@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services\Pdf;
 
-use App\Models\Signature;
 use App\Models\Vehicle;
 use App\Services\ServiceDeliveryControlSheet\PcpEvidence;
 use App\Services\Tracking\LocationHistoryService;
@@ -111,13 +110,8 @@ final class ServiceControlSheetDaily
             }
 
             $pendientesDia = $pendientesPorDia[$hojaDia->id] ?? [];
-            $pendientesOperativos = array_values(array_filter(
-                $pendientesDia,
-                fn (array $item) => ($item['rol'] ?? null) !== Signature::ROL_COORDINADOR
-            ));
-            $faltaCoordinador = collect($pendientesDia)->contains(
-                fn (array $item) => ($item['rol'] ?? null) === Signature::ROL_COORDINADOR
-            );
+            $pendientesOperativos = $this->evidencia->pendientesOperativos($pendientesDia);
+            $faltaCoordinador = $this->evidencia->faltaCoordinador($pendientesDia);
             if ($pendientesOperativos !== []) {
                 $firmasPendientesPdf[] = [
                     'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
