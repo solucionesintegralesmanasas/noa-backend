@@ -160,7 +160,7 @@ disponibilidad legada con 1 firma → `conductor` vigente; con 2 → `conductor`
 planilla con recorridos → orden `funcionario`/`conductor` conservado; coordinador → `coordinador`.
 Filas de prueba eliminadas después.
 
-`php artisan test`: **42 tests verdes** (antes de la última tanda: 34). Frontend: `npm run test` en verde (9 tests + a11y + perf + lint).
+`php artisan test`: **52 tests verdes**. Frontend: `npm run test` en verde (9 tests + a11y + perf + lint).
 
 **Tests nuevos de esta fase:**
 - `tests/Feature/CierreExcepcionTest.php` — cobertura HTTP real con **Sanctum + Spatie**: 403 sin permiso,
@@ -173,6 +173,12 @@ Filas de prueba eliminadas después.
   número de días hijos.
 - `tests/Feature/EvidenceStatusPdfTest.php` — las bandas de evidencia operativa, certificación tardía y
   excepción son distintas y no se muestran cuando no hay advertencias.
+- `tests/Feature/ServiceControlSheetRowsTest.php` — el builder de filas unificado: cierre propio del
+  recorrido, respaldo a la hoja, motivo de disponibilidad, formato de número por reporte y novedad que
+  excusa sin borrar firmas.
+- `tests/Feature/DailyBandasTest.php` — clasificación de `ServiceControlSheetDaily::armarBandas`: día con
+  faltantes operativos → banda de evidencia; día completo sin coordinador → solo certificación; día con
+  excepción → solo su banda; día completo y certificado → sin bandas.
 
 **Pendiente de cobertura:** render end-to-end del PDF completo con DomPDF y firmas/relaciones persistidas. La
 vista parcial que contiene las bandas sí se renderiza y prueba directamente; las respuestas serializadas de

@@ -878,22 +878,22 @@ class PdfService
             // Filas unificadas con mensual/filtrado (misma forma, misma resolución
             // de firmas, mismo respaldo). La estrategia de E/S no cambia: una
             // lectura por recorrido, igual que antes.
-            $resultadoFilas = $this->filas->armarDias($hojasDias, [
-                'proyecto' => fn () => $nombreProyecto,
-                'rutasDe' => fn ($hoja) => $hoja->routes->where('is_active', true)->sortBy('order_index')->values(),
-                'firmaHoja' => fn ($hoja) => $base64Images["func_{$hoja->id}"] ?? null,
-                'firmasRuta' => function ($hoja, $route) use ($routeSignatures) {
+            $resultadoFilas = $this->filas->armarDias($hojasDias, new ServiceControlSheetRowsOptions(
+                proyecto: fn () => $nombreProyecto,
+                rutasDe: fn ($hoja) => $hoja->routes->where('is_active', true)->sortBy('order_index')->values(),
+                firmaHoja: fn ($hoja) => $base64Images["func_{$hoja->id}"] ?? null,
+                firmasRuta: function ($hoja, $route) use ($routeSignatures) {
                     $sigGroup = $routeSignatures->get($route->id) ?? collect();
-                    $base = $this->getBase64Parallel([
+                    $base64 = $this->getBase64Parallel([
                         'firma_funcionario' => $sigGroup->get(0),
                         'firma_conductor' => $sigGroup->get(1),
                     ]);
 
-                    return ['funcionario' => $base['firma_funcionario'], 'conductor' => $base['firma_conductor']];
+                    return ['funcionario' => $base64['firma_funcionario'], 'conductor' => $base64['firma_conductor']];
                 },
-                'numeroEntero' => true,
-                'conRutasDetalle' => true,
-            ]);
+                numeroEntero: true,
+                conRutasDetalle: true,
+            ));
             $dias = $resultadoFilas['dias'];
             $rutasDetalle = $resultadoFilas['rutasDetalle'];
             $totalRecorridos = $resultadoFilas['totalRecorridos'];
@@ -1227,26 +1227,26 @@ class PdfService
             // Resolver firmas por hoja y por recorrido desde el lote único.
             // La firma del conductor no se usa en el listado: solo va en el pie.
             $firmaHojaMensual = [];
-            foreach ($clavesHoja as $sheetId => $uk) {
-                $firmaHojaMensual[$sheetId] = $base64Images["firma_func_{$uk}"] ?? null;
+            foreach ($clavesHoja as $sheetId => $uniqueKey) {
+                $firmaHojaMensual[$sheetId] = $base64Images["firma_func_{$uniqueKey}"] ?? null;
             }
             $firmasRutaMensual = [];
-            foreach ($clavesRuta as $routeId => $cr) {
+            foreach ($clavesRuta as $routeId => $claveRecorrido) {
                 $firmasRutaMensual[$routeId] = [
-                    'funcionario' => $base64Images["firma_func_{$cr}"] ?? null,
+                    'funcionario' => $base64Images["firma_func_{$claveRecorrido}"] ?? null,
                     'conductor' => null,
                 ];
             }
 
             // Filas unificadas con diario/filtrado (misma forma, mismo respaldo).
-            $resultadoFilas = $this->filas->armarDias($sheets, [
-                'proyecto' => fn ($s) => $s->project ? $s->project->project_name : null,
-                'rutasDe' => fn ($s) => $routesBySheet->get($s->uuid, collect()),
-                'firmaHoja' => fn ($s) => $firmaHojaMensual[$s->id] ?? null,
-                'firmasRuta' => fn ($h, $r) => $firmasRutaMensual[$r->id] ?? ['funcionario' => null, 'conductor' => null],
-                'numeroEntero' => false,
-                'conRutasDetalle' => false,
-            ]);
+            $resultadoFilas = $this->filas->armarDias($sheets, new ServiceControlSheetRowsOptions(
+                proyecto: fn ($s) => $s->project ? $s->project->project_name : null,
+                rutasDe: fn ($s) => $routesBySheet->get($s->uuid, collect()),
+                firmaHoja: fn ($s) => $firmaHojaMensual[$s->id] ?? null,
+                firmasRuta: fn ($h, $r) => $firmasRutaMensual[$r->id] ?? ['funcionario' => null, 'conductor' => null],
+                numeroEntero: false,
+                conRutasDetalle: false,
+            ));
             $dias = $resultadoFilas['dias'];
 
             // Construir observaciones consolidadas del mes: peajes + total recorridos
@@ -1447,23 +1447,23 @@ class PdfService
             // Diferencia intencionada respecto al código anterior: las filas por
             // recorrido usan hora/km del recorrido (no solo globales), el detalle
             // incluye peajes y la firma resuelve igual que en el diario.
-            $resultadoFilas = $this->filas->armarDias($sheets, [
-                'proyecto' => fn ($s) => $s->project?->project_name,
-                'rutasDe' => fn ($s) => $routesBySheet->get($s->uuid, collect()),
-                'firmaHoja' => fn ($s) => $base64Sigs["ff_{$s->id}"] ?? null,
-                'firmasRuta' => function ($hoja, $route) use ($routeSigs) {
-                    $gf = $routeSigs->get($route->id, collect());
+            $resultadoFilas = $this->filas->armarDias($sheets, new ServiceControlSheetRowsOptions(
+                proyecto: fn ($s) => $s->project?->project_name,
+                rutasDe: fn ($s) => $routesBySheet->get($s->uuid, collect()),
+                firmaHoja: fn ($s) => $base64Sigs["ff_{$s->id}"] ?? null,
+                firmasRuta: function ($hoja, $route) use ($routeSigs) {
+                    $grupoFirmas = $routeSigs->get($route->id, collect());
                     $firmaRec = null;
-                    if ($gf->first()) {
-                        $tmp = $this->getBase64Parallel(['fr' => $gf->first()]);
-                        $firmaRec = $tmp['fr'] ?? null;
+                    if ($grupoFirmas->first()) {
+                        $paralelo = $this->getBase64Parallel(['fr' => $grupoFirmas->first()]);
+                        $firmaRec = $paralelo['fr'] ?? null;
                     }
 
                     return ['funcionario' => $firmaRec, 'conductor' => null];
                 },
-                'numeroEntero' => false,
-                'conRutasDetalle' => false,
-            ]);
+                numeroEntero: false,
+                conRutasDetalle: false,
+            ));
             $dias = $resultadoFilas['dias'];
 
             $etiquetas = [
