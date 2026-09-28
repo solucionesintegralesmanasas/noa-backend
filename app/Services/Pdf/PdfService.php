@@ -12,7 +12,7 @@ use App\Services\ContractExtraction\FuecService;
 use App\Services\Fleet\AffiliateAdminChargeService;
 use App\Services\Fleet\BusinessCollaborationAgreementService;
 use App\Services\Fleet\VehicleService;
-use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
+use App\Services\ServiceDeliveryControlSheet\PcpEvidence;
 use App\Services\ThirdParties\ThirdPartyService;
 use App\Utils\Logger;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
@@ -40,7 +40,7 @@ class PdfService
         private readonly VehicleService $vehicleService,
         private readonly CompanyService $companyService,
         private readonly AffiliateAdminChargeService $affiliateAdminChargeService,
-        private readonly ServiceDeliveryControlSheetService $serviceDeliveryControlSheetService
+        private readonly PcpEvidence $evidencia
     ) {}
 
     /**
@@ -1141,7 +1141,7 @@ class PdfService
             $firmasPendientesPdf = [];
             $certificacionesPendientesPdf = [];
             $diasConExcepcion = [];
-            $pendientesPorDia = $this->serviceDeliveryControlSheetService->firmasPendientesEnLote($hojasDias);
+            $pendientesPorDia = $this->evidencia->pendientesEnLote($hojasDias);
             foreach ($hojasDias as $hojaDia) {
                 if ($hojaDia->esCerradaConExcepcion()) {
                     $diasConExcepcion[] = [
