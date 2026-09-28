@@ -45,12 +45,17 @@ class VehicleDocumentService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $documentType = null,
-        ?string $thirdPartyUuid = null
+        ?string $thirdPartyUuid = null,
+        ?string $vehicleUuid = null
     ): LengthAwarePaginator {
         $query = $this->query()->with(['vehicle.thirdParty']);
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
+        }
+
+        if ($vehicleUuid) {
+            $query->where('vehicle_uuid', $vehicleUuid);
         }
 
         if ($thirdPartyUuid) {

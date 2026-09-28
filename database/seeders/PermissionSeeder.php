@@ -337,6 +337,11 @@ class PermissionSeeder extends Seeder
             'vehicle_inspections.update' => ['module' => 'Inspecciones de Vehículos', 'description' => 'Actualizar una inspección'],
             'vehicle_inspections.delete' => ['module' => 'Inspecciones de Vehículos', 'description' => 'Eliminar una inspección'],
 
+            // --- Reportes ---
+            'reports.vehicles.index' => ['module' => 'Reportes', 'description' => 'Ver el reporte de vehículos'],
+            'reports.vehicles.export-excel' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de vehículos a Excel'],
+            'reports.vehicles.export-pdf' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de vehículos a PDF'],
+
             // --- Resultados de Inspección ---
             'inspection_results.index'  => ['module' => 'Resultados de Inspección', 'description' => 'Listar todos los resultados de inspección'],
             'inspection_results.create' => ['module' => 'Resultados de Inspección', 'description' => 'Registrar un nuevo resultado de inspección'],

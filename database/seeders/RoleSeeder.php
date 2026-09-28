@@ -261,6 +261,10 @@ class RoleSeeder extends Seeder
             'vehicles.history_pdf',
             'vehicles.technical_sheet_pdf',
 
+            'reports.vehicles.index',
+            'reports.vehicles.export-excel',
+            'reports.vehicles.export-pdf',
+
             'vehicle_documents.index',
             'vehicle_documents.create',
             'vehicle_documents.update',
@@ -394,6 +398,8 @@ class RoleSeeder extends Seeder
             'vehicles.change_branch',
             'vehicles.history_pdf',
             'vehicles.technical_sheet_pdf',
+
+            'reports.vehicles.index',
 
             'vehicle_documents.index',
 

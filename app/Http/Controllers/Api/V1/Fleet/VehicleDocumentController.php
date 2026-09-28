@@ -52,7 +52,8 @@ class VehicleDocumentController extends Controller
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $documentType = $request->query('document_type') ?? $request->input('filter.document_type');
             $thirdPartyUuid = $request->query('third_party_uuid') ?? $request->input('filter.third_party_uuid');
-            $data = $this->vehicleDocumentService->getAllVehicleDocumentsWithPagination($perPage, $page, $search, $companyUuid, $documentType, $thirdPartyUuid);
+            $vehicleUuid = $request->query('vehicle_uuid') ?? $request->input('filter.vehicle_uuid');
+            $data = $this->vehicleDocumentService->getAllVehicleDocumentsWithPagination($perPage, $page, $search, $companyUuid, $documentType, $thirdPartyUuid, $vehicleUuid);
 
             return $this->successResponse($data, 'Listado paginado de DocumentoVehiculo recuperado con éxito.');
         } catch (\Throwable $e) {
