@@ -160,12 +160,13 @@ class Project extends Model implements HasMedia
     }
 
     /**
-     * Scope para filtrar los proyectos a los que pertenece un conductor (tercero).
+     * Scope para filtrar los proyectos donde el conductor (tercero) está
+     * asignado actualmente (solo asignaciones activas).
      */
     public function scopeForThirdParty(Builder $query, string $thirdPartyUuid): Builder
     {
-        return $query->whereHas('thirdParties', function (Builder $q) use ($thirdPartyUuid) {
-            $q->where('third_parties.uuid', $thirdPartyUuid);
+        return $query->whereHas('driverVehicleAssignments', function (Builder $q) use ($thirdPartyUuid) {
+            $q->active()->where('project_driver_vehicles.third_party_uuid', $thirdPartyUuid);
         });
     }
 }

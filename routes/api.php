@@ -973,9 +973,20 @@ Route::prefix('v1')->group(function () {
                 ->name('api.v1.tracking.alerts.read');
         });
 
+        // ─── MÓDULO REPORTES ───
+        Route::prefix('reports')->group(function () {
+            Route::prefix('vehicles')->group(function () {
+                Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'index'])->name('api.v1.reports.vehicles.index');
+                Route::get('/catalogs/affiliated-companies', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'affiliatedCompanies'])->name('api.v1.reports.vehicles.affiliated-companies');
+                Route::get('/catalogs/agreements', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'agreements'])->name('api.v1.reports.vehicles.agreements');
+                Route::get('/catalogs/drivers', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'drivers'])->name('api.v1.reports.vehicles.drivers');
+                Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'excel'])->name('api.v1.reports.vehicles.excel');
+                Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'pdf'])->name('api.v1.reports.vehicles.pdf');
+            });
+        });
+
         // ─── MÓDULO CONFIGURACIONES ───
-        Route::prefix('settings')->group(function () {
-            Route::prefix('system-configurations')->group(function () {
+        Route::prefix('settings')->group(function () {            Route::prefix('system-configurations')->group(function () {
                 Route::get('/', [SystemConfigurationController::class, 'index'])->name('api.v1.settings.system-configurations.index');
                 Route::post('/', [SystemConfigurationController::class, 'store'])->name('api.v1.settings.system-configurations.store');
                 Route::get('/company/{companyUuid}', [SystemConfigurationController::class, 'showByCompany'])->name('api.v1.settings.system-configurations.company');

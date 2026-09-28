@@ -1772,6 +1772,36 @@ class PdfService
     }
 
     /**
+     * Genera el PDF del reporte de vehículos (tabla simple, tope 1000 filas).
+     *
+     * @param  \Illuminate\Support\Collection<int, array>  $filas
+     */
+    public function generateVehicleReportPdf($filas, array $filtros = []): array
+    {
+        $etiquetas = [
+            'affiliate' => 'AFILIADO',
+            'operation_card' => 'TARJETA DE OPERACIÓN',
+            'document' => 'DOCUMENTOS',
+            'project' => 'PROYECTO',
+            'maintenance' => 'MANTENIMIENTO',
+            'driver' => 'CONDUCTOR',
+        ];
+        $tipo = $filtros['filter_type'] ?? '-';
+
+        $pdf = Pdf::loadView('pdf.vehicle-report', [
+            'filas' => $filas,
+            'filtros' => $filtros,
+            'filtroDescripcion' => $etiquetas[$tipo] ?? strtoupper((string) $tipo),
+        ]);
+        $pdf->setPaper('letter', 'landscape');
+
+        return [
+            'pdf' => $pdf,
+            'file_name' => 'Reporte_Vehiculos_'.now()->format('Ymd_His').'.pdf',
+        ];
+    }
+
+    /**
      * Formatea kilómetros sin ceros innecesarios: 12300.00 → 12300, 12300.50 → 12300.5.
      */
     private function formatKilometer(mixed $valor): string
