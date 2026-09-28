@@ -81,7 +81,14 @@ Unicidad lógica: una sola `vigente` por (entidad + rol); el reemplazo marca la 
 
 ## 7. Backend
 
-**7.1 `firmasPendientes($record): array`.** Devuelve etiquetas (`conductor`, `funcionario`,
+El ciclo de vida de la evidencia vive en un solo módulo profundo,
+`app/Services/ServiceDeliveryControlSheet/PcpEvidence.php` (solo derivación, nunca muta): literales de
+entidad únicos, regla de completitud por unidad operativa, derivación de estados, mapeo de compatibilidad
+a `control_status` y carga en lote con consultas constantes. El servicio PCP conserva el contrato hacia el
+controlador (`getProjectEvidenceSummary` delega) y todo lo de mutación; el PDF depende del módulo, no del
+servicio grande; `showPublic` usa la hoja `tieneCertificacionVigente()`.
+
+**7.1 `PcpEvidence::pendientes($record): array`.** Devuelve etiquetas (`conductor`, `funcionario`,
 `coordinador`, `ruta:{uuid}`) calculadas por rol vigente, no por posición ni `exists()` simple. Incluye
 rutas cerradas sin firma propia y marca las heredadas como tales.
 **7.2 Congelamiento.** `asegurarEditable()` con 422 en **cinco** rutas que mutan la planilla:
@@ -98,10 +105,13 @@ excepciones a `resources/views/pdf/partials/evidence-status.blade.php`. Renderiz
 OPERATIVA INCOMPLETA"*, *"PENDIENTE DE CERTIFICACIÓN ADMINISTRATIVA"* y *"CERRADA CON EXCEPCIÓN"*. Una firma
 coordinadora tardía no etiqueta como incompleta una operación ya completa. Una excepción aprobada no se
 duplica como evidencia incompleta. La descarga nunca se bloquea.
-**7.5 Listado.** Padres y días hijos cargan `routes` en lote y sus firmas se agrupan en 3 consultas; no hay
-consulta por hijo. Una prueba con 12 días hijos confirma que el total de SELECT queda acotado (≤20),
-independiente del número de hijos. Cada fila y día exponen `estado`, `firmas_pendientes` y completitud
-operativa; los padres agregan los faltantes con la fecha de cada hijo.
+**7.5 Listado.** `PcpEvidence::decorarColeccion()` decora padres e hijos con `estado`,
+`firmas_pendientes` y agregados (`dias_evidencia_incompleta`, `dias_pendientes_certificacion`,
+`dias_excepcion`), con firmas cargadas en 3 consultas; no hay consulta por hijo. Una prueba con 12 días
+hijos confirma que el total de SELECT queda acotado (≤20), independiente del número de hijos.
+`control_status` se sigue emitiendo con valores idénticos a los históricos (mapeo `controlStatus()`),
+salvo un caso intencionado: un padre con todo cerrado pero evidencia incompleta antes decía CERRADA y
+ahora dice PARCIAL. El frontend no consume ese campo.
 **7.6 Permiso `close_exception`.** `POST /{uuid}/close-exception` con
 `permission:service_delivery_control_sheets.close_exception`, asignado a `ADMIN_EMPRESA` (SUPERADMIN recibe
 todos). Reutiliza la guarda de congelamiento: no es puerta trasera a una evidencia ya cerrada.

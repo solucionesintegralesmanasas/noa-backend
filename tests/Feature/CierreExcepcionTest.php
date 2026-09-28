@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\ServiceDeliveryControlSheet;
+use App\Services\ServiceDeliveryControlSheet\PcpEvidence;
 use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -102,7 +103,7 @@ class CierreExcepcionTest extends TestCase
         $this->assertNotNull($cerrada->exception_approved_at);
         $this->assertSame(
             ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION,
-            $cerrada->estadoAdministrativo(false)
+            app(PcpEvidence::class)->estado($cerrada, false)
         );
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\ServiceDeliveryControlSheet;
+use App\Services\ServiceDeliveryControlSheet\PcpEvidence;
 use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -217,11 +218,11 @@ class EvidenciaListadoTest extends TestCase
 
         $this->assertSame(
             [],
-            app(ServiceDeliveryControlSheetService::class)->firmasPendientes($sheet)
+            app(PcpEvidence::class)->pendientes($sheet)
         );
         $this->assertSame(
             ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION,
-            $sheet->estadoAdministrativo(false, false)
+            app(PcpEvidence::class)->estado($sheet, false, false)
         );
     }
 
@@ -267,5 +268,18 @@ class EvidenciaListadoTest extends TestCase
         $this->assertSame(0, $parent->dias_evidencia_incompleta);
         $this->assertSame(0, $parent->dias_pendientes_certificacion);
         $this->assertLessThanOrEqual(20, $selects, 'La cantidad de SELECT debe ser acotada por lote, no crecer por cada hijo.');
+    }
+
+    public function test_control_status_legacy_deriva_del_estado_sin_vocabulario_duplicado(): void
+    {
+        $evidencia = app(PcpEvidence::class);
+
+        // Compatibilidad: mismos valores históricos que resolveControlStatus.
+        $this->assertSame('ABIERTA', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_BORRADOR));
+        $this->assertSame('ABIERTA', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_EN_CURSO));
+        $this->assertSame('PARCIAL', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_PARCIAL));
+        $this->assertSame('CERRADA', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_CERRADA_OPERATIVAMENTE));
+        $this->assertSame('CERRADA', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_CERTIFICADA));
+        $this->assertSame('CERRADA', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION));
     }
 }

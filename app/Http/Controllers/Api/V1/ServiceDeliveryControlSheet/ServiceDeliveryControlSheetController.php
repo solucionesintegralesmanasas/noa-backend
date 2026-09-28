@@ -7,7 +7,6 @@ namespace App\Http\Controllers\Api\V1\ServiceDeliveryControlSheet;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ServiceDeliveryControlSheet\StoreServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\UpdateServiceDeliveryControlSheetRequest;
-use App\Models\Signature;
 use App\Models\Vehicle;
 use App\Services\Pdf\PdfService;
 use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
@@ -763,10 +762,9 @@ class ServiceDeliveryControlSheetController extends Controller
                 return $this->errorResponse('El registro solicitado no existe.', 404);
             }
 
-            $hasCoordinator = Signature::query()
-                ->where('entity_type', 'App\\Models\\ServiceDeliveryControlSheetCoordinator')
-                ->where('entity_id', $record->id)
-                ->exists();
+            // Una sola definición de "firmado por el coordinador": firma vigente
+            // con rol explícito, igual que en el resto de SPEC-002.
+            $hasCoordinator = $record->tieneCertificacionVigente();
 
             return $this->successResponse([
                 'uuid' => $record->uuid,
