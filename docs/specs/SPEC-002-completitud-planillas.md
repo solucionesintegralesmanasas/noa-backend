@@ -104,7 +104,10 @@ persistidos del recorrido (`:711`: cada campo se escribe solo si llega en el pay
 excepciones a `resources/views/pdf/partials/evidence-status.blade.php`. Renderiza bandas distintas: *"EVIDENCIA
 OPERATIVA INCOMPLETA"*, *"PENDIENTE DE CERTIFICACIÓN ADMINISTRATIVA"* y *"CERRADA CON EXCEPCIÓN"*. Una firma
 coordinadora tardía no etiqueta como incompleta una operación ya completa. Una excepción aprobada no se
-duplica como evidencia incompleta. La descarga nunca se bloquea.
+duplica como evidencia incompleta. La descarga nunca se bloquea. El armado de filas vive en
+`app/Services/Pdf/ServiceControlSheetRows.php` (puro, una sola definición usada por diario/mensual/filtrado)
+y la composición del día (mapa + bandas) en `app/Services/Pdf/ServiceControlSheetDaily.php`; `PdfService`
+queda como renderizador con dependencias declaradas, sin `app()` en la ruta del diario.
 **7.5 Listado.** `PcpEvidence::decorarColeccion()` decora padres e hijos con `estado`,
 `firmas_pendientes` y agregados (`dias_evidencia_incompleta`, `dias_pendientes_certificacion`,
 `dias_excepcion`), con firmas cargadas en 3 consultas; no hay consulta por hijo. Una prueba con 12 días

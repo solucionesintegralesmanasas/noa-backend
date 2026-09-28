@@ -12,7 +12,6 @@ use App\Services\ContractExtraction\FuecService;
 use App\Services\Fleet\AffiliateAdminChargeService;
 use App\Services\Fleet\BusinessCollaborationAgreementService;
 use App\Services\Fleet\VehicleService;
-use App\Services\ServiceDeliveryControlSheet\PcpEvidence;
 use App\Services\ThirdParties\ThirdPartyService;
 use App\Utils\Logger;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
@@ -40,7 +39,8 @@ class PdfService
         private readonly VehicleService $vehicleService,
         private readonly CompanyService $companyService,
         private readonly AffiliateAdminChargeService $affiliateAdminChargeService,
-        private readonly PcpEvidence $evidencia
+        private readonly ServiceControlSheetRows $filas,
+        private readonly ServiceControlSheetDaily $diario
     ) {}
 
     /**
@@ -875,138 +875,28 @@ class PdfService
                     ->groupBy('entity_id');
             }
 
-            // Para la planilla diaria se genera UNA FILA POR CADA RUTA (recorrido),
-            // repitiendo fecha/horas/km globales en cada línea según formato OPE-F-006.
-            // En consolidado se repite por cada día hijo (los días cerrados incluidos).
-            $dias = [];
-            $rutasDetalle = [];
-            $totalRecorridos = 0;
-
-            foreach ($hojasDias as $hojaDia) {
-                $fechaDia = Carbon::parse($hojaDia->service_date);
-
-                // Rutas asociadas al día (origen → destino)
-                $routes = $hojaDia->routes->where('is_active', true)->sortBy('order_index')->values();
-                $rutasLista = $this->formatRoutesList($routes);
-                $rutasTexto = ! empty($rutasLista)
-                    ? implode(' · ', $rutasLista)
-                    : ($hojaDia->daily_route ?? 'Sin ruta definida');
-
-                // Firmas por recorrido del día (cierre individual por recorrido)
-                $rutasDetalleDia = [];
-                foreach ($routes as $route) {
+            // Filas unificadas con mensual/filtrado (misma forma, misma resolución
+            // de firmas, mismo respaldo). La estrategia de E/S no cambia: una
+            // lectura por recorrido, igual que antes.
+            $resultadoFilas = $this->filas->armarDias($hojasDias, [
+                'proyecto' => fn () => $nombreProyecto,
+                'rutasDe' => fn ($hoja) => $hoja->routes->where('is_active', true)->sortBy('order_index')->values(),
+                'firmaHoja' => fn ($hoja) => $base64Images["func_{$hoja->id}"] ?? null,
+                'firmasRuta' => function ($hoja, $route) use ($routeSignatures) {
                     $sigGroup = $routeSignatures->get($route->id) ?? collect();
                     $base = $this->getBase64Parallel([
                         'firma_funcionario' => $sigGroup->get(0),
                         'firma_conductor' => $sigGroup->get(1),
                     ]);
-                    $arr = $route->toArray();
-                    $arr['firma_funcionario'] = $base['firma_funcionario'];
-                    $arr['firma_conductor'] = $base['firma_conductor'];
-                    $rutasDetalleDia[] = $arr;
-                    $rutasDetalle[] = $arr;
-                }
-                $totalRecorridos += $routes->count();
 
-                $restHours = $this->calculateRestHours($hojaDia->start_time, $hojaDia->end_time, $hojaDia->total_hours);
-
-                $horaInicio = $hojaDia->start_time ? $hojaDia->start_time->format('H:i') : '';
-                $horaFinGlobal = $hojaDia->end_time ? $hojaDia->end_time->format('H:i') : '';
-                $totalHoras = $hojaDia->total_hours ? $hojaDia->total_hours->format('H:i') : '';
-                $kmInicialFmt = $this->formatKilometer($hojaDia->starting_kilometer);
-                $kmFinalGlobalFmt = $this->formatKilometer($hojaDia->ending_kilometer);
-                $kmTotalGlobal = $hojaDia->starting_kilometer !== null && $hojaDia->ending_kilometer !== null
-                    && $hojaDia->starting_kilometer !== '' && $hojaDia->ending_kilometer !== ''
-                    ? $this->formatKilometer($hojaDia->ending_kilometer - $hojaDia->starting_kilometer)
-                    : '';
-
-                $baseFila = [
-                    'numero' => (int) $fechaDia->format('d'),
-                    'fecha_completa' => $fechaDia->format('d/m/Y'),
-                    'hora_inicio' => $horaInicio,
-                    'descanso_inicio' => $restHours['inicio'],
-                    'descanso_fin' => $restHours['fin'],
-                    'hora_fin' => $horaFinGlobal,
-                    'total_hours' => $totalHoras,
-                    'km_inicial' => $kmInicialFmt,
-                    'km_final' => $kmFinalGlobalFmt,
-                    'km_total' => $kmTotalGlobal,
-                    'conductor' => $hojaDia->driver_name,
-                    'proyecto' => $nombreProyecto,
-                    'estado' => $hojaDia->is_active ? 'ABIERTA' : 'FINALIZADA',
-                    'is_closed' => ! (bool) $hojaDia->is_active,
-                ];
-
-                if (! empty($rutasDetalleDia)) {
-                    foreach ($rutasDetalleDia as $rd) {
-                        $rutaUnica = trim(($rd['origin'] ?? '').' - '.($rd['destination'] ?? ''), ' -');
-                        if ($rutaUnica === '' || $rutaUnica === '-') {
-                            $rutaUnica = $hojaDia->daily_route ?? 'Sin ruta definida';
-                        }
-                        // Si el recorrido tiene cierre propio se usa en la fila; si no, se conserva el global.
-                        $horaFinRec = ! empty($rd['end_time']) ? Carbon::parse($rd['end_time'])->format('H:i') : '';
-                        $kmFinRec = (isset($rd['ending_kilometer']) && $rd['ending_kilometer'] !== null && $rd['ending_kilometer'] !== '')
-                            ? $rd['ending_kilometer']
-                            : null;
-                        $horaFinFila = $horaFinRec !== '' ? $horaFinRec : $horaFinGlobal;
-                        $kmFinalFilaRaw = $kmFinRec !== null ? $kmFinRec : $hojaDia->ending_kilometer;
-                        $kmFinalFila = $this->formatKilometer($kmFinalFilaRaw);
-                        $kmTotalFila = ($hojaDia->starting_kilometer !== null && $hojaDia->starting_kilometer !== '' && $kmFinalFilaRaw !== null && $kmFinalFilaRaw !== '')
-                            ? $this->formatKilometer($kmFinalFilaRaw - $hojaDia->starting_kilometer)
-                            : $kmTotalGlobal;
-                        // Detalle de cierre solo si existe (funcionario / peajes / novedad).
-                        $detalleCierre = '';
-                        $partesCierre = [];
-                        if (! empty($rd['funcionario_nombre']) || ! empty($rd['funcionario_cc'])) {
-                            $funcTxt = 'Funcionario CC '.trim(($rd['funcionario_cc'] ?? '').(! empty($rd['funcionario_nombre']) ? ' - '.$rd['funcionario_nombre'] : ''));
-                            $partesCierre[] = $funcTxt;
-                        }
-                        if (! empty($rd['number_of_tolls']) || ! empty($rd['total_toll_value'])) {
-                            $valorPeaje = isset($rd['total_toll_value']) ? number_format((float) $rd['total_toll_value'], 0, ',', '.') : '0';
-                            $partesCierre[] = 'Peajes: '.($rd['number_of_tolls'] ?? 0).' ($'.$valorPeaje.')';
-                        }
-                        if (! empty($rd['end_novelty'])) {
-                            $partesCierre[] = 'Novedad: '.$rd['end_novelty'];
-                        }
-                        if (! empty($partesCierre)) {
-                            $detalleCierre = implode(' | ', $partesCierre);
-                        }
-                        // La firma de cada fila es la del funcionario del recorrido; si el recorrido
-                        // no tiene firma propia se usa la del funcionario de la hoja como respaldo.
-                        // La firma del coordinador NUNCA va en esta columna: solo en RECIBO Y FIRMA.
-                        $dias[] = array_merge($baseFila, [
-                            'ruta' => $rutaUnica,
-                            'ruta_unica' => $rutaUnica,
-                            'hora_fin' => $horaFinFila,
-                            'km_final' => $kmFinalFila,
-                            'km_total' => $kmTotalFila,
-                            'hora_fin_recorrido' => $horaFinRec,
-                            'km_final_recorrido' => $kmFinRec !== null ? $this->formatKilometer($kmFinRec) : '',
-                            'detalle_cierre' => $detalleCierre,
-                            'firma_funcionario' => $rd['firma_funcionario'] ?? null ?: ($base64Images["func_{$hojaDia->id}"] ?? null),
-                            'firma_conductor_recorrido' => null,
-                        ]);
-                    }
-                } else {
-                    $esDisponibilidad = $hojaDia->esDisponibilidad();
-                    $textoDisponibilidad = $esDisponibilidad ? $hojaDia->textoDisponibilidad() : '';
-                    $dias[] = array_merge($baseFila, [
-                        'ruta' => $esDisponibilidad ? $textoDisponibilidad : $rutasTexto,
-                        'ruta_unica' => $esDisponibilidad ? $textoDisponibilidad : $rutasTexto,
-                        'rutas' => $rutasLista,
-                        'hora_fin_recorrido' => '',
-                        'km_final_recorrido' => '',
-                        'detalle_cierre' => $esDisponibilidad
-                            ? 'Vehículo en disponibilidad'.($hojaDia->motivoDisponibilidad() !== null
-                                ? ' — '.$hojaDia->motivoDisponibilidad()
-                                : ' — sin recorridos asignados')
-                            : '',
-                        // En disponibilidad no hay funcionario: solo firman conductor y coordinador (pie).
-                        'firma_funcionario' => $esDisponibilidad ? null : ($base64Images["func_{$hojaDia->id}"] ?? null),
-                        'firma_conductor_recorrido' => null,
-                    ]);
-                }
-            }
+                    return ['funcionario' => $base['firma_funcionario'], 'conductor' => $base['firma_conductor']];
+                },
+                'numeroEntero' => true,
+                'conRutasDetalle' => true,
+            ]);
+            $dias = $resultadoFilas['dias'];
+            $rutasDetalle = $resultadoFilas['rutasDetalle'];
+            $totalRecorridos = $resultadoFilas['totalRecorridos'];
 
             // No agregamos filas vacías para que la tabla solo muestre los registros reales
 
@@ -1081,97 +971,10 @@ class PdfService
                 }
             }
 
-            // Mapa del recorrido GPS del día (vehículo + proyecto + fecha).
-            // Prioridad: captura pegada desde el frontend; si no hay, mapa automático.
-            // Nunca bloquea el PDF: si no hay puntos o falla la red, se muestra mensaje o PNG de respaldo.
-            $mapaRecorrido = ['imagen_base64' => null, 'mime' => 'image/png', 'sin_datos' => true, 'stats' => ['total_puntos' => 0, 'distancia_km' => 0, 'hora_inicio' => null, 'hora_fin' => null]];
-            $mapaFecha = null;
-            $mapaEsCaptura = false;
-            try {
-                $captura = $sheet->getFirstMedia('ROUTE_MAP');
-                if ($captura && $captura->getPath() && file_exists($captura->getPath())) {
-                    $binCaptura = file_get_contents($captura->getPath());
-                    $infoCaptura = @getimagesizefromstring($binCaptura);
-                    if ($binCaptura && $infoCaptura && in_array($infoCaptura['mime'], ['image/png', 'image/jpeg'], true)) {
-                        $mapaRecorrido = [
-                            'imagen_base64' => base64_encode($binCaptura),
-                            'mime' => $infoCaptura['mime'],
-                            'sin_datos' => false,
-                            'stats' => app(RouteMapService::class)->calcularStats(
-                                app(\App\Services\Tracking\LocationHistoryService::class)->getVehicleProjectDayHistory(
-                                    $sheet->internalControl?->vehicle_uuid,
-                                    $sheet->project_uuid,
-                                    $sheet->service_date,
-                                    $sheet->company_uuid
-                                )
-                            ),
-                        ];
-                        $mapaFecha = Carbon::parse($sheet->service_date)->format('d/m/Y');
-                        $mapaEsCaptura = true;
-                    }
-                }
-                if (! $mapaEsCaptura) {
-                    $historyService = app(\App\Services\Tracking\LocationHistoryService::class);
-                    $routeMapService = app(RouteMapService::class);
-                    foreach ($hojasDias as $hojaMapa) {
-                        $vehicleUuidMapa = $hojaMapa->internalControl?->vehicle_uuid;
-                        if (empty($vehicleUuidMapa) && ! empty($placa)) {
-                            $vehicleUuidMapa = Vehicle::where('vehicle_license_plate', $placa)->value('uuid');
-                        }
-                        $puntosGps = $historyService->getVehicleProjectDayHistory(
-                            $vehicleUuidMapa,
-                            $hojaMapa->project_uuid,
-                            $hojaMapa->service_date,
-                            $hojaMapa->company_uuid
-                        );
-                        if ($puntosGps->isEmpty()) {
-                            continue;
-                        }
-                        $mapaRecorrido = $routeMapService->generar($puntosGps);
-                        $mapaFecha = Carbon::parse($hojaMapa->service_date)->format('d/m/Y');
-                        break;
-                    }
-                }
-            } catch (\Throwable $e) {
-                Logger::warning('No se pudo generar el mapa del recorrido GPS: '.$e->getMessage());
-            }
-
-            // SPEC-002 §7.4 — La evidencia incompleta se AVISA, nunca se bloquea.
-            // Se calcula por día una sola vez y se agrupa en la banda del pie.
-            $firmasPendientesPdf = [];
-            $certificacionesPendientesPdf = [];
-            $diasConExcepcion = [];
-            $pendientesPorDia = $this->evidencia->pendientesEnLote($hojasDias);
-            foreach ($hojasDias as $hojaDia) {
-                if ($hojaDia->esCerradaConExcepcion()) {
-                    $diasConExcepcion[] = [
-                        'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
-                        'motivo' => $hojaDia->motivoExcepcion(),
-                    ];
-                    continue;
-                }
-
-                $pendientesDia = $pendientesPorDia[$hojaDia->id] ?? [];
-                $pendientesOperativos = array_values(array_filter(
-                    $pendientesDia,
-                    fn (array $item) => ($item['rol'] ?? null) !== \App\Models\Signature::ROL_COORDINADOR
-                ));
-                $faltaCoordinador = collect($pendientesDia)->contains(
-                    fn (array $item) => ($item['rol'] ?? null) === \App\Models\Signature::ROL_COORDINADOR
-                );
-                if ($pendientesOperativos !== []) {
-                    $firmasPendientesPdf[] = [
-                        'fecha' => Carbon::parse($hojaDia->service_date)->format('d/m/Y'),
-                        'pendientes' => array_column($pendientesOperativos, 'etiqueta'),
-                    ];
-                }
-                if ($pendientesOperativos === []
-                    && $faltaCoordinador
-                    && ! $hojaDia->is_active
-                    && ! $hojaDia->esCerradaConExcepcion()) {
-                    $certificacionesPendientesPdf[] = Carbon::parse($hojaDia->service_date)->format('d/m/Y');
-                }
-            }
+            // Mapa y bandas del diario en su módulo: dependencias inyectadas,
+            // sin app() y sin engordar este servicio.
+            [$mapaRecorrido, $mapaFecha, $mapaEsCaptura] = $this->diario->generarMapa($sheet, $hojasDias, $placa);
+            [$firmasPendientesPdf, $certificacionesPendientesPdf, $diasConExcepcion] = $this->diario->armarBandas($hojasDias);
 
             $data = [
                 'logo' => $logoData['logo'],
@@ -1326,10 +1129,16 @@ class PdfService
             $dias = [];
             $signatureModelsToLoad = [];
 
+            // Fase 1: juntar los modelos de firma para UNA sola carga en lote.
+            // Las filas se arman después, con el builder y el lote ya resuelto.
+            $clavesHoja = [];
+            $clavesRuta = [];
+
             foreach ($sheets as $sheet) {
                 $sheetDate = Carbon::parse($sheet->service_date);
                 $dayNum = $sheetDate->format('d');
                 $uniqueKey = "{$dayNum}_{$sheet->id}";
+                $clavesHoja[$sheet->id] = $uniqueKey;
 
                 $sheetSignatures = $allSignatures->get($sheet->id, collect());
                 $firmaFuncModel = $sheetSignatures->first(); // Funcionario que recibe
@@ -1369,109 +1178,18 @@ class PdfService
                     $signatureModelsToLoad["firma_cond_{$uniqueKey}"] = $firmaCondModel;
                 }
 
-                $restHours = $this->calculateRestHours($sheet->start_time, $sheet->end_time, $sheet->total_hours);
-
                 // Recorridos de esta hoja (desde la precarga, sin N+1)
                 $routes = $routesBySheet->get($sheet->uuid, collect());
-                $rutasLista = $this->formatRoutesList($routes);
-                $rutasTexto = ! empty($rutasLista)
-                    ? implode(' · ', $rutasLista)
-                    : ($sheet->daily_route ?? 'Sin ruta definida');
-
-                $kmInicialBase = $this->formatKilometer($sheet->starting_kilometer);
-                $kmFinalBase = $this->formatKilometer($sheet->ending_kilometer);
-                $kmTotalBase = ($sheet->starting_kilometer !== null && $sheet->starting_kilometer !== ''
-                    && $sheet->ending_kilometer !== null && $sheet->ending_kilometer !== '')
-                    ? $this->formatKilometer($sheet->ending_kilometer - $sheet->starting_kilometer)
-                    : '';
-
-                $baseFila = [
-                    'numero' => $dayNum,
-                    'fecha_completa' => $sheetDate->format('d/m/Y'),
-                    'hora_inicio' => $sheet->start_time ? $sheet->start_time->format('H:i') : '',
-                    'descanso_inicio' => $restHours['inicio'],
-                    'descanso_fin' => $restHours['fin'],
-                    'hora_fin' => $sheet->end_time ? $sheet->end_time->format('H:i') : '',
-                    'total_hours' => $sheet->total_hours ? $sheet->total_hours->format('H:i') : '',
-                    'km_inicial' => $kmInicialBase,
-                    'km_final' => $kmFinalBase,
-                    'km_total' => $kmTotalBase,
-                    'unique_key' => $uniqueKey,
-                    'conductor' => $sheet->driver_name,
-                    'proyecto' => $sheet->project ? $sheet->project->project_name : null,
-                    'estado' => $sheet->is_active ? 'ABIERTA' : 'FINALIZADA',
-                    'is_closed' => ! (bool) $sheet->is_active,
-                ];
-
-                if ($routes->isNotEmpty()) {
-                    foreach ($routes as $route) {
-                        $rutaUnica = trim(($route->origin ?? '').' - '.($route->destination ?? ''), ' -');
-                        if ($rutaUnica === '' || $rutaUnica === '-') {
-                            $rutaUnica = $sheet->daily_route ?? 'Sin ruta definida';
-                        }
-                        $claveRecorrido = "rec_{$uniqueKey}_{$route->id}";
-                        $grupoFirmas = $routeSignaturesByRoute->get($route->id) ?? collect();
-                        if ($grupoFirmas->get(0)) {
-                            $signatureModelsToLoad["firma_func_{$claveRecorrido}"] = $grupoFirmas->get(0);
-                        }
-                        if ($grupoFirmas->get(1)) {
-                            $signatureModelsToLoad["firma_conduit_{$claveRecorrido}"] = $grupoFirmas->get(1);
-                        }
-                        $horaFinRec = $route->end_time ? Carbon::parse($route->end_time)->format('H:i') : '';
-                        $kmFinRecRaw = ($route->ending_kilometer !== null && $route->ending_kilometer !== '')
-                            ? $route->ending_kilometer
-                            : null;
-                        $horaFinFila = $horaFinRec !== '' ? $horaFinRec : $baseFila['hora_fin'];
-                        $kmFinalFilaRaw = $kmFinRecRaw !== null ? $kmFinRecRaw : $sheet->ending_kilometer;
-                        $kmFinalFila = $this->formatKilometer($kmFinalFilaRaw);
-                        $kmTotalFila = ($sheet->starting_kilometer !== null && $sheet->starting_kilometer !== ''
-                            && $kmFinalFilaRaw !== null && $kmFinalFilaRaw !== '')
-                            ? $this->formatKilometer($kmFinalFilaRaw - $sheet->starting_kilometer)
-                            : $baseFila['km_total'];
-                        $partesCierre = [];
-                        if (! empty($route->funcionario_nombre) || ! empty($route->funcionario_cc)) {
-                            $funcTxt = 'Funcionario CC '.trim(($route->funcionario_cc ?? '').(! empty($route->funcionario_nombre) ? ' - '.$route->funcionario_nombre : ''));
-                            $partesCierre[] = $funcTxt;
-                        }
-                        if (! empty($route->number_of_tolls) || ! empty($route->total_toll_value)) {
-                            $valorPeaje = $route->total_toll_value !== null ? number_format((float) $route->total_toll_value, 0, ',', '.') : '0';
-                            $partesCierre[] = 'Peajes: '.($route->number_of_tolls ?? 0).' ($'.$valorPeaje.')';
-                        }
-                        if (! empty($route->end_novelty)) {
-                            $partesCierre[] = 'Novedad: '.$route->end_novelty;
-                        }
-                        $dias[] = array_merge($baseFila, [
-                            'ruta' => $rutaUnica,
-                            'ruta_unica' => $rutaUnica,
-                            'hora_fin' => $horaFinFila,
-                            'km_final' => $kmFinalFila,
-                            'km_total' => $kmTotalFila,
-                            'hora_fin_recorrido' => $horaFinRec,
-                            'km_final_recorrido' => $kmFinRecRaw !== null ? $this->formatKilometer($kmFinRecRaw) : '',
-                            'detalle_cierre' => ! empty($partesCierre) ? implode(' | ', $partesCierre) : '',
-                            'clave_recorrido' => $claveRecorrido,
-                            'firma_funcionario' => null,
-                            'firma_conductor_recorrido' => null,
-                        ]);
+                foreach ($routes as $route) {
+                    $claveRecorrido = "rec_{$uniqueKey}_{$route->id}";
+                    $clavesRuta[$route->id] = $claveRecorrido;
+                    $grupoFirmas = $routeSignaturesByRoute->get($route->id) ?? collect();
+                    if ($grupoFirmas->get(0)) {
+                        $signatureModelsToLoad["firma_func_{$claveRecorrido}"] = $grupoFirmas->get(0);
                     }
-                } else {
-                    $esDisponibilidadMes = $sheet->esDisponibilidad();
-                    $textoDispMes = $esDisponibilidadMes ? $sheet->textoDisponibilidad() : '';
-                    $dias[] = array_merge($baseFila, [
-                        'ruta' => $esDisponibilidadMes ? $textoDispMes : $rutasTexto,
-                        'ruta_unica' => $esDisponibilidadMes ? $textoDispMes : $rutasTexto,
-                        'rutas' => $rutasLista,
-                        'hora_fin_recorrido' => '',
-                        'km_final_recorrido' => '',
-                        'detalle_cierre' => $esDisponibilidadMes
-                            ? 'Vehículo en disponibilidad'.($sheet->motivoDisponibilidad() !== null
-                                ? ' — '.$sheet->motivoDisponibilidad()
-                                : ' — sin recorridos asignados')
-                            : '',
-                        'clave_recorrido' => null,
-                        'firma_funcionario' => null,
-                        'firma_conductor_recorrido' => null,
-                    ]);
+                    if ($grupoFirmas->get(1)) {
+                        $signatureModelsToLoad["firma_conduit_{$claveRecorrido}"] = $grupoFirmas->get(1);
+                    }
                 }
             }
 
@@ -1506,20 +1224,30 @@ class PdfService
             $filesToLoad = array_merge(['logo' => $logoModel], $signatureModelsToLoad);
             $base64Images = $this->getBase64Parallel($filesToLoad);
 
-            // Mapear las firmas a cada fila (una fila por recorrido).
-            // Prioridad: firma del recorrido; si no existe, firma global de la hoja.
+            // Resolver firmas por hoja y por recorrido desde el lote único.
             // La firma del conductor no se usa en el listado: solo va en el pie.
-            foreach ($dias as &$dia) {
-                if (! empty($dia['unique_key'])) {
-                    $uKey = $dia['unique_key'];
-                    $firmaHojaFunc = $base64Images["firma_func_{$uKey}"] ?? null;
-                    $claveRec = $dia['clave_recorrido'] ?? null;
-                    $firmaRecFunc = ($claveRec !== null) ? ($base64Images["firma_func_{$claveRec}"] ?? null) : null;
-                    $dia['firma_funcionario'] = $firmaRecFunc ?: $firmaHojaFunc;
-                    $dia['firma_conductor_recorrido'] = null;
-                }
+            $firmaHojaMensual = [];
+            foreach ($clavesHoja as $sheetId => $uk) {
+                $firmaHojaMensual[$sheetId] = $base64Images["firma_func_{$uk}"] ?? null;
             }
-            unset($dia);
+            $firmasRutaMensual = [];
+            foreach ($clavesRuta as $routeId => $cr) {
+                $firmasRutaMensual[$routeId] = [
+                    'funcionario' => $base64Images["firma_func_{$cr}"] ?? null,
+                    'conductor' => null,
+                ];
+            }
+
+            // Filas unificadas con diario/filtrado (misma forma, mismo respaldo).
+            $resultadoFilas = $this->filas->armarDias($sheets, [
+                'proyecto' => fn ($s) => $s->project ? $s->project->project_name : null,
+                'rutasDe' => fn ($s) => $routesBySheet->get($s->uuid, collect()),
+                'firmaHoja' => fn ($s) => $firmaHojaMensual[$s->id] ?? null,
+                'firmasRuta' => fn ($h, $r) => $firmasRutaMensual[$r->id] ?? ['funcionario' => null, 'conductor' => null],
+                'numeroEntero' => false,
+                'conRutasDetalle' => false,
+            ]);
+            $dias = $resultadoFilas['dias'];
 
             // Construir observaciones consolidadas del mes: peajes + total recorridos
             $totalPeajes = $sheets->sum('number_of_tolls');
@@ -1715,64 +1443,28 @@ class PdfService
             $base64Sigs = $this->getBase64Parallel(array_merge(['logo2' => null], $sigModels));
             unset($base64Sigs['logo2']);
 
-            $dias = [];
-            foreach ($sheets as $sheet) {
-                $fecha = Carbon::parse($sheet->service_date);
-                $rest = $this->calculateRestHours($sheet->start_time, $sheet->end_time, $sheet->total_hours);
-                $base = [
-                    'numero' => $fecha->format('d'),
-                    'fecha_completa' => $fecha->format('d/m/Y'),
-                    'hora_inicio' => $sheet->start_time ? $sheet->start_time->format('H:i') : '',
-                    'descanso_inicio' => $rest['inicio'],
-                    'descanso_fin' => $rest['fin'],
-                    'hora_fin' => $sheet->end_time ? $sheet->end_time->format('H:i') : '',
-                    'total_hours' => $sheet->total_hours ? $sheet->total_hours->format('H:i') : '',
-                    'km_inicial' => $this->formatKilometer($sheet->starting_kilometer),
-                    'km_final' => $this->formatKilometer($sheet->ending_kilometer),
-                    'km_total' => ($sheet->starting_kilometer !== null && $sheet->ending_kilometer !== null)
-                        ? $this->formatKilometer($sheet->ending_kilometer - $sheet->starting_kilometer) : '',
-                    'conductor' => $sheet->driver_name,
-                    'proyecto' => $sheet->project?->project_name,
-                    'estado' => 'FINALIZADA',
-                    'is_closed' => true,
-                ];
-                $firmaHoja = $base64Sigs["ff_{$sheet->id}"] ?? null;
-                $routes = $routesBySheet->get($sheet->uuid, collect());
-                if ($routes->isNotEmpty()) {
-                    foreach ($routes as $route) {
-                        $rutaUnica = trim(($route->origin ?? '').' - '.($route->destination ?? ''), ' -') ?: ($sheet->daily_route ?? 'Sin ruta definida');
-                        $gf = $routeSigs->get($route->id, collect());
-                        $firmaRec = null;
-                        if ($gf->first()) {
-                            $tmp = $this->getBase64Parallel(['fr' => $gf->first()]);
-                            $firmaRec = $tmp['fr'] ?? null;
-                        }
-                        $partes = [];
-                        if (! empty($route->funcionario_cc) || ! empty($route->funcionario_nombre)) {
-                            $partes[] = 'Funcionario CC '.trim(($route->funcionario_cc ?? '').' - '.($route->funcionario_nombre ?? ''), ' -');
-                        }
-                        if (! empty($route->end_novelty)) {
-                            $partes[] = 'Novedad: '.$route->end_novelty;
-                        }
-                        $dias[] = array_merge($base, [
-                            'ruta' => $rutaUnica,
-                            'ruta_unica' => $rutaUnica,
-                            'detalle_cierre' => implode(' | ', $partes),
-                            'firma_funcionario' => $firmaRec ?: $firmaHoja,
-                        ]);
+            // Filas unificadas con diario/mensual: misma forma, mismos respaldos.
+            // Diferencia intencionada respecto al código anterior: las filas por
+            // recorrido usan hora/km del recorrido (no solo globales), el detalle
+            // incluye peajes y la firma resuelve igual que en el diario.
+            $resultadoFilas = $this->filas->armarDias($sheets, [
+                'proyecto' => fn ($s) => $s->project?->project_name,
+                'rutasDe' => fn ($s) => $routesBySheet->get($s->uuid, collect()),
+                'firmaHoja' => fn ($s) => $base64Sigs["ff_{$s->id}"] ?? null,
+                'firmasRuta' => function ($hoja, $route) use ($routeSigs) {
+                    $gf = $routeSigs->get($route->id, collect());
+                    $firmaRec = null;
+                    if ($gf->first()) {
+                        $tmp = $this->getBase64Parallel(['fr' => $gf->first()]);
+                        $firmaRec = $tmp['fr'] ?? null;
                     }
-                } else {
-                    $textoDispReporte = $sheet->esDisponibilidad() ? $sheet->textoDisponibilidad() : 'VEHÍCULO EN DISPONIBILIDAD';
-                    $dias[] = array_merge($base, [
-                        'ruta' => $textoDispReporte,
-                        'ruta_unica' => $textoDispReporte,
-                        'detalle_cierre' => 'Vehículo en disponibilidad'.($sheet->motivoDisponibilidad() !== null
-                            ? ' — '.$sheet->motivoDisponibilidad()
-                            : ' — sin recorridos asignados'),
-                        'firma_funcionario' => null,
-                    ]);
-                }
-            }
+
+                    return ['funcionario' => $firmaRec, 'conductor' => null];
+                },
+                'numeroEntero' => false,
+                'conRutasDetalle' => false,
+            ]);
+            $dias = $resultadoFilas['dias'];
 
             $etiquetas = [
                 'rango' => 'RANGO '.($filtros['fecha_desde'] ?? '').' AL '.($filtros['fecha_hasta'] ?? ''),
@@ -1988,71 +1680,6 @@ class PdfService
         }
 
         return null;
-    }
-
-    /**
-     * Formatea los recorridos de una planilla como lista "Origen - Destino".
-     *
-     * @param  \Illuminate\Support\Collection  $routes
-     * @return array<int, string>
-     */
-    private function formatRoutesList($routes): array
-    {
-        return $routes
-            ->map(fn ($r) => trim(($r->origin ?? '').' - '.($r->destination ?? ''), ' -'))
-            ->filter()
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Calcula las horas de descanso (inicio y fin) basado en la diferencia entre
-     * el tiempo transcurrido y las horas reportadas (estándar Colombia).
-     */
-    private function calculateRestHours(?Carbon $start, ?Carbon $end, ?Carbon $totalHours): array
-    {
-        if (! $start || ! $end) {
-            return ['inicio' => '', 'fin' => ''];
-        }
-
-        $totalElapsedMinutes = $start->diffInMinutes($end);
-        if ($end < $start) {
-            $totalElapsedMinutes = $start->diffInMinutes($end->copy()->addDay());
-        }
-
-        $breakMinutes = 0;
-
-        if ($totalHours) {
-            $totalWorkedMinutes = ($totalHours->hour * 60) + $totalHours->minute;
-            $breakMinutes = $totalElapsedMinutes - $totalWorkedMinutes;
-        }
-
-        // Si no hay diferencia reportada, pero la jornada es mayor a 6 horas,
-        // en Colombia por ley debe haber al menos 1 hora de descanso.
-        if ($breakMinutes <= 0 && $totalElapsedMinutes > 360) {
-            $breakMinutes = 60; // Forzar 1 hora de descanso
-        }
-
-        if ($breakMinutes > 0) {
-            // Descanso estándar colombiano suele ser al mediodía (12:00 PM)
-            $breakStart = Carbon::createFromTime(12, 0);
-
-            // Si el turno empezó después de las 12:00 o en la noche, el descanso se pone a la mitad de la jornada
-            if ($start->hour >= 12 || $start->hour < 5 || $end->hour <= 12) {
-                $halfElapsed = (int) ($totalElapsedMinutes / 2);
-                $halfBreak = (int) ($breakMinutes / 2);
-                $breakStart = $start->copy()->addMinutes($halfElapsed - $halfBreak);
-            }
-
-            $breakEnd = $breakStart->copy()->addMinutes($breakMinutes);
-
-            return [
-                'inicio' => $breakStart->format('H:i'),
-                'fin' => $breakEnd->format('H:i'),
-            ];
-        }
-
-        return ['inicio' => '', 'fin' => ''];
     }
 
     /**
