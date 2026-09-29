@@ -158,7 +158,8 @@ class VehicleDocumentService extends BaseService
                 ->map(fn ($date) => $date instanceof \Carbon\Carbon ? $date->toDateString() : (string) $date);
             $expiry = $validExpiries->isEmpty() ? null : $validExpiries->sort()->first();
 
-            $hasVigente = $policies->contains(fn ($doc) => $doc->status === 'VIGENTE');
+            // Acepta SI por compatibilidad con registros anteriores a la normalización.
+            $hasVigente = $policies->contains(fn ($doc) => in_array($doc->status, ['VIGENTE', 'SI'], true));
 
             return [
                 'uuid' => $vehicle->uuid,
