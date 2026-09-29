@@ -6,11 +6,14 @@ namespace App\Services\Tracking;
 
 use App\Models\DriverLocation;
 use App\Models\DriverLocationAlert;
+use App\Models\DriverLocationDailyStat;
 use App\Models\DriverLocationSession;
 use App\Models\Geofence;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -89,6 +92,7 @@ class LocationTrackingService extends BaseService
 
             $location->save();
 
+            $this->actualizarResumenDiario($location);
             $this->recalcularPuntoSiguiente($location);
             $this->updateActiveSession($location);
             $this->processGeofences($location);
@@ -425,6 +429,184 @@ class LocationTrackingService extends BaseService
         $siguiente->save();
 
         $this->ajustarSesionActiva($siguiente->third_party_uuid, $distanciaNueva - $distanciaPrevia);
+        $this->ajustarDistanciaResumenDiario($siguiente, $distanciaNueva - $distanciaPrevia);
+    }
+
+    /**
+     * Suma el punto recién guardado al resumen de su día.
+     *
+     * La fila se bloquea dentro de la transacción para que dos puntos del mismo
+     * día no se pisen entre sí. Si dos escrituras concurrentes la crean a la vez,
+     * la segunda reintenta la lectura tras el conflicto de unicidad.
+     */
+    private function actualizarResumenDiario(DriverLocation $location): void
+    {
+        $resumen = $this->resumenDiarioBloqueado($location, true);
+
+        $resumen->total_points++;
+        $resumen->total_distance_meters = round(
+            (float) $resumen->total_distance_meters + (float) $location->distance_meters,
+            2
+        );
+        $resumen->samples = $this->agregarMuestra($resumen->samples ?? [], [
+            (float) $location->latitude,
+            (float) $location->longitude,
+            Carbon::parse($location->recorded_at)->format('Y-m-d H:i:s'),
+            (float) ($location->speed ?? 0),
+        ]);
+        $resumen->save();
+    }
+
+    /**
+     * Corrige la distancia del día cuando un punto tardío cambia el tramo de un
+     * punto ya contabilizado. Si la fila del día no existe (no debería pasar),
+     * se reconstruye desde los puntos para no dejar el resumen descuadrado.
+     */
+    private function ajustarDistanciaResumenDiario(DriverLocation $punto, float $deltaMeters): void
+    {
+        if ($deltaMeters === 0.0) {
+            return;
+        }
+
+        $resumen = $this->resumenDiarioBloqueado($punto, false);
+
+        if (! $resumen) {
+            $this->reconstruirResumenDia(
+                $punto->third_party_uuid,
+                $punto->company_uuid,
+                Carbon::parse($punto->recorded_at)->toDateString()
+            );
+
+            return;
+        }
+
+        $resumen->total_distance_meters = round((float) $resumen->total_distance_meters + $deltaMeters, 2);
+        $resumen->save();
+    }
+
+    /**
+     * Fila del día del punto, bloqueada para escritura. Con $crear en verdadero
+     * la crea si no existe; en falso devuelve nulo para que quien llama decida.
+     */
+    private function resumenDiarioBloqueado(DriverLocation $punto, bool $crear): ?DriverLocationDailyStat
+    {
+        $fecha = Carbon::parse($punto->recorded_at)->toDateString();
+
+        $resumen = DriverLocationDailyStat::where('third_party_uuid', $punto->third_party_uuid)
+            ->where('company_uuid', $punto->company_uuid)
+            ->where('service_date', $fecha)
+            ->lockForUpdate()
+            ->first();
+
+        if ($resumen || ! $crear) {
+            return $resumen;
+        }
+
+        try {
+            return DriverLocationDailyStat::create([
+                'company_uuid' => $punto->company_uuid,
+                'third_party_uuid' => $punto->third_party_uuid,
+                'service_date' => $fecha,
+                'total_points' => 0,
+                'total_distance_meters' => 0,
+                'samples' => [],
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            return DriverLocationDailyStat::where('third_party_uuid', $punto->third_party_uuid)
+                ->where('company_uuid', $punto->company_uuid)
+                ->where('service_date', $fecha)
+                ->lockForUpdate()
+                ->firstOrFail();
+        }
+    }
+
+    /**
+     * Reconstruye la fila de un día desde los puntos, para corregir un resumen
+     * ausente sin tocar los demás días.
+     */
+    private function reconstruirResumenDia(string $driverUuid, ?string $companyUuid, string $fecha): void
+    {
+        DriverLocationDailyStat::where('third_party_uuid', $driverUuid)
+            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+            ->where('service_date', $fecha)
+            ->delete();
+
+        $filtroFecha = "DATE(recorded_at) = ?";
+        $parametros = [$driverUuid, $fecha];
+
+        if ($companyUuid) {
+            $filtroFecha .= ' AND company_uuid = ?';
+            $parametros[] = $companyUuid;
+        }
+
+        $agregado = DB::selectOne(
+            "SELECT COUNT(*) AS puntos, COALESCE(SUM(distance_meters), 0) AS distancia " .
+            "FROM driver_locations WHERE third_party_uuid = ? AND {$filtroFecha}",
+            $parametros
+        );
+
+        $total = (int) $agregado->puntos;
+
+        if ($total === 0) {
+            return;
+        }
+
+        $paso = max(1, (int) ceil($total / DriverLocationDailyStat::MUESTRAS_POR_DIA));
+
+        $filas = DB::select(
+            'SELECT latitude, longitude, recorded_at, speed FROM (' .
+            'SELECT latitude, longitude, recorded_at, speed, ' .
+            'ROW_NUMBER() OVER (ORDER BY recorded_at, id) AS rn ' .
+            "FROM driver_locations WHERE third_party_uuid = ? AND {$filtroFecha}) t " .
+            'WHERE (rn - 1) % ' . $paso . ' = 0 ORDER BY recorded_at',
+            $parametros
+        );
+
+        DriverLocationDailyStat::create([
+            'company_uuid' => $companyUuid,
+            'third_party_uuid' => $driverUuid,
+            'service_date' => $fecha,
+            'total_points' => $total,
+            'total_distance_meters' => round((float) $agregado->distancia, 2),
+            'samples' => array_map(fn ($f) => [
+                (float) $f->latitude,
+                (float) $f->longitude,
+                (string) $f->recorded_at,
+                (float) ($f->speed ?? 0),
+            ], $filas),
+        ]);
+    }
+
+    /**
+     * Agrega un punto a las muestras del día manteniendo el orden cronológico
+     * y el tope, con primero y último siempre presentes.
+     *
+     * @param  array<int, array{0: float, 1: float, 2: string, 3: float}>  $muestras
+     * @return array<int, array{0: float, 1: float, 2: string, 3: float}>
+     */
+    private function agregarMuestra(array $muestras, array $punto): array
+    {
+        $muestras[] = $punto;
+
+        usort($muestras, fn ($a, $b) => $a[2] <=> $b[2]);
+
+        $tope = DriverLocationDailyStat::MUESTRAS_POR_DIA;
+
+        if (count($muestras) > $tope) {
+            $total = count($muestras);
+            $paso = ($total - 1) / ($tope - 1);
+            $diezmadas = [];
+
+            for ($i = 0; $i < $tope; $i++) {
+                $diezmadas[] = $muestras[(int) round($i * $paso)];
+            }
+
+            $diezmadas[0] = $muestras[0];
+            $diezmadas[$tope - 1] = $muestras[$total - 1];
+            $muestras = $diezmadas;
+        }
+
+        return array_values($muestras);
     }
 
     /**

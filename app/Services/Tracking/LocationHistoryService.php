@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Tracking;
 
 use App\Models\DriverLocation;
+use App\Models\DriverLocationDailyStat;
 use App\Models\DriverLocationSession;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Builder;
@@ -109,9 +110,12 @@ class LocationHistoryService extends BaseService
     }
 
     /**
-     * Trazado decimado para el mapa (ARQ-002): como máximo $maxPoints puntos
-     * muestreados por buckets de tiempo. La forma del recorrido se conserva
-     * sin transferir ni hidratar el rango completo.
+     * Trazado decimado para el mapa (ARQ-002): como máximo $maxPoints puntos.
+     *
+     * Con el resumen diario, el mapa fusiona las muestras ya guardadas por día
+     * en vez de agrupar la ventana completa. Si algún día del rango no tiene
+     * resumen, se usa el cálculo anterior por cubetas de tiempo para no dejar
+     * huecos en el trazado.
      */
     public function getDriverHistoryForMap(
         string $driverUuid,
@@ -124,6 +128,137 @@ class LocationHistoryService extends BaseService
 
         $maxPoints = max(100, min($maxPoints, self::MAPA_MAX_PUNTOS_TOPE));
 
+        $trazado = $this->trazadoDesdeResumenes($driverUuid, $companyUuid, $start, $end, $maxPoints);
+
+        return $trazado ?? $this->trazadoPorCubetas($driverUuid, $companyUuid, $start, $end, $maxPoints);
+    }
+
+    /**
+     * Fusiona las muestras diarias del rango y las diezma al tope pedido.
+     * Devuelve nulo cuando falta el resumen de algún día con datos.
+     *
+     * @return \Illuminate\Support\Collection<int, array{latitude: float, longitude: float, speed: float, recorded_at: string}>|null
+     */
+    private function trazadoDesdeResumenes(
+        string $driverUuid,
+        ?string $companyUuid,
+        Carbon $start,
+        Carbon $end,
+        int $maxPoints
+    ): ?\Illuminate\Support\Collection {
+        $resumenes = DriverLocationDailyStat::where('third_party_uuid', $driverUuid)
+            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+            ->whereBetween('service_date', [$start->toDateString(), $end->toDateString()])
+            ->orderBy('service_date')
+            ->get(['service_date', 'samples']);
+
+        if ($resumenes->isEmpty()) {
+            return $this->hayPuntosEnRango($driverUuid, $companyUuid, $start, $end) ? null : collect();
+        }
+
+        // Los días del rango sin resumen solo obligan al respaldo si de verdad
+        // tienen puntos. Verificar día por día con el índice es mucho más barato
+        // que listar los días con datos de toda la ventana.
+        $diasConResumen = $resumenes->map(fn ($r) => $r->service_date->toDateString())->all();
+
+        for ($dia = $start->copy()->startOfDay(); $dia->lte($end); $dia->addDay()) {
+            $fecha = $dia->toDateString();
+
+            if (in_array($fecha, $diasConResumen, true)) {
+                continue;
+            }
+
+            if ($this->hayPuntosEnDia($driverUuid, $companyUuid, $dia)) {
+                return null;
+            }
+        }
+
+        $puntos = [];
+
+        foreach ($resumenes as $resumen) {
+            foreach ($resumen->samples ?? [] as $muestra) {
+                $puntos[] = [
+                    'latitude' => (float) $muestra[0],
+                    'longitude' => (float) $muestra[1],
+                    'recorded_at' => (string) $muestra[2],
+                    'speed' => (float) ($muestra[3] ?? 0),
+                ];
+            }
+        }
+
+        usort($puntos, fn ($a, $b) => $a['recorded_at'] <=> $b['recorded_at']);
+
+        return collect($this->diezmarPuntos($puntos, $maxPoints));
+    }
+
+    /**
+     * Indica si el conductor tiene puntos en un día, resuelto con el índice.
+     */
+    private function hayPuntosEnDia(
+        string $driverUuid,
+        ?string $companyUuid,
+        Carbon $dia
+    ): bool {
+        return DriverLocation::query()
+            ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
+            ->where('third_party_uuid', $driverUuid)
+            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+            ->whereBetween('recorded_at', [$dia->copy()->startOfDay(), $dia->copy()->endOfDay()])
+            ->exists();
+    }
+
+    private function hayPuntosEnRango(
+        string $driverUuid,
+        ?string $companyUuid,
+        Carbon $start,
+        Carbon $end
+    ): bool {
+        return DriverLocation::query()
+            ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
+            ->where('third_party_uuid', $driverUuid)
+            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+            ->whereBetween('recorded_at', [$start, $end])
+            ->exists();
+    }
+
+    /**
+     * Diezma puntos ordenados al tope, conservando primero y último.
+     *
+     * @param  array<int, array{latitude: float, longitude: float, speed: float, recorded_at: string}>  $puntos
+     * @return array<int, array{latitude: float, longitude: float, speed: float, recorded_at: string}>
+     */
+    private function diezmarPuntos(array $puntos, int $tope): array
+    {
+        $total = count($puntos);
+
+        if ($total <= $tope) {
+            return array_values($puntos);
+        }
+
+        $paso = ($total - 1) / ($tope - 1);
+        $salida = [];
+
+        for ($i = 0; $i < $tope; $i++) {
+            $salida[] = $puntos[(int) round($i * $paso)];
+        }
+
+        $salida[0] = $puntos[0];
+        $salida[$tope - 1] = $puntos[$total - 1];
+
+        return array_values($salida);
+    }
+
+    /**
+     * Trazado anterior por cubetas de tiempo: se conserva como respaldo cuando
+     * el resumen diario no cubre todo el rango.
+     */
+    private function trazadoPorCubetas(
+        string $driverUuid,
+        ?string $companyUuid,
+        Carbon $start,
+        Carbon $end,
+        int $maxPoints
+    ): \Illuminate\Support\Collection {
         // Carbon 3 devuelve diffs con signo: se fuerza valor absoluto.
         $rangeSeconds = max(1, (int) abs($end->diffInSeconds($start)));
         $bucketSeconds = max(1, (int) ceil($rangeSeconds / $maxPoints));
