@@ -195,8 +195,7 @@ class ResumenDiarioMapaTest extends TestCase
 
     #[Test]
     public function un_punto_tardio_ajusta_el_resumen_sin_duplicar(): void
-    {
-        $this->punto(4.70, -74.10, '2026-09-28 08:00:00');
+    {        $this->punto(4.70, -74.10, '2026-09-28 08:00:00');
         $this->punto(4.71, -74.10, '2026-09-28 08:10:00');
 
         // Llega tarde un punto intermedio del mismo día.
@@ -207,5 +206,23 @@ class ResumenDiarioMapaTest extends TestCase
         $this->assertSame(3, $resumen->total_points);
         $this->assertEqualsWithDelta(1111.95, (float) $resumen->total_distance_meters, 1.0);
         $this->assertCount(3, $resumen->samples);
+    }
+
+    #[Test]
+    public function los_dias_sin_datos_no_obligan_al_respaldo(): void
+    {
+        $this->punto(4.70, -74.10, '2026-09-28 08:00:00');
+        $this->punto(4.71, -74.10, '2026-09-30 08:00:00');
+
+        // El 29 no tiene puntos ni resumen: el mapa sale de los resúmenes.
+        $this->assertNull($this->resumenDe('2026-09-29'));
+
+        $trazado = $this->mapa('2026-09-28', '2026-09-30');
+
+        $this->assertCount(2, $trazado);
+        $this->assertSame(
+            ['2026-09-28 08:00:00', '2026-09-30 08:00:00'],
+            $this->marcas($trazado)
+        );
     }
 }

@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -49,55 +50,91 @@ return new class extends Migration
      */
     private function backfill(): void
     {
-        $particiones = DB::table('driver_locations')
+        DB::table('driver_locations')
             ->selectRaw('third_party_uuid, company_uuid, DATE(recorded_at) AS dia')
             ->distinct()
+            ->orderBy('third_party_uuid')
+            ->chunk(200, function ($particiones) {
+                foreach ($particiones as $particion) {
+                    $this->backfillDia(
+                        $particion->third_party_uuid,
+                        $particion->company_uuid,
+                        $particion->dia
+                    );
+                }
+            });
+    }
+
+    /**
+     * Construye el resumen de un día desde sus puntos.
+     *
+     * El rango de fecha usa el índice; el diezmado es el mismo de
+     * DriverLocationDailyStat::indicesParaTope() y se duplica aquí para que la
+     * migración no dependa del código actual.
+     */
+    private function backfillDia(string $driverUuid, string $companyUuid, string $dia): void
+    {
+        $filas = DB::table('driver_locations')
+            ->select(['latitude', 'longitude', 'recorded_at', 'speed', 'distance_meters'])
+            ->where('third_party_uuid', $driverUuid)
+            ->where('company_uuid', $companyUuid)
+            ->whereBetween('recorded_at', [
+                Carbon::parse($dia)->startOfDay(),
+                Carbon::parse($dia)->endOfDay(),
+            ])
+            ->orderBy('recorded_at')
+            ->orderBy('id')
             ->get();
 
-        foreach ($particiones as $particion) {
-            $agregado = DB::table('driver_locations')
-                ->selectRaw('COUNT(*) AS puntos, COALESCE(SUM(distance_meters), 0) AS distancia')
-                ->where('third_party_uuid', $particion->third_party_uuid)
-                ->where('company_uuid', $particion->company_uuid)
-                ->whereDate('recorded_at', $particion->dia)
-                ->first();
+        $total = count($filas);
 
-            $total = (int) $agregado->puntos;
+        if ($total === 0) {
+            return;
+        }
 
-            if ($total === 0) {
-                continue;
+        $indices = range(0, $total - 1);
+
+        if ($total > 300) {
+            $paso = ($total - 1) / 299;
+            $indices = [];
+
+            for ($i = 0; $i < 300; $i++) {
+                $indices[] = (int) round($i * $paso);
             }
 
-            $paso = max(1, (int) ceil($total / 300));
-
-            $filas = DB::select(
-                'SELECT latitude, longitude, recorded_at, speed FROM (' .
-                'SELECT latitude, longitude, recorded_at, speed, ' .
-                'ROW_NUMBER() OVER (ORDER BY recorded_at, id) AS rn ' .
-                'FROM driver_locations WHERE third_party_uuid = ? AND company_uuid = ? AND DATE(recorded_at) = ?) t ' .
-                'WHERE (rn - 1) % ' . $paso . ' = 0 ORDER BY recorded_at',
-                [$particion->third_party_uuid, $particion->company_uuid, $particion->dia]
-            );
-
-            $muestras = array_map(fn ($f) => [
-                (float) $f->latitude,
-                (float) $f->longitude,
-                (string) $f->recorded_at,
-                (float) ($f->speed ?? 0),
-            ], $filas);
-
-            DB::table('driver_location_daily_stats')->insert([
-                'uuid' => (string) Str::uuid(),
-                'company_uuid' => $particion->company_uuid,
-                'third_party_uuid' => $particion->third_party_uuid,
-                'service_date' => $particion->dia,
-                'total_points' => $total,
-                'total_distance_meters' => round((float) $agregado->distancia, 2),
-                'samples' => json_encode($muestras),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            $indices[0] = 0;
+            $indices[299] = $total - 1;
+            $indices = array_values(array_unique($indices));
         }
+
+        $muestras = [];
+        $distancia = 0.0;
+
+        foreach ($filas as $fila) {
+            $distancia += (float) $fila->distance_meters;
+        }
+
+        foreach ($indices as $i) {
+            $fila = $filas[$i];
+            $muestras[] = [
+                (float) $fila->latitude,
+                (float) $fila->longitude,
+                (string) $fila->recorded_at,
+                (float) ($fila->speed ?? 0),
+            ];
+        }
+
+        DB::table('driver_location_daily_stats')->insert([
+            'uuid' => (string) Str::uuid(),
+            'company_uuid' => $companyUuid,
+            'third_party_uuid' => $driverUuid,
+            'service_date' => $dia,
+            'total_points' => $total,
+            'total_distance_meters' => round($distancia, 2),
+            'samples' => json_encode($muestras),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
     }
 
     public function down(): void

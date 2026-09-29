@@ -65,7 +65,7 @@ class LocationTrackingService extends BaseService
 
             // La distancia se calcula antes de insertar: el punto anterior del
             // conductor ya existe y así el nuevo se guarda una sola vez.
-            $anterior = $this->puntoAnterior($data['third_party_uuid'], $recordedAt);
+            $anterior = $this->puntoAnterior($data['third_party_uuid'], $data['company_uuid'], $recordedAt);
 
             $location = new DriverLocation([
                 'uuid' => (string) Str::uuid(),
@@ -377,14 +377,23 @@ class LocationTrackingService extends BaseService
     }
 
     /**
-     * Punto anterior del conductor antes de insertar el nuevo.
+     * Punto anterior del conductor y la empresa antes de insertar el nuevo.
      *
      * El id del punto nuevo todavía no existe y será el mayor, así que cualquier
      * registro con la misma marca de tiempo es anterior: basta el rango simple.
+     * Se filtra por empresa para que la cadena de distancias no mezcle
+     * recorridos de distintas empresas del mismo conductor; con el índice
+     * forzado el filtro no cambia el plan.
      */
-    private function puntoAnterior(string $driverUuid, mixed $recordedAt): ?DriverLocation
+    private function puntoAnterior(string $driverUuid, ?string $companyUuid, mixed $recordedAt): ?DriverLocation
     {
-        return $this->consultaVecino($driverUuid)
+        $consulta = $this->consultaVecino($driverUuid, $companyUuid);
+
+        if ($companyUuid) {
+            $consulta->where('company_uuid', $companyUuid);
+        }
+
+        return $consulta
             ->where('recorded_at', '<=', $recordedAt)
             ->orderByDesc('recorded_at')
             ->orderByDesc('id')
@@ -402,17 +411,7 @@ class LocationTrackingService extends BaseService
      */
     private function recalcularPuntoSiguiente(DriverLocation $location): void
     {
-        $siguiente = $this->consultaVecino($location->third_party_uuid)
-            ->where('id', '!=', $location->id)
-            ->where('recorded_at', '>', $location->recorded_at)
-            ->orderBy('recorded_at')
-            ->orderBy('id')
-            ->first()
-            ?? $this->consultaVecino($location->third_party_uuid)
-                ->where('recorded_at', $location->recorded_at)
-                ->where('id', '>', $location->id)
-                ->orderBy('id')
-                ->first();
+        $siguiente = $this->puntoPosterior($location) ?? $this->puntoMismaMarca($location);
 
         if (! $siguiente) {
             return;
@@ -441,26 +440,31 @@ class LocationTrackingService extends BaseService
      */
     private function actualizarResumenDiario(DriverLocation $location): void
     {
-        $resumen = $this->resumenDiarioBloqueado($location, true);
+        $resumen = $this->obtenerOCrearResumenBloqueado($location);
 
         $resumen->total_points++;
         $resumen->total_distance_meters = round(
             (float) $resumen->total_distance_meters + (float) $location->distance_meters,
             2
         );
-        $resumen->samples = $this->agregarMuestra($resumen->samples ?? [], [
-            (float) $location->latitude,
-            (float) $location->longitude,
-            Carbon::parse($location->recorded_at)->format('Y-m-d H:i:s'),
-            (float) ($location->speed ?? 0),
-        ]);
+
+        $muestras = array_map(
+            fn ($arreglo) => MuestraRuta::desdeArreglo($arreglo),
+            $resumen->samples ?? []
+        );
+        $muestras[] = MuestraRuta::desdePunto($location);
+
+        $resumen->samples = array_map(
+            fn ($muestra) => $muestra->aArreglo(),
+            $this->agregarMuestra($muestras)
+        );
         $resumen->save();
     }
 
     /**
      * Corrige la distancia del día cuando un punto tardío cambia el tramo de un
-     * punto ya contabilizado. Si la fila del día no existe (no debería pasar),
-     * se reconstruye desde los puntos para no dejar el resumen descuadrado.
+     * punto ya contabilizado. Sin fila no hay nada que corregir: ese día nunca
+     * se contabilizó.
      */
     private function ajustarDistanciaResumenDiario(DriverLocation $punto, float $deltaMeters): void
     {
@@ -468,15 +472,9 @@ class LocationTrackingService extends BaseService
             return;
         }
 
-        $resumen = $this->resumenDiarioBloqueado($punto, false);
+        $resumen = $this->obtenerResumenBloqueado($punto);
 
         if (! $resumen) {
-            $this->reconstruirResumenDia(
-                $punto->third_party_uuid,
-                $punto->company_uuid,
-                Carbon::parse($punto->recorded_at)->toDateString()
-            );
-
             return;
         }
 
@@ -485,20 +483,29 @@ class LocationTrackingService extends BaseService
     }
 
     /**
-     * Fila del día del punto, bloqueada para escritura. Con $crear en verdadero
-     * la crea si no existe; en falso devuelve nulo para que quien llama decida.
+     * Fila del día del punto, bloqueada para escritura.
      */
-    private function resumenDiarioBloqueado(DriverLocation $punto, bool $crear): ?DriverLocationDailyStat
+    private function obtenerResumenBloqueado(DriverLocation $punto): ?DriverLocationDailyStat
     {
-        $fecha = Carbon::parse($punto->recorded_at)->toDateString();
-
-        $resumen = DriverLocationDailyStat::where('third_party_uuid', $punto->third_party_uuid)
+        return DriverLocationDailyStat::where('third_party_uuid', $punto->third_party_uuid)
             ->where('company_uuid', $punto->company_uuid)
-            ->where('service_date', $fecha)
+            ->where('service_date', Carbon::parse($punto->recorded_at)->toDateString())
             ->lockForUpdate()
             ->first();
+    }
 
-        if ($resumen || ! $crear) {
+    /**
+     * Fila del día del punto, creándola si no existe.
+     *
+     * Si dos escrituras concurrentes la crean a la vez, la segunda reintenta la
+     * lectura tras el conflicto de unicidad. La lectura con bloqueo espera a que
+     * la escritura ganadora confirme, así que la fila ya es visible.
+     */
+    private function obtenerOCrearResumenBloqueado(DriverLocation $punto): DriverLocationDailyStat
+    {
+        $resumen = $this->obtenerResumenBloqueado($punto);
+
+        if ($resumen) {
             return $resumen;
         }
 
@@ -506,123 +513,78 @@ class LocationTrackingService extends BaseService
             return DriverLocationDailyStat::create([
                 'company_uuid' => $punto->company_uuid,
                 'third_party_uuid' => $punto->third_party_uuid,
-                'service_date' => $fecha,
+                'service_date' => Carbon::parse($punto->recorded_at)->toDateString(),
                 'total_points' => 0,
                 'total_distance_meters' => 0,
                 'samples' => [],
             ]);
         } catch (UniqueConstraintViolationException) {
-            return DriverLocationDailyStat::where('third_party_uuid', $punto->third_party_uuid)
-                ->where('company_uuid', $punto->company_uuid)
-                ->where('service_date', $fecha)
-                ->lockForUpdate()
-                ->firstOrFail();
+            return $this->obtenerResumenBloqueado($punto) ?? throw new \RuntimeException(
+                'No se pudo obtener el resumen diario tras un conflicto de unicidad.'
+            );
         }
     }
 
     /**
-     * Reconstruye la fila de un día desde los puntos, para corregir un resumen
-     * ausente sin tocar los demás días.
-     */
-    private function reconstruirResumenDia(string $driverUuid, ?string $companyUuid, string $fecha): void
-    {
-        DriverLocationDailyStat::where('third_party_uuid', $driverUuid)
-            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
-            ->where('service_date', $fecha)
-            ->delete();
-
-        $filtroFecha = "DATE(recorded_at) = ?";
-        $parametros = [$driverUuid, $fecha];
-
-        if ($companyUuid) {
-            $filtroFecha .= ' AND company_uuid = ?';
-            $parametros[] = $companyUuid;
-        }
-
-        $agregado = DB::selectOne(
-            "SELECT COUNT(*) AS puntos, COALESCE(SUM(distance_meters), 0) AS distancia " .
-            "FROM driver_locations WHERE third_party_uuid = ? AND {$filtroFecha}",
-            $parametros
-        );
-
-        $total = (int) $agregado->puntos;
-
-        if ($total === 0) {
-            return;
-        }
-
-        $paso = max(1, (int) ceil($total / DriverLocationDailyStat::MUESTRAS_POR_DIA));
-
-        $filas = DB::select(
-            'SELECT latitude, longitude, recorded_at, speed FROM (' .
-            'SELECT latitude, longitude, recorded_at, speed, ' .
-            'ROW_NUMBER() OVER (ORDER BY recorded_at, id) AS rn ' .
-            "FROM driver_locations WHERE third_party_uuid = ? AND {$filtroFecha}) t " .
-            'WHERE (rn - 1) % ' . $paso . ' = 0 ORDER BY recorded_at',
-            $parametros
-        );
-
-        DriverLocationDailyStat::create([
-            'company_uuid' => $companyUuid,
-            'third_party_uuid' => $driverUuid,
-            'service_date' => $fecha,
-            'total_points' => $total,
-            'total_distance_meters' => round((float) $agregado->distancia, 2),
-            'samples' => array_map(fn ($f) => [
-                (float) $f->latitude,
-                (float) $f->longitude,
-                (string) $f->recorded_at,
-                (float) ($f->speed ?? 0),
-            ], $filas),
-        ]);
-    }
-
-    /**
-     * Agrega un punto a las muestras del día manteniendo el orden cronológico
-     * y el tope, con primero y último siempre presentes.
+     * Agrega muestras manteniendo el orden cronológico y el tope, con primero
+     * y último siempre presentes.
      *
-     * @param  array<int, array{0: float, 1: float, 2: string, 3: float}>  $muestras
-     * @return array<int, array{0: float, 1: float, 2: string, 3: float}>
+     * @param  array<int, MuestraRuta>  $muestras
+     * @return array<int, MuestraRuta>
      */
-    private function agregarMuestra(array $muestras, array $punto): array
+    private function agregarMuestra(array $muestras): array
     {
-        $muestras[] = $punto;
+        usort($muestras, fn ($a, $b) => $a->registradaEn <=> $b->registradaEn);
 
-        usort($muestras, fn ($a, $b) => $a[2] <=> $b[2]);
+        $indices = DriverLocationDailyStat::indicesParaTope(count($muestras), DriverLocationDailyStat::MUESTRAS_POR_DIA);
 
-        $tope = DriverLocationDailyStat::MUESTRAS_POR_DIA;
+        return array_values(array_map(fn ($i) => $muestras[$i], $indices));
+    }
 
-        if (count($muestras) > $tope) {
-            $total = count($muestras);
-            $paso = ($total - 1) / ($tope - 1);
-            $diezmadas = [];
+    /**
+     * Punto con marca posterior al nuevo, en orden (recorded_at, id).
+     */
+    private function puntoPosterior(DriverLocation $location): ?DriverLocation
+    {
+        return $this->consultaVecino($location->third_party_uuid, $location->company_uuid)
+            ->where('id', '!=', $location->id)
+            ->where('recorded_at', '>', $location->recorded_at)
+            ->orderBy('recorded_at')
+            ->orderBy('id')
+            ->first();
+    }
 
-            for ($i = 0; $i < $tope; $i++) {
-                $diezmadas[] = $muestras[(int) round($i * $paso)];
-            }
-
-            $diezmadas[0] = $muestras[0];
-            $diezmadas[$tope - 1] = $muestras[$total - 1];
-            $muestras = $diezmadas;
-        }
-
-        return array_values($muestras);
+    /**
+     * Punto con la misma marca que el nuevo y mayor id.
+     */
+    private function puntoMismaMarca(DriverLocation $location): ?DriverLocation
+    {
+        return $this->consultaVecino($location->third_party_uuid, $location->company_uuid)
+            ->where('recorded_at', $location->recorded_at)
+            ->where('id', '>', $location->id)
+            ->orderBy('id')
+            ->first();
     }
 
     /**
      * Consulta base del vecino, con el índice por conductor forzado.
      *
-     * El vecino es del mismo conductor, sin filtrar por empresa: un conductor
-     * pertenece a una sola empresa y el filtro de empresa hacía que el
-     * optimizador recorriera todo el histórico de la compañía en cada punto.
-     * Sin el hint, con un histórico grande, el optimizador elige un plan con
-     * filesort que recorre el conductor completo.
+     * Filtra por conductor y empresa para que la cadena de distancias no mezcle
+     * recorridos de distintas empresas. Con el índice forzado el filtro de
+     * empresa no cambia el plan; sin el hint, el optimizador elegía el índice
+     * de empresa y recorría todo su histórico en cada punto.
      */
-    private function consultaVecino(string $driverUuid): Builder
+    private function consultaVecino(string $driverUuid, ?string $companyUuid): Builder
     {
-        return DriverLocation::withoutGlobalScope('company')
+        $query = DriverLocation::withoutGlobalScope('company')
             ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
             ->where('third_party_uuid', $driverUuid);
+
+        if ($companyUuid) {
+            $query->where('company_uuid', $companyUuid);
+        }
+
+        return $query;
     }
 
     /**

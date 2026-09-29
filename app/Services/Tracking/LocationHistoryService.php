@@ -48,19 +48,15 @@ class LocationHistoryService extends BaseService
      * Se fuerza el índice por conductor: con un histórico grande el optimizador
      * elige el índice de empresa y examina todos los puntos de la compañía.
      */
-    private function rangoQuery(
-        string $driverUuid,
-        ?string $companyUuid,
-        Carbon $start,
-        Carbon $end
-    ): Builder {
+    private function rangoQuery(RangoConductor $rango): Builder
+    {
         $query = DriverLocation::query()
             ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
-            ->where('third_party_uuid', $driverUuid)
-            ->whereBetween('recorded_at', [$start, $end]);
+            ->where('third_party_uuid', $rango->conductorUuid)
+            ->whereBetween('recorded_at', [$rango->inicio, $rango->fin]);
 
-        if ($companyUuid) {
-            $query->where('company_uuid', $companyUuid);
+        if ($rango->empresaUuid) {
+            $query->where('company_uuid', $rango->empresaUuid);
         }
 
         return $query;
@@ -89,7 +85,7 @@ class LocationHistoryService extends BaseService
         $perPage = max(1, min($perPage, self::HISTORIAL_POR_PAGINA_MAX));
         $page = max(1, $page);
 
-        $query = $this->rangoQuery($driverUuid, $companyUuid, $start, $end);
+        $query = $this->rangoQuery(new RangoConductor($driverUuid, $companyUuid, $start, $end));
 
         $total = (clone $query)->count();
         $items = (clone $query)
@@ -127,10 +123,11 @@ class LocationHistoryService extends BaseService
         [$start, $end] = $this->rangoFechas($startDate, $endDate);
 
         $maxPoints = max(100, min($maxPoints, self::MAPA_MAX_PUNTOS_TOPE));
+        $rango = new RangoConductor($driverUuid, $companyUuid, $start, $end);
 
-        $trazado = $this->trazadoDesdeResumenes($driverUuid, $companyUuid, $start, $end, $maxPoints);
+        $trazado = $this->trazadoDesdeResumenes($rango, $maxPoints);
 
-        return $trazado ?? $this->trazadoPorCubetas($driverUuid, $companyUuid, $start, $end, $maxPoints);
+        return $trazado ?? $this->trazadoPorCubetas($rango, $maxPoints);
     }
 
     /**
@@ -139,21 +136,15 @@ class LocationHistoryService extends BaseService
      *
      * @return \Illuminate\Support\Collection<int, array{latitude: float, longitude: float, speed: float, recorded_at: string}>|null
      */
-    private function trazadoDesdeResumenes(
-        string $driverUuid,
-        ?string $companyUuid,
-        Carbon $start,
-        Carbon $end,
-        int $maxPoints
-    ): ?\Illuminate\Support\Collection {
-        $resumenes = DriverLocationDailyStat::where('third_party_uuid', $driverUuid)
-            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
-            ->whereBetween('service_date', [$start->toDateString(), $end->toDateString()])
+    private function trazadoDesdeResumenes(RangoConductor $rango, int $maxPoints): ?\Illuminate\Support\Collection {
+        $resumenes = DriverLocationDailyStat::where('third_party_uuid', $rango->conductorUuid)
+            ->when($rango->empresaUuid, fn ($q) => $q->where('company_uuid', $rango->empresaUuid))
+            ->whereBetween('service_date', [$rango->inicio->toDateString(), $rango->fin->toDateString()])
             ->orderBy('service_date')
             ->get(['service_date', 'samples']);
 
         if ($resumenes->isEmpty()) {
-            return $this->hayPuntosEnRango($driverUuid, $companyUuid, $start, $end) ? null : collect();
+            return $this->hayPuntosEnRango($rango) ? null : collect();
         }
 
         // Los días del rango sin resumen solo obligan al respaldo si de verdad
@@ -161,63 +152,56 @@ class LocationHistoryService extends BaseService
         // que listar los días con datos de toda la ventana.
         $diasConResumen = $resumenes->map(fn ($r) => $r->service_date->toDateString())->all();
 
-        for ($dia = $start->copy()->startOfDay(); $dia->lte($end); $dia->addDay()) {
+        for ($dia = $rango->inicio->copy()->startOfDay(); $dia->lte($rango->fin); $dia->addDay()) {
             $fecha = $dia->toDateString();
 
             if (in_array($fecha, $diasConResumen, true)) {
                 continue;
             }
 
-            if ($this->hayPuntosEnDia($driverUuid, $companyUuid, $dia)) {
+            if ($this->hayPuntosEnDia($rango, $dia)) {
                 return null;
             }
         }
 
-        $puntos = [];
+        $muestras = [];
 
         foreach ($resumenes as $resumen) {
-            foreach ($resumen->samples ?? [] as $muestra) {
-                $puntos[] = [
-                    'latitude' => (float) $muestra[0],
-                    'longitude' => (float) $muestra[1],
-                    'recorded_at' => (string) $muestra[2],
-                    'speed' => (float) ($muestra[3] ?? 0),
-                ];
+            foreach ($resumen->samples ?? [] as $arreglo) {
+                $muestras[] = MuestraRuta::desdeArreglo($arreglo);
             }
         }
 
-        usort($puntos, fn ($a, $b) => $a['recorded_at'] <=> $b['recorded_at']);
+        usort($muestras, fn ($a, $b) => $a->registradaEn <=> $b->registradaEn);
 
-        return collect($this->diezmarPuntos($puntos, $maxPoints));
+        $indices = DriverLocationDailyStat::indicesParaTope(count($muestras), $maxPoints);
+
+        return collect(array_map(
+            fn ($i) => $muestras[$i]->aRespuesta(),
+            $indices
+        ));
     }
 
     /**
      * Indica si el conductor tiene puntos en un día, resuelto con el índice.
      */
-    private function hayPuntosEnDia(
-        string $driverUuid,
-        ?string $companyUuid,
-        Carbon $dia
-    ): bool {
+    private function hayPuntosEnDia(RangoConductor $rango, Carbon $dia): bool
+    {
         return DriverLocation::query()
             ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
-            ->where('third_party_uuid', $driverUuid)
-            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+            ->where('third_party_uuid', $rango->conductorUuid)
+            ->when($rango->empresaUuid, fn ($q) => $q->where('company_uuid', $rango->empresaUuid))
             ->whereBetween('recorded_at', [$dia->copy()->startOfDay(), $dia->copy()->endOfDay()])
             ->exists();
     }
 
-    private function hayPuntosEnRango(
-        string $driverUuid,
-        ?string $companyUuid,
-        Carbon $start,
-        Carbon $end
-    ): bool {
+    private function hayPuntosEnRango(RangoConductor $rango): bool
+    {
         return DriverLocation::query()
             ->from(DB::raw('driver_locations FORCE INDEX (idx_dl_driver_recorded)'))
-            ->where('third_party_uuid', $driverUuid)
-            ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
-            ->whereBetween('recorded_at', [$start, $end])
+            ->where('third_party_uuid', $rango->conductorUuid)
+            ->when($rango->empresaUuid, fn ($q) => $q->where('company_uuid', $rango->empresaUuid))
+            ->whereBetween('recorded_at', [$rango->inicio, $rango->fin])
             ->exists();
     }
 
@@ -229,41 +213,21 @@ class LocationHistoryService extends BaseService
      */
     private function diezmarPuntos(array $puntos, int $tope): array
     {
-        $total = count($puntos);
+        $indices = DriverLocationDailyStat::indicesParaTope(count($puntos), $tope);
 
-        if ($total <= $tope) {
-            return array_values($puntos);
-        }
-
-        $paso = ($total - 1) / ($tope - 1);
-        $salida = [];
-
-        for ($i = 0; $i < $tope; $i++) {
-            $salida[] = $puntos[(int) round($i * $paso)];
-        }
-
-        $salida[0] = $puntos[0];
-        $salida[$tope - 1] = $puntos[$total - 1];
-
-        return array_values($salida);
+        return array_values(array_map(fn ($i) => $puntos[$i], $indices));
     }
 
     /**
      * Trazado anterior por cubetas de tiempo: se conserva como respaldo cuando
      * el resumen diario no cubre todo el rango.
      */
-    private function trazadoPorCubetas(
-        string $driverUuid,
-        ?string $companyUuid,
-        Carbon $start,
-        Carbon $end,
-        int $maxPoints
-    ): \Illuminate\Support\Collection {
+    private function trazadoPorCubetas(RangoConductor $rango, int $maxPoints): \Illuminate\Support\Collection {
         // Carbon 3 devuelve diffs con signo: se fuerza valor absoluto.
-        $rangeSeconds = max(1, (int) abs($end->diffInSeconds($start)));
+        $rangeSeconds = max(1, (int) abs($rango->fin->diffInSeconds($rango->inicio)));
         $bucketSeconds = max(1, (int) ceil($rangeSeconds / $maxPoints));
 
-        return $this->rangoQuery($driverUuid, $companyUuid, $start, $end)
+        return $this->rangoQuery($rango)
             ->selectRaw('AVG(latitude) AS latitude, AVG(longitude) AS longitude, AVG(speed) AS speed, MIN(recorded_at) AS recorded_at')
             ->groupBy(DB::raw('FLOOR(UNIX_TIMESTAMP(recorded_at) / ' . $bucketSeconds . ')'))
             ->orderBy('recorded_at', 'asc')
@@ -286,7 +250,7 @@ class LocationHistoryService extends BaseService
         $range = null;
         if ($startDate && $endDate) {
             [$start, $end] = $this->rangoFechas($startDate, $endDate);
-            $range = $this->calculateStats($driverUuid, $companyUuid, $start, $end);
+            $range = $this->calculateStats(new RangoConductor($driverUuid, $companyUuid, $start, $end));
         }
 
         $totalSessions = DriverLocationSession::where('third_party_uuid', $driverUuid)
@@ -316,17 +280,13 @@ class LocationHistoryService extends BaseService
      * punto del rango se le descuenta su tramo: su distancia es la que recorrió
      * desde un punto anterior al rango, que no debe contar en el periodo.
      */
-    private function calculateStats(
-        string $driverUuid,
-        ?string $companyUuid,
-        Carbon $startDate,
-        Carbon $endDate
-    ): array {
+    private function calculateStats(RangoConductor $rango): array
+    {
         $where = 'third_party_uuid = ? AND recorded_at BETWEEN ? AND ?';
-        $bindings = [$driverUuid, $startDate->toDateTimeString(), $endDate->toDateTimeString()];
-        if ($companyUuid) {
+        $bindings = [$rango->conductorUuid, $rango->inicio->toDateTimeString(), $rango->fin->toDateTimeString()];
+        if ($rango->empresaUuid) {
             $where .= ' AND company_uuid = ?';
-            $bindings[] = $companyUuid;
+            $bindings[] = $rango->empresaUuid;
         }
 
         $agg = DB::selectOne(

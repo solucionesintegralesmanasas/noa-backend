@@ -40,11 +40,22 @@ class DriverLocationDailyStat extends Model
     protected $table = 'driver_location_daily_stats';
 
     /**
-     * Ningún atributo es asignable en masa: las filas las mantiene el servidor.
+     * Los atributos que son asignables masivamente.
+     *
+     * Solo el servidor mantiene estas filas y siempre con valores calculados,
+     * nunca con datos directos del cliente.
      *
      * @var array<int, string>
      */
-    protected $guarded = ['id'];
+    protected $fillable = [
+        'uuid',
+        'company_uuid',
+        'third_party_uuid',
+        'service_date',
+        'total_points',
+        'total_distance_meters',
+        'samples',
+    ];
 
     /**
      * Los atributos que deben ser convertidos a tipos nativos.
@@ -57,4 +68,32 @@ class DriverLocationDailyStat extends Model
         'total_distance_meters' => 'decimal:2',
         'samples' => 'array',
     ];
+
+    /**
+     * Índices a conservar al diezmar una lista ordenada al tope.
+     *
+     * Es la única definición del diezmado: la usan el mantenimiento diario, el
+     * mapa y el backfill de la migración, así que una misma muestra siempre
+     * sobrevive igual venga de donde venga. Primero y último garantizados.
+     *
+     * @return array<int, int>
+     */
+    public static function indicesParaTope(int $total, int $tope): array
+    {
+        if ($total <= $tope) {
+            return range(0, $total - 1);
+        }
+
+        $paso = ($total - 1) / ($tope - 1);
+        $indices = [];
+
+        for ($i = 0; $i < $tope; $i++) {
+            $indices[] = (int) round($i * $paso);
+        }
+
+        $indices[0] = 0;
+        $indices[$tope - 1] = $total - 1;
+
+        return array_values(array_unique($indices));
+    }
 }
