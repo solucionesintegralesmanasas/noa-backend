@@ -111,23 +111,45 @@ class ThirdPartyService extends BaseService
             'company_uuid',
         ], 'page', $page);
 
+        $today = now()->toDateString();
+
         // Optimización de payload in-place
-        $paginator->getCollection()->transform(fn ($tp) => [
-            'uuid' => $tp->uuid,
-            'document_number' => $tp->document_number,
-            'full_name' => $tp->company_name ?: "{$tp->first_name} {$tp->last_name}",
-            'email' => $tp->email,
-            'phone' => $tp->phone,
-            'is_active' => (bool) $tp->is_active,
-            'is_driver' => (bool) $tp->is_driver,
-            'is_employee' => (bool) $tp->is_employee,
-            'is_affiliate' => (bool) $tp->is_affiliate,
-            'is_customer' => (bool) $tp->is_customer,
-            'is_supplier' => (bool) $tp->is_supplier,
-            'is_others' => (bool) $tp->is_others,
-            'company_uuid' => $tp->company_uuid,
-            'has_valid_license' => $tp->driverLicenses->where('expiration_date', '>', now()->toDateString())->isNotEmpty(),
-        ]);
+        $paginator->getCollection()->transform(function ($tp) use ($today) {
+            $licenses = $tp->driverLicenses
+                ->map(fn ($l) => [
+                    'uuid' => $l->uuid,
+                    'status' => $l->status,
+                    'expiration_date' => $l->expiration_date?->toDateString(),
+                ])
+                ->values()
+                ->all();
+
+            // Licencia vigente: estado ACTIVA (insensible a mayúsculas/espacios)
+            // y fecha de expiración hoy o futura, con granularidad de día.
+            $hasValidLicense = collect($licenses)->contains(
+                fn ($l) => strtoupper(trim((string) $l['status'])) === 'ACTIVA'
+                    && $l['expiration_date'] !== null
+                    && $l['expiration_date'] >= $today
+            );
+
+            return [
+                'uuid' => $tp->uuid,
+                'document_number' => $tp->document_number,
+                'full_name' => $tp->company_name ?: "{$tp->first_name} {$tp->last_name}",
+                'email' => $tp->email,
+                'phone' => $tp->phone,
+                'is_active' => (bool) $tp->is_active,
+                'is_driver' => (bool) $tp->is_driver,
+                'is_employee' => (bool) $tp->is_employee,
+                'is_affiliate' => (bool) $tp->is_affiliate,
+                'is_customer' => (bool) $tp->is_customer,
+                'is_supplier' => (bool) $tp->is_supplier,
+                'is_others' => (bool) $tp->is_others,
+                'company_uuid' => $tp->company_uuid,
+                'driver_licenses' => $licenses,
+                'has_valid_license' => $hasValidLicense,
+            ];
+        });
 
         return $paginator;
     }
