@@ -41,6 +41,8 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => PermissionMiddleware::class,
             'role' => RoleMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
+            'authz' => \App\Http\Middleware\AuthorizeByResource::class,
+            'cron.token' => \App\Http\Middleware\VerifyCronToken::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
