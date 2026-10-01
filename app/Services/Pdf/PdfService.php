@@ -332,9 +332,20 @@ class PdfService
                 ->setOption('isHtml5ParserEnabled', true)    // ✅ parser más rápido
                 ->setOption('isFontSubsettingEnabled', true); // ✅ fuentes más livianas
 
+            // Nombre del archivo: placa + recorrido (origen - destino)
+            $placa = trim((string) ($fuec->vehicle->vehicle_license_plate ?? 'SINPLACA'));
+            $origen = trim((string) ($fuec->origin_route ?? ''));
+            $destino = trim((string) ($fuec->destination_route ?? ''));
+            $recorrido = trim($origen.($origen !== '' && $destino !== '' ? ' - ' : '').$destino, ' -');
+            $baseName = trim($placa.($recorrido !== '' ? ' '.$recorrido : ''));
+            // Sanea caracteres no válidos en nombres de archivo
+            $baseName = preg_replace('/[\/\\\\:*?"<>|]/u', '-', $baseName);
+            $baseName = preg_replace('/\s+/u', ' ', $baseName);
+            $baseName = trim($baseName) !== '' ? trim($baseName) : 'FUEC-'.$fuec->number_fuec;
+
             return [
                 'pdf' => $pdf,
-                'file_name' => 'FUEC-'.$fuec->number_fuec.'.pdf',
+                'file_name' => $baseName.'.pdf',
             ];
         } catch (\Throwable $e) {
             throw $e;
