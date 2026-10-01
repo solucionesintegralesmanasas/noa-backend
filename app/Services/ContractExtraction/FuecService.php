@@ -79,7 +79,10 @@ class FuecService extends BaseService
         ?string $companyUuid = null,
         ?string $thirdPartyUuid = null
     ): LengthAwarePaginator {
-        $query = parent::query();
+        $query = parent::query()->with([
+            'vehicle:uuid,vehicle_license_plate',
+            'contractor:uuid,company_name,document_number',
+        ]);
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
@@ -110,6 +113,8 @@ class FuecService extends BaseService
 
         $columns = [
             'uuid',
+            'vehicle_uuid',
+            'contractor_uuid',
             'number_fuec',
             'request_number',
             'contract_number_display',
@@ -131,6 +136,15 @@ class FuecService extends BaseService
             'origin_route' => $fuec->origin_route,
             'destination_route' => $fuec->destination_route,
             'status' => $fuec->status,
+            'vehicle' => $fuec->relationLoaded('vehicle') && $fuec->vehicle ? [
+                'uuid' => $fuec->vehicle->uuid,
+                'vehicle_license_plate' => $fuec->vehicle->vehicle_license_plate,
+            ] : null,
+            'contractor' => $fuec->relationLoaded('contractor') && $fuec->contractor ? [
+                'uuid' => $fuec->contractor->uuid,
+                'company_name' => $fuec->contractor->company_name,
+                'document_number' => $fuec->contractor->document_number,
+            ] : null,
         ]);
 
         return $paginator;
