@@ -26,6 +26,14 @@ class DriverLocation extends Model
     use BelongsToCompany, FormatsDates, HasFactory, HasUuid, LogsActivity;
 
     /**
+     * Tabla de altísima frecuencia (un registro por punto GPS / por alerta): el propio registro es
+     * el historial, así que NO se duplica cada escritura en activity_log (ARQ-004R).
+     *
+     * @var array<int, string>
+     */
+    protected static $recordEvents = [];
+
+    /**
      * La tabla asociada al modelo.
      *
      * @var string
