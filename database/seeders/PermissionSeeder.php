@@ -391,6 +391,27 @@ class PermissionSeeder extends Seeder
             'objects_contracts.update' => ['module' => 'Contratos de Objetos', 'description' => 'Actualizar un contrato de objetos'],
             'objects_contracts.delete' => ['module' => 'Contratos de Objetos', 'description' => 'Eliminar un contrato de objetos'],
 
+            // --- Catálogos de Configuración ---
+            'brands.index'  => ['module' => 'Marcas', 'description' => 'Listar todas las marcas'],
+            'brands.create' => ['module' => 'Marcas', 'description' => 'Crear una nueva marca'],
+            'brands.update' => ['module' => 'Marcas', 'description' => 'Actualizar una marca'],
+            'brands.delete' => ['module' => 'Marcas', 'description' => 'Eliminar una marca'],
+
+            'vehicle_classes.index'  => ['module' => 'Clases de Vehículos', 'description' => 'Listar todas las clases de vehículos'],
+            'vehicle_classes.create' => ['module' => 'Clases de Vehículos', 'description' => 'Crear una nueva clase de vehículo'],
+            'vehicle_classes.update' => ['module' => 'Clases de Vehículos', 'description' => 'Actualizar una clase de vehículo'],
+            'vehicle_classes.delete' => ['module' => 'Clases de Vehículos', 'description' => 'Eliminar una clase de vehículo'],
+
+            'inspection_items.index'  => ['module' => 'Ítems de Inspección', 'description' => 'Listar todos los ítems de inspección'],
+            'inspection_items.create' => ['module' => 'Ítems de Inspección', 'description' => 'Crear un nuevo ítem de inspección'],
+            'inspection_items.update' => ['module' => 'Ítems de Inspección', 'description' => 'Actualizar un ítem de inspección'],
+            'inspection_items.delete' => ['module' => 'Ítems de Inspección', 'description' => 'Eliminar un ítem de inspección'],
+
+            'withholdings.index'  => ['module' => 'Retenciones', 'description' => 'Listar todas las retenciones'],
+            'withholdings.create' => ['module' => 'Retenciones', 'description' => 'Crear una nueva retención'],
+            'withholdings.update' => ['module' => 'Retenciones', 'description' => 'Actualizar una retención'],
+            'withholdings.delete' => ['module' => 'Retenciones', 'description' => 'Eliminar una retención'],
+
             // --- Contratistas ---
             'contractors.index'  => ['module' => 'Contratistas', 'description' => 'Listar todos los contratistas'],
             'contractors.create' => ['module' => 'Contratistas', 'description' => 'Registrar un nuevo contratista'],
