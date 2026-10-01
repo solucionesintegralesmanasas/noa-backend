@@ -95,7 +95,7 @@ class LocationTrackingService extends BaseService
             $this->actualizarResumenDiario($location);
             $this->recalcularPuntoSiguiente($location);
             $this->updateActiveSession($location);
-            $this->processGeofences($location);
+            $this->processGeofences($location, $anterior);
 
             return $location;
         });
@@ -207,6 +207,10 @@ class LocationTrackingService extends BaseService
      * Cruza por vehículo (uuid directo o placa para subcontratados) y proyecto.
      * Si no hay planilla, deja planilla_dia en nulo sin romper la respuesta.
      *
+     * El número de consultas NO depende de la cantidad de conductores (ARQ-007): una consulta
+     * para las planillas de hoy (con todo lo que usan los accesores precargado) y, solo si algún
+     * conductor no tiene planilla con rutas hoy, una única consulta de respaldo para todos ellos.
+     *
      * @param  \Illuminate\Support\Collection<int, DriverLocation>  $ubicaciones
      */
     private function adjuntarPlanillaDelDia(\Illuminate\Support\Collection $ubicaciones, ?string $companyUuid): void
@@ -218,29 +222,20 @@ class LocationTrackingService extends BaseService
         try {
             $hoy = now()->toDateString();
 
+            // `service_date` es DATE: comparación directa (whereDate envuelve la columna y anula el índice).
             $planillas = \App\Models\ServiceDeliveryControlSheet::query()
                 ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
-                ->whereDate('service_date', $hoy)
-                ->with([
-                    'routes' => fn ($q) => $q->where('is_active', true)->orderBy('order_index'),
-                    'internalControl:id,service_delivery_control_sheet_uuid,vehicle_uuid',
-                    'project:uuid,project_name',
-                ])
+                ->where('service_date', $hoy)
+                ->with($this->relacionesDePlanilla())
                 ->get();
 
-            foreach ($ubicaciones as $ubicacion) {
-                $candidatas = $planillas->filter(function ($p) use ($ubicacion) {
-                    $porVehiculo = $p->internalControl
-                        && $ubicacion->vehicle_uuid
-                        && $p->internalControl->vehicle_uuid === $ubicacion->vehicle_uuid;
-                    $placaUbicacion = $ubicacion->vehicle?->vehicle_license_plate;
-                    $porPlaca = $placaUbicacion && (
-                        $p->vehicle_license_plate === $placaUbicacion
-                        || $p->internalControl?->vehicle?->vehicle_license_plate === $placaUbicacion
-                    );
+            /** @var \Illuminate\Support\Collection<int, DriverLocation> $necesitanRespaldo */
+            $necesitanRespaldo = collect();
+            /** @var array<int, array{0: object, 1: \Illuminate\Support\Collection}> $deHoySinRutas */
+            $deHoySinRutas = [];
 
-                    return $porVehiculo || $porPlaca;
-                });
+            foreach ($ubicaciones as $ubicacion) {
+                $candidatas = $planillas->filter(fn ($p) => $this->planillaCorrespondeAlVehiculo($p, $ubicacion));
 
                 // Preferir la planilla del mismo proyecto del GPS cuando hay varias.
                 $elegida = null;
@@ -251,39 +246,40 @@ class LocationTrackingService extends BaseService
                 }
 
                 if (! $elegida) {
-                    $ubicacion->setAttribute('planilla_dia', $this->buscarUltimasRutasConocidas($ubicacion, $companyUuid));
+                    $necesitanRespaldo->push($ubicacion);
 
                     continue;
                 }
 
-                $rutas = $elegida->routes->map(fn ($r) => [
-                    'origin' => $r->origin,
-                    'destination' => $r->destination,
-                    'funcionario_nombre' => $r->funcionario_nombre,
-                    'funcionario_cc' => $r->funcionario_cc,
-                ])->values();
+                $rutas = $this->rutasDePlanilla($elegida);
 
-                // Si la planilla de hoy no trae rutas (disponibilidad), respaldar con
-                // las últimas rutas conocidas del mismo vehículo/proyecto para que el
-                // monitor sí muestre ruta y funcionario.
-                $esHoy = true;
+                // Si la planilla de hoy no trae rutas (disponibilidad), se respalda con las últimas
+                // rutas conocidas del mismo vehículo/proyecto para que el monitor muestre ruta y funcionario.
                 if ($rutas->isEmpty()) {
-                    $respaldo = $this->buscarUltimasRutasConocidas($ubicacion, $companyUuid);
-                    if ($respaldo) {
-                        $ubicacion->setAttribute('planilla_dia', $respaldo);
+                    $necesitanRespaldo->push($ubicacion);
+                    $deHoySinRutas[$ubicacion->id] = [$elegida, $rutas];
 
-                        continue;
-                    }
+                    continue;
                 }
 
-                $ubicacion->setAttribute('planilla_dia', [
-                    'uuid' => $elegida->uuid,
-                    'service_date' => $elegida->service_date,
-                    'driver_name' => $elegida->driver_name,
-                    'project_name' => $elegida->project?->project_name ?? $ubicacion->project?->project_name,
-                    'routes' => $rutas,
-                    'es_planilla_hoy' => $esHoy,
-                ]);
+                $ubicacion->setAttribute('planilla_dia', $this->planillaDia($elegida, $rutas, $ubicacion, true));
+            }
+
+            if ($necesitanRespaldo->isEmpty()) {
+                return;
+            }
+
+            $respaldos = $this->ultimasRutasConocidas($necesitanRespaldo, $companyUuid);
+
+            foreach ($necesitanRespaldo as $ubicacion) {
+                if (isset($respaldos[$ubicacion->id])) {
+                    $ubicacion->setAttribute('planilla_dia', $respaldos[$ubicacion->id]);
+                } elseif (isset($deHoySinRutas[$ubicacion->id])) {
+                    [$elegida, $rutas] = $deHoySinRutas[$ubicacion->id];
+                    $ubicacion->setAttribute('planilla_dia', $this->planillaDia($elegida, $rutas, $ubicacion, true));
+                } else {
+                    $ubicacion->setAttribute('planilla_dia', null);
+                }
             }
         } catch (\Throwable $e) {
             foreach ($ubicaciones as $ubicacion) {
@@ -293,57 +289,111 @@ class LocationTrackingService extends BaseService
     }
 
     /**
-     * Busca la planilla más reciente (hasta hoy) del mismo vehículo/proyecto
-     * que sí tenga rutas activas, para mostrar ruta y funcionario aunque hoy
-     * la planilla esté en disponibilidad o sin recorridos.
+     * Relaciones que usa el monitor, incluidas las de los accesores `vehicle_license_plate` y
+     * `driver_name` de la planilla (sin precargarlas, cada acceso era una consulta por planilla).
+     *
+     * @return array<int|string, mixed>
      */
-    private function buscarUltimasRutasConocidas(object $ubicacion, ?string $companyUuid): ?array
+    private function relacionesDePlanilla(): array
+    {
+        return [
+            'routes' => fn ($q) => $q->where('is_active', true)->orderBy('order_index'),
+            'internalControl.vehicle',
+            'internalControl.thirdParty',
+            'subcontractedControl',
+            'project:uuid,project_name',
+        ];
+    }
+
+    /** Si la planilla es del vehículo de la ubicación (uuid del control interno o placa). */
+    private function planillaCorrespondeAlVehiculo(object $planilla, object $ubicacion): bool
+    {
+        $porVehiculo = $planilla->internalControl
+            && $ubicacion->vehicle_uuid
+            && $planilla->internalControl->vehicle_uuid === $ubicacion->vehicle_uuid;
+
+        $placa = $ubicacion->vehicle?->vehicle_license_plate;
+        $porPlaca = $placa && (
+            $planilla->vehicle_license_plate === $placa
+            || $planilla->internalControl?->vehicle?->vehicle_license_plate === $placa
+        );
+
+        return $porVehiculo || $porPlaca;
+    }
+
+    /** @return \Illuminate\Support\Collection<int, array<string, mixed>> */
+    private function rutasDePlanilla(object $planilla): \Illuminate\Support\Collection
+    {
+        return $planilla->routes->map(fn ($r) => [
+            'origin' => $r->origin,
+            'destination' => $r->destination,
+            'funcionario_nombre' => $r->funcionario_nombre,
+            'funcionario_cc' => $r->funcionario_cc,
+        ])->values();
+    }
+
+    /** @return array<string, mixed> */
+    private function planillaDia(object $planilla, \Illuminate\Support\Collection $rutas, object $ubicacion, bool $esHoy): array
+    {
+        return [
+            'uuid' => $planilla->uuid,
+            'service_date' => $planilla->service_date,
+            'driver_name' => $planilla->driver_name,
+            'project_name' => $planilla->project?->project_name ?? $ubicacion->project?->project_name,
+            'routes' => $rutas,
+            'es_planilla_hoy' => $esHoy,
+        ];
+    }
+
+    /**
+     * Para varios conductores a la vez: la planilla más reciente (hasta hoy) del mismo vehículo,
+     * y del mismo proyecto si el GPS lo trae, que sí tenga rutas activas. Una sola consulta con
+     * tope de filas, en lugar de una búsqueda por conductor.
+     *
+     * @param  \Illuminate\Support\Collection<int, DriverLocation>  $ubicaciones
+     * @return array<int, array<string, mixed>> planilla_dia por id de ubicación (solo las que tienen respaldo)
+     */
+    private function ultimasRutasConocidas(\Illuminate\Support\Collection $ubicaciones, ?string $companyUuid): array
     {
         try {
-            $hoy = now()->toDateString();
-            $placa = $ubicacion->vehicle?->vehicle_license_plate;
+            $vehiculos = $ubicaciones->pluck('vehicle_uuid')->filter()->unique()->values()->all();
+            $placas = $ubicaciones->map(fn ($u) => $u->vehicle?->vehicle_license_plate)->filter()->unique()->values()->all();
+            if (! $vehiculos && ! $placas) {
+                return [];
+            }
 
             $candidatas = \App\Models\ServiceDeliveryControlSheet::query()
                 ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
-                ->whereDate('service_date', '<=', $hoy)
-                ->when($ubicacion->project_uuid, fn ($q) => $q->where('project_uuid', $ubicacion->project_uuid))
+                ->where('service_date', '<=', now()->toDateString())
                 ->whereHas('routes', fn ($q) => $q->where('is_active', true))
-                ->with([
-                    'routes' => fn ($q) => $q->where('is_active', true)->orderBy('order_index'),
-                    'internalControl:id,service_delivery_control_sheet_uuid,vehicle_uuid',
-                    'project:uuid,project_name',
-                ])
+                ->where(function ($q) use ($vehiculos, $placas) {
+                    $q->whereHas('internalControl', fn ($i) => $i->whereIn('vehicle_uuid', $vehiculos))
+                        ->orWhereHas('internalControl.vehicle', fn ($v) => $v->whereIn('vehicle_license_plate', $placas))
+                        ->orWhereHas('subcontractedControl', fn ($s) => $s->whereIn('vehicle_license_plate', $placas));
+                })
+                ->with($this->relacionesDePlanilla())
                 ->orderByDesc('service_date')
-                ->limit(20)
-                ->get()
-                ->filter(function ($p) use ($ubicacion, $placa) {
-                    $porVehiculo = $p->internalControl
-                        && $ubicacion->vehicle_uuid
-                        && $p->internalControl->vehicle_uuid === $ubicacion->vehicle_uuid;
+                ->limit(500)
+                ->get();
 
-                    return $porVehiculo || ($placa && $p->vehicle_license_plate === $placa);
+            $resultado = [];
+            foreach ($ubicaciones as $ubicacion) {
+                $elegida = $candidatas->first(function ($p) use ($ubicacion) {
+                    if ($ubicacion->project_uuid && $p->project_uuid !== $ubicacion->project_uuid) {
+                        return false;
+                    }
+
+                    return $this->planillaCorrespondeAlVehiculo($p, $ubicacion);
                 });
 
-            $elegida = $candidatas->first();
-            if (! $elegida) {
-                return null;
+                if ($elegida) {
+                    $resultado[$ubicacion->id] = $this->planillaDia($elegida, $this->rutasDePlanilla($elegida), $ubicacion, false);
+                }
             }
 
-            return [
-                'uuid' => $elegida->uuid,
-                'service_date' => $elegida->service_date,
-                'driver_name' => $elegida->driver_name,
-                'project_name' => $elegida->project?->project_name ?? $ubicacion->project?->project_name,
-                'routes' => $elegida->routes->map(fn ($r) => [
-                    'origin' => $r->origin,
-                    'destination' => $r->destination,
-                    'funcionario_nombre' => $r->funcionario_nombre,
-                    'funcionario_cc' => $r->funcionario_cc,
-                ])->values(),
-                'es_planilla_hoy' => false,
-            ];
+            return $resultado;
         } catch (\Throwable) {
-            return null;
+            return [];
         }
     }
 
@@ -411,7 +461,7 @@ class LocationTrackingService extends BaseService
      */
     private function recalcularPuntoSiguiente(DriverLocation $location): void
     {
-        $siguiente = $this->puntoPosterior($location) ?? $this->puntoMismaMarca($location);
+        $siguiente = $this->puntoSiguiente($location);
 
         if (! $siguiente) {
             return;
@@ -542,26 +592,17 @@ class LocationTrackingService extends BaseService
     }
 
     /**
-     * Punto con marca posterior al nuevo, en orden (recorded_at, id).
+     * Punto que sigue al nuevo en el orden real (recorded_at, id): con marca posterior o, a igual
+     * marca, de id mayor. Una sola consulta (antes eran dos en el caso normal de punto en orden).
      */
-    private function puntoPosterior(DriverLocation $location): ?DriverLocation
+    private function puntoSiguiente(DriverLocation $location): ?DriverLocation
     {
         return $this->consultaVecino($location->third_party_uuid, $location->company_uuid)
-            ->where('id', '!=', $location->id)
-            ->where('recorded_at', '>', $location->recorded_at)
+            ->where(function ($q) use ($location) {
+                $q->where('recorded_at', '>', $location->recorded_at)
+                    ->orWhere(fn ($q2) => $q2->where('recorded_at', $location->recorded_at)->where('id', '>', $location->id));
+            })
             ->orderBy('recorded_at')
-            ->orderBy('id')
-            ->first();
-    }
-
-    /**
-     * Punto con la misma marca que el nuevo y mayor id.
-     */
-    private function puntoMismaMarca(DriverLocation $location): ?DriverLocation
-    {
-        return $this->consultaVecino($location->third_party_uuid, $location->company_uuid)
-            ->where('recorded_at', $location->recorded_at)
-            ->where('id', '>', $location->id)
             ->orderBy('id')
             ->first();
     }
@@ -623,22 +664,24 @@ class LocationTrackingService extends BaseService
      */
     private function updateActiveSession(DriverLocation $location): void
     {
-        $session = DriverLocationSession::where('third_party_uuid', $location->third_party_uuid)
+        $distanceKm = round(((float) ($location->distance_meters ?? 0)) / 1000, 4);
+
+        // Un solo UPDATE atómico (antes: SELECT + 2 incrementos por punto).
+        DriverLocationSession::where('third_party_uuid', $location->third_party_uuid)
             ->where('status', 'active')
-            ->first();
-
-        if ($session) {
-            $distanceKm = ((float) ($location->distance_meters ?? 0)) / 1000;
-
-            $session->increment('total_distance_km', round($distanceKm, 4));
-            $session->increment('total_points');
-        }
+            ->update([
+                'total_distance_km' => DB::raw('total_distance_km + '.$distanceKm),
+                'total_points' => DB::raw('total_points + 1'),
+            ]);
     }
 
     /**
      * Procesa todas las geocercas activas para la empresa y genera alertas.
+     *
+     * El estado previo sale del punto anterior que ya se consultó al guardar (no una consulta por
+     * geocerca y por tipo de alerta): sin punto anterior se considera que estaba fuera.
      */
-    private function processGeofences(DriverLocation $location): void
+    private function processGeofences(DriverLocation $location, ?DriverLocation $anterior = null): void
     {
         $geofences = Geofence::where('company_uuid', $location->company_uuid)
             ->where('is_active', true)
@@ -652,7 +695,7 @@ class LocationTrackingService extends BaseService
             $isInside = $this->isPointInsideGeofence($location, $geofence);
 
             if ($geofence->alert_on_exit) {
-                $wasInside = $this->getPreviousGeofenceState($location->third_party_uuid, $geofence);
+                $wasInside = $anterior ? $this->isPointInsideGeofence($anterior, $geofence) : false;
 
                 if ($wasInside && ! $isInside) {
                     $this->createAlert([
@@ -669,7 +712,7 @@ class LocationTrackingService extends BaseService
             }
 
             if ($geofence->alert_on_enter) {
-                $wasInside = $this->getPreviousGeofenceState($location->third_party_uuid, $geofence);
+                $wasInside = $anterior ? $this->isPointInsideGeofence($anterior, $geofence) : false;
 
                 if (! $wasInside && $isInside) {
                     $this->createAlert([
@@ -721,23 +764,6 @@ class LocationTrackingService extends BaseService
             (float) $location->longitude,
             $geofence->polygon_points ?? []
         );
-    }
-
-    /**
-     * Verifica si el conductor estaba dentro de la geocerca en la ubicación anterior.
-     */
-    private function getPreviousGeofenceState(string $driverUuid, Geofence $geofence): bool
-    {
-        $previousLocation = DriverLocation::where('third_party_uuid', $driverUuid)
-            ->orderByDesc('recorded_at')
-            ->skip(1)
-            ->first();
-
-        if (! $previousLocation) {
-            return false;
-        }
-
-        return $this->isPointInsideGeofence($previousLocation, $geofence);
     }
 
     /**
