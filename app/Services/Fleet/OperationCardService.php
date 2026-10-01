@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Fleet;
 
+use App\Exceptions\GeneralException;
 use App\Models\OperationCard;
 use App\Models\Vehicle;
 use App\Services\BaseService;
@@ -126,6 +127,8 @@ class OperationCardService extends BaseService
      */
     public function createOperationCard(array $data): Model
     {
+        $this->asegurarQueElVehiculoRequiereTarjeta($data['vehicle_uuid'] ?? null);
+
         return $this->transaction(function () use ($data) {
             $internalNumber = $data['internal_number'] ?? null;
             $vehicle = Vehicle::where('uuid', $data['vehicle_uuid'])->first();
@@ -182,6 +185,10 @@ class OperationCardService extends BaseService
             $record = $this->findByUuid($uuid);
 
             $vehicleUuid = $data['vehicle_uuid'] ?? $record->vehicle_uuid;
+            // Solo si cambia de vehículo: la tarjeta histórica de un vehículo ya particular se puede editar.
+            if ($vehicleUuid !== $record->vehicle_uuid) {
+                $this->asegurarQueElVehiculoRequiereTarjeta($vehicleUuid);
+            }
             $vehicle = Vehicle::where('uuid', $vehicleUuid)->first();
             $internalNumber = $data['internal_number'] ?? null;
             if ($vehicle) {
@@ -259,5 +266,20 @@ class OperationCardService extends BaseService
 
             return $record->fresh();
         });
+    }
+
+    /**
+     * Un vehículo particular no tiene tarjeta de operación. Defensa en el servicio por si se
+     * invoca fuera de un FormRequest.
+     *
+     * @throws GeneralException
+     */
+    private function asegurarQueElVehiculoRequiereTarjeta(?string $vehicleUuid): void
+    {
+        $vehiculo = $vehicleUuid ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first() : null;
+
+        if ($vehiculo && ! $vehiculo->requiereTarjetaOperacion()) {
+            throw GeneralException::unprocessable('Un vehículo particular no tiene tarjeta de operación.');
+        }
     }
 }
