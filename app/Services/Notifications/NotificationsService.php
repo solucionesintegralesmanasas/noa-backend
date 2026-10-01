@@ -971,6 +971,10 @@ class NotificationsService extends BaseService
                     $registeredTypes = $vehicle->vehicleDocuments->pluck('document_type')->map(fn ($t) => strtoupper((string) $t))->toArray();
 
                     foreach (self::MANDATORY_DOCUMENTS as $mandatoryType) {
+                        // Un vehículo particular solo tiene SOAT y RTM (sin pólizas RCC/RCE).
+                        if (! $vehicle->admiteTipoDocumento($mandatoryType)) {
+                            continue;
+                        }
                         if (! in_array($mandatoryType, $registeredTypes)) {
                             if ($mandatoryType === 'RTM') {
                                 $regDate = $vehicle->registration_date ? Carbon::parse($vehicle->registration_date) : null;
@@ -993,6 +997,7 @@ class NotificationsService extends BaseService
 
                     // Solo procesar el documento más reciente por tipo
                     $latestDocs = $vehicle->vehicleDocuments
+                        ->filter(fn ($doc) => $vehicle->admiteTipoDocumento($doc->document_type))
                         ->groupBy('document_type')
                         ->map(fn ($docs) => $docs->sortByDesc('expiry_date')->first());
 
@@ -1096,6 +1101,11 @@ class NotificationsService extends BaseService
 
             $vehiclesQuery->chunk(100, function ($vehicles) use (&$expired, &$expiringSoon, &$missing, $today, $alertDate) {
                 foreach ($vehicles as $vehicle) {
+                    // Un vehículo particular no tiene tarjeta de operación: nada que exigir ni vigilar.
+                    if (! $vehicle->requiereTarjetaOperacion()) {
+                        continue;
+                    }
+
                     if ($vehicle->operationCards->isEmpty()) {
                         $missing[] = [
                             'vehicle_uuid' => $vehicle->uuid,

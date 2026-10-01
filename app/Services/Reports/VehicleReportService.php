@@ -206,6 +206,12 @@ class VehicleReportService extends BaseService
 
     protected function applyOperationCardFilter(Builder $query, array $filtros): void
     {
+        $filtrosDeTarjeta = ['affiliated_company', 'operating_card_number', 'operation_card_status', 'operation_card_expiry_from', 'operation_card_expiry_to'];
+        if (array_filter(array_intersect_key($filtros, array_flip($filtrosDeTarjeta)), fn ($v) => $v !== null && $v !== '')) {
+            // Un vehículo particular no tiene tarjeta de operación: nunca coincide con estos filtros.
+            $query->where('vehicles.type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR);
+        }
+
         if (! empty($filtros['affiliated_company'])) {
             $company = trim((string) $filtros['affiliated_company']);
             $query->whereHas('operationCards', fn ($q) => $q->where('affiliated_company', $company));
@@ -246,6 +252,10 @@ class VehicleReportService extends BaseService
 
         if ($docType && ! in_array($docType, self::DOCUMENT_TYPES, true)) {
             return;
+        }
+
+        if (in_array($docType, Vehicle::DOCUMENTOS_NO_APLICAN_A_PARTICULARES, true)) {
+            $query->where('vehicles.type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR);
         }
 
         if ($docType || $docStatus) {
@@ -349,6 +359,9 @@ class VehicleReportService extends BaseService
         $docUuids = [];
         foreach ($vehicle->relationLoaded('vehicleDocuments') ? $vehicle->vehicleDocuments : collect() as $doc) {
             $key = strtoupper((string) $doc->document_type);
+            if (! $vehicle->admiteTipoDocumento($key)) {
+                continue; // RCC/RCE históricos de un vehículo hoy particular: no aplican
+            }
             if (! isset($docs[$key]) || $doc->expiry_date > $docs[$key]) {
                 $docs[$key] = $doc->expiry_date ? Carbon::parse($doc->expiry_date)->toDateString() : null;
                 $docUuids[$key] = $doc->uuid;
@@ -356,7 +369,7 @@ class VehicleReportService extends BaseService
         }
 
         $card = null;
-        if ($vehicle->relationLoaded('operationCards') && $vehicle->operationCards->isNotEmpty()) {
+        if ($vehicle->requiereTarjetaOperacion() && $vehicle->relationLoaded('operationCards') && $vehicle->operationCards->isNotEmpty()) {
             $card = $vehicle->operationCards->sortByDesc('expiration_date')->first();
         }
 
@@ -390,6 +403,8 @@ class VehicleReportService extends BaseService
             'body_type' => $vehicle->body_type,
             'type_of_service' => $vehicle->type_of_service,
             'modality_label' => $vehicle->type_of_service === 'PUBLICO' ? 'Público' : 'Particular',
+            // Indicador para mostrar "No aplica" en pólizas RCC/RCE y tarjeta de operación (Excel, PDF y pantalla).
+            'es_particular' => $vehicle->esParticular(),
             'soat_expiry' => $docs['SOAT'] ?? null,
             'rcc_expiry' => $docs['RCC'] ?? null,
             'rce_expiry' => $docs['RCE'] ?? null,

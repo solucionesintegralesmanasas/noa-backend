@@ -34,22 +34,27 @@ class VehicleReportExport implements FromCollection, WithHeadings, ShouldAutoSiz
     {
         $service = $this->reportService ?? app(VehicleReportService::class);
 
-        return $service->allForExport($this->filtros)->map(fn (array $row) => [
+        return $service->allForExport($this->filtros)->map(function (array $row) {
+            // Un vehículo particular no tiene pólizas RCC/RCE ni tarjeta de operación.
+            $noAplica = $row['es_particular'] ?? false ? 'No aplica' : null;
+
+            return [
             $row['vehicle_license_plate'],
             $row['model'],
             $row['vehicle_class'],
             $row['body_type'],
             $row['modality_label'],
             $row['soat_expiry'],
-            $row['rcc_expiry'],
-            $row['rce_expiry'],
+            $noAplica ?? $row['rcc_expiry'],
+            $noAplica ?? $row['rce_expiry'],
             $row['rtm_expiry'],
-            $row['operation_card_number'],
-            $row['operation_card_expiry'],
+            $noAplica ?? $row['operation_card_number'],
+            $noAplica ?? $row['operation_card_expiry'],
             $row['agreement_name'],
             $row['affiliate_name'],
             $row['driver_name'],
             $row['project_name'],
-        ]);
+            ];
+        });
     }
 }
