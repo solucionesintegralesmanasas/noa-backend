@@ -92,12 +92,12 @@ class AutorizacionPorRecursoTest extends TestCase
         $this->assertSame('rup_records', $r->resolver('api.v1.administration.rup.index', 'GET')['recurso']);
     }
 
-    public function test_catalogos_leen_todos_y_escriben_solo_superadmin(): void
+    public function test_catalogos_leen_todos_y_escriben_superadmin_y_admin_empresa(): void
     {
         $r = new ResourceAuthorization();
 
         $this->assertNull($r->resolver('api.v1.catalogs.brands.index', 'GET'));
-        $this->assertSame(['SUPERADMIN'], $r->resolver('api.v1.catalogs.brands.store', 'POST')['roles']);
+        $this->assertSame(['SUPERADMIN', 'ADMIN_EMPRESA'], $r->resolver('api.v1.catalogs.brands.store', 'POST')['roles']);
     }
 
     public function test_rutas_exentas_o_sin_mapa_no_se_evaluan(): void
@@ -143,14 +143,42 @@ class AutorizacionPorRecursoTest extends TestCase
         $this->assertNotSame(403, $this->postJson('/api/v1/catalogs/brands', [], $this->cab($empresa))->status());
     }
 
-    public function test_en_catalogos_escribir_exige_superadmin_pero_leer_no(): void
+    public function test_en_catalogos_escribir_exige_rol_de_administracion_pero_leer_no(): void
+    {
+        config(['authorization.enforce' => true]);
+        $empresa = $this->empresa();
+        Sanctum::actingAs($this->usuario('EMPLEADO', $empresa), ['*']);
+
+        $this->postJson('/api/v1/catalogs/brands', [], $this->cab($empresa))->assertForbidden();
+        $this->assertNotSame(403, $this->getJson('/api/v1/catalogs/brands', $this->cab($empresa))->status());
+    }
+
+    public function test_la_escritura_de_catalogos_se_bloquea_aunque_el_modo_sea_auditoria(): void
+    {
+        config(['authorization.enforce' => false, 'authorization.enforce_catalogs' => true]);
+        $empresa = $this->empresa();
+        Sanctum::actingAs($this->usuario('EMPLEADO', $empresa), ['*']);
+
+        $this->postJson('/api/v1/catalogs/brands', [], $this->cab($empresa))->assertForbidden();
+        $this->assertNotSame(403, $this->getJson('/api/v1/catalogs/brands', $this->cab($empresa))->status());
+    }
+
+    public function test_el_administrador_de_empresa_si_gestiona_los_catalogos(): void
     {
         config(['authorization.enforce' => true]);
         $empresa = $this->empresa();
         Sanctum::actingAs($this->usuario('ADMIN_EMPRESA', $empresa), ['*']);
 
-        $this->postJson('/api/v1/catalogs/brands', [], $this->cab($empresa))->assertForbidden();
-        $this->assertNotSame(403, $this->getJson('/api/v1/catalogs/brands', $this->cab($empresa))->status());
+        $this->assertNotSame(403, $this->postJson('/api/v1/catalogs/brands', [], $this->cab($empresa))->status());
+    }
+
+    public function test_el_bloqueo_de_catalogos_se_puede_apagar(): void
+    {
+        config(['authorization.enforce' => false, 'authorization.enforce_catalogs' => false]);
+        $empresa = $this->empresa();
+        Sanctum::actingAs($this->usuario('ADMIN_EMPRESA', $empresa), ['*']);
+
+        $this->assertNotSame(403, $this->postJson('/api/v1/catalogs/brands', [], $this->cab($empresa))->status());
     }
 
     public function test_en_modo_auditoria_no_bloquea_pero_deja_constancia(): void
