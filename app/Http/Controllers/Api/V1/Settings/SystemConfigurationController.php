@@ -237,7 +237,7 @@ class SystemConfigurationController extends Controller
     {
         try {
             $request->validate([
-                'ministry_logo' => ['required', 'file', 'mimes:jpg,jpeg,png,svg,webp', 'max:2048'],
+                'ministry_logo' => ['required', 'file', 'extensions:jpg,jpeg,png,svg,webp', 'max:2048'],
             ]);
 
             $record = $this->systemConfigurationService->findByUuid($uuid);
@@ -274,7 +274,7 @@ class SystemConfigurationController extends Controller
     {
         try {
             $request->validate([
-                'super_logo' => ['required', 'file', 'mimes:jpg,jpeg,png,svg,webp', 'max:2048'],
+                'super_logo' => ['required', 'file', 'extensions:jpg,jpeg,png,svg,webp', 'max:2048'],
             ]);
 
             $record = $this->systemConfigurationService->findByUuid($uuid);
@@ -311,7 +311,7 @@ class SystemConfigurationController extends Controller
     {
         try {
             $request->validate([
-                'letterhead' => ['required', 'file', 'mimes:jpg,jpeg,png,svg,webp,pdf', 'max:4096'],
+                'letterhead' => ['required', 'file', 'extensions:jpg,jpeg,png,svg,webp,pdf', 'max:4096'],
             ]);
 
             $record = $this->systemConfigurationService->findByUuid($uuid);
