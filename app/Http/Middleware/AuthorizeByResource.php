@@ -48,7 +48,11 @@ class AuthorizeByResource
             'exige' => $exigencia['tipo'] === 'rol' ? $exigencia['roles'] : $exigencia['permisos'],
         ];
 
-        if (! config('authorization.enforce')) {
+        // Los catálogos compartidos se bloquean siempre (salvo AUTHZ_ENFORCE_CATALOGS=false).
+        $bloquea = config('authorization.enforce')
+            || ($exigencia['tipo'] === 'rol' && config('authorization.enforce_catalogs'));
+
+        if (! $bloquea) {
             // Una línea por usuario, ruta y método cada hora: el log de auditoría es para revisar
             // patrones, no para registrar cada petición.
             $clave = sprintf('authz-audit:%s:%s:%s', $detalle['usuario'], $detalle['metodo'], $detalle['ruta']);

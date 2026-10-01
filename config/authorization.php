@@ -27,6 +27,13 @@ return [
      */
     'enforce' => (bool) env('AUTHZ_ENFORCE', false),
 
+    /*
+     | Los catálogos (api.v1.catalogs.*) son datos COMPARTIDOS entre todas las empresas: su escritura se
+     | bloquea ya (SUPERADMIN y ADMIN_EMPRESA) aunque `enforce` siga en modo auditoría. Se puede apagar con
+     | AUTHZ_ENFORCE_CATALOGS=false.
+     */
+    'enforce_catalogs' => (bool) env('AUTHZ_ENFORCE_CATALOGS', true),
+
     // Roles que siempre pasan.
     'bypass_roles' => ['SUPERADMIN'],
 
@@ -67,5 +74,5 @@ return [
      | abierta a cualquier usuario autenticado (los formularios los necesitan) y la
      | escritura exige uno de estos roles.
      */
-    'catalog_write_roles' => ['SUPERADMIN'],
+    'catalog_write_roles' => ['SUPERADMIN', 'ADMIN_EMPRESA'],
 ];
