@@ -63,6 +63,10 @@ return [
         'osm_url' => env('MAP_STATIC_OSM_URL', 'https://staticmap.openstreetmap.de/staticmap.php'),
         'mapbox_token' => env('MAPBOX_TOKEN'),
         'timeout' => (int) env('MAP_STATIC_TIMEOUT', 6),
+        // Caché en disco de las imágenes descargadas (ARQ-006): la URL determina la imagen, así que un
+        // punto GPS nuevo cambia la clave y nunca se sirve un mapa obsoleto.
+        'cache_enabled' => (bool) env('MAP_STATIC_CACHE', true),
+        'cache_days' => (int) env('MAP_STATIC_CACHE_DAYS', 30),
     ],
 
 

@@ -7,6 +7,7 @@ namespace App\Services\Pdf;
 use App\Utils\Logger;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Genera la imagen del recorrido GPS del vehículo en proyecto para el PDF diario.
@@ -27,6 +28,9 @@ class RouteMapService
      * 900x380 no gana detalle con más puntos y el trazado es O(n).
      */
     private const MAX_POINTS_DRAW = 1000;
+
+    /** Carpeta (disco local) de las imágenes de mapa en caché. */
+    private const CARPETA_CACHE = 'route-maps';
 
     private const MAP_WIDTH = 900;
 
@@ -172,6 +176,39 @@ class RouteMapService
             $url = $this->construirUrlMapbox($muestra);
         }
 
+        return $this->obtenerImagen($url, $timeout);
+    }
+
+    /**
+     * Imagen del mapa para una URL: de la caché en disco si ya se descargó y, si no, de la red
+     * (y se guarda). Solo se cachean descargas correctas; un fallo se reintenta la próxima vez.
+     * El hash de la URL es una clave exacta: incluye coordenadas, centro, zoom, tamaño y proveedor.
+     */
+    private function obtenerImagen(string $url, int $timeout): ?string
+    {
+        $ruta = self::CARPETA_CACHE.'/'.sha1($url).'.png';
+        $usarCache = (bool) config('services.route_map.cache_enabled', true);
+
+        if ($usarCache && Storage::disk('local')->exists($ruta)) {
+            return base64_encode((string) Storage::disk('local')->get($ruta));
+        }
+
+        $imagen = $this->descargarImagen($url, $timeout);
+
+        if ($imagen !== null && $usarCache) {
+            Storage::disk('local')->put($ruta, $imagen);
+            $this->limpiarCacheAntigua();
+        }
+
+        return $imagen !== null ? base64_encode($imagen) : null;
+    }
+
+    /**
+     * Descarga la imagen (bytes) o devuelve null si la respuesta no es válida.
+     * Método protegido para poder sustituir la red en las pruebas.
+     */
+    protected function descargarImagen(string $url, int $timeout): ?string
+    {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -198,7 +235,33 @@ class RouteMapService
             return null;
         }
 
-        return base64_encode($contenido);
+        return $contenido;
+    }
+
+    /** 1 de cada 20 escrituras; las pruebas lo sustituyen. */
+    protected function tocaLimpiar(): bool
+    {
+        return random_int(1, 20) === 1;
+    }
+
+    /**
+     * Borra las imágenes en caché más antiguas que `cache_days`. Se ejecuta de forma oportunista
+     * (1 de cada 20 escrituras): el hosting compartido no tiene cron.
+     */
+    protected function limpiarCacheAntigua(): void
+    {
+        if (! $this->tocaLimpiar()) {
+            return;
+        }
+
+        $limite = now()->subDays(max(1, (int) config('services.route_map.cache_days', 30)))->getTimestamp();
+        $disco = Storage::disk('local');
+
+        foreach ($disco->files(self::CARPETA_CACHE) as $archivo) {
+            if ($disco->lastModified($archivo) < $limite) {
+                $disco->delete($archivo);
+            }
+        }
     }
 
     /**
