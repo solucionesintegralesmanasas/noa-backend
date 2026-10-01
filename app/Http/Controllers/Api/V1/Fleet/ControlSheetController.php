@@ -219,7 +219,7 @@ class ControlSheetController extends Controller
     public function uploadPdf(Request $request, string $uuid): JsonResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:pdf', 'max:10240'],
+            'file' => ['required', 'file', 'extensions:pdf', 'max:10240'],
         ]);
 
         try {
@@ -265,7 +265,7 @@ class ControlSheetController extends Controller
     {
         $request->validate([
             'files' => ['required', 'array', 'min:1'],
-            'files.*' => ['required', 'file', 'mimes:pdf', 'max:10240'],
+            'files.*' => ['required', 'file', 'extensions:pdf', 'max:10240'],
         ]);
 
         try {
