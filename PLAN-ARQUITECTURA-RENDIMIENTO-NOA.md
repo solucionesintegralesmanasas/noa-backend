@@ -97,6 +97,8 @@ Hallazgos asociados:
 - Una ruta que cruza varias geocercas genera N alertas por punto (con sus inserts y activity asociados): se necesita agregación o debounce.
 - FK reales no declaradas en la migración original: `driver_locations` referencia a `companies` (CASCADE), `third_parties` (CASCADE) y `vehicles` (SET NULL); `driver_location_alerts.driver_location_uuid` referencia a `driver_locations.uuid` con `ON DELETE SET NULL` (alertas huérfanas posibles); `geofences.company_uuid` referencia a `companies.uuid` (CASCADE).
 
+**Resultado ARQ-004R (2026-10-01):** medido con `IngestaGpsTest` en el caso normal (punto que no es el primero del conductor): **16 consultas sin geocercas y 28 con 6** (`+2` por geocerca) → **7 consultas, igual con o sin geocercas**. Cambios en `LocationTrackingService`: (1) el estado previo de cada geocerca sale del punto anterior que ya se consulta al guardar, en lugar de una consulta por geocerca y por tipo de alerta (entrada/salida); (2) el punto siguiente se busca con una sola consulta (antes dos en el caso normal); (3) la sesión activa se actualiza con un único `UPDATE` atómico (antes `SELECT` + 2 incrementos). Además `DriverLocation` y `DriverLocationAlert` dejan de escribir en `activity_log` (`$recordEvents = []`): antes cada punto y cada alerta duplicaba su escritura en una tabla que crecía sin parar. Diferencia sutil, solo para puntos desordenados: el estado previo ahora es el punto inmediatamente anterior en el orden real (recorded_at, id), no el segundo más reciente. Pruebas: comportamiento (distancia, sesión, resumen diario, alertas de entrada/salida/exceso de velocidad, geocercas de otra empresa) y conteo de consultas.
+
 ### 4.2 Historial y estadísticas GPS
 
 **Archivos principales:**
@@ -142,6 +144,8 @@ Las exportaciones y mapas se generan durante la petición HTTP. Excel materializ
 - Cachear mapas por hash de coordenadas, tamaño y proveedor.
 - Mantener el mapa offline como fallback controlado.
 
+**Resultado ARQ-006 (2026-10-01):** `RouteMapService` guarda en disco (`storage/app/private/route-maps/<sha1(url)>.png`) la imagen del mapa estático descargada. La URL incluye coordenadas, centro, zoom, tamaño y proveedor, así que su hash es una clave exacta: un punto GPS nuevo cambia la URL y nunca se sirve un mapa obsoleto. Solo se cachean descargas correctas (un fallo cae al respaldo GD y se reintenta). Limpieza oportunista (1 de cada 20 escrituras, sin cron) de archivos de más de `MAP_STATIC_CACHE_DAYS` (30). Configurable: `MAP_STATIC_CACHE=false` la desactiva. Efecto: el PDF diario ya no espera hasta 6 s de red por mapa en cada descarga repetida. Pruebas: `CacheMapasRutaTest`.
+
 ### 4.4 Monitor de flota y consultas N+1
 
 **Archivo principal:**
@@ -157,6 +161,8 @@ Cuando una ubicación no tiene planilla compatible, se ejecuta una búsqueda his
 - Evitar relaciones no necesarias en la respuesta.
 - Añadir una representación específica para el monitor.
 - Evaluar un read model de flota activa actualizado al recibir puntos GPS.
+
+**Resultado ARQ-007 (2026-10-01):** `LocationTrackingService::adjuntarPlanillaDelDia` ya no depende de la cantidad de conductores. Causas del N+1: (1) los accesores `vehicle_license_plate` y `driver_name` de la planilla cargaban `internalControl.vehicle`, `internalControl.thirdParty` y `subcontractedControl` una vez por planilla y por conductor; (2) el respaldo "últimas rutas conocidas" hacía 4 consultas por conductor sin planilla de hoy (consulta + 3 relaciones). Ahora: una consulta para las planillas de hoy con todo precargado y UNA consulta de respaldo para todos los conductores que la necesiten (tope 500 filas). Medido con la prueba de consultas: 2 conductores = 12 consultas y 14 conductores = 20 antes; ahora el mismo número en ambos casos. Además `whereDate('service_date')` pasó a comparación directa (la columna es DATE y la función anulaba el índice) y se añadió el índice `idx_sdcs_company_date (company_uuid, service_date)` (migración `2026_10_01_000002`; la tabla no tenía ninguno por empresa/fecha). Efecto colateral intencional: `driver_name` de las planillas directas ahora sale poblado (antes la relación se cargaba con columnas restringidas y quedaba nulo). Pruebas: `MonitorFlotaTest`.
 
 ### 4.5 Índices y filtros de fecha
 
@@ -177,6 +183,18 @@ Los índices actuales de `driver_locations` cubren empresa/fecha, conductor/fech
 - Validar `company_uuid, service_date, is_active`.
 - Revisar índices de sesiones por empresa, conductor y estado.
 - No añadir índices sin comprobar selectividad y coste de escritura.
+
+**Evidencia ARQ-008 (2026-10-01, `noa_test`, 600 000 puntos GPS y 60 000 alertas, mediana de 5 corridas):**
+
+| Consulta | Antes | Después | Índice |
+|---|---:|---:|---|
+| Monitor: último punto por conductor (empresa, 1 día) | 948 ms | 36 ms | `idx_dl_company_recorded (company, recorded_at, third_party)` — cubriente, reemplaza al anterior |
+| Mapa del día por vehículo | 973 ms | 3,5 ms | `idx_dl_company_vehicle_recorded` |
+| Mapa del día por proyecto | 936 ms | 117 ms | `idx_dl_company_project_recorded` |
+| Alertas no leídas / de la empresa (página 1) | 2,3 / 0,7 ms | 0,3 ms | `idx_dla_company_read_created`, `idx_dla_company_created` |
+| Último punto de un conductor, punto anterior (ingesta), historial 1 día | < 4 ms | sin cambio | ya estaban bien indexadas |
+
+Coste de escritura: 10 000 `INSERT` tardan 1,0–2,5 s antes y después (la variación entre corridas supera la diferencia); al ritmo real de ingesta (decenas de conductores, un punto cada pocos segundos) es irrelevante. El índice de empresa se REEMPLAZA (no se suma uno más). Nota técnica: InnoDB no permite borrar el índice que respalda una clave foránea sin reemplazarlo en la misma sentencia (`ALTER TABLE ... DROP INDEX ..., ADD INDEX ...`). Banco de pruebas reproducible en el scratchpad de la sesión (`bench_idx.php`); pendiente repetir con volúmenes de producción (ver sección 11).
 
 ### 4.6 Tiempo real en frontend
 
@@ -440,12 +458,12 @@ Leyenda de Estado: HECHO · EN CURSO · PENDIENTE · BLOQUEADO (requiere workers
 | ARQ-002 | Limitar y paginar historiales GPS | P0 | ARQ-001 | HECHO |
 | ARQ-003 | Crear Job de procesamiento GPS | P0 | — | BLOQUEADO (sin workers) |
 | ARQ-004 | Persistir estado conductor/geocerca | P0 | ARQ-003 | BLOQUEADO en forma con cola; parte ejecutable → ARQ-004R |
-| ARQ-004R | Reducir consultas por punto ingerido (hoist + batch, sin cambiar modelo) | P0 | Ninguna | PENDIENTE |
+| ARQ-004R | Reducir consultas por punto ingerido (hoist + batch, sin cambiar modelo) | P0 | Ninguna | HECHO en código (2026-10-01): 16 → 7 consultas por punto, independiente de las geocercas; ver §4.1 |
 | ARQ-005 | Convertir PDF y Excel a Jobs | P0 | — | BLOQUEADO (sin workers); forma ejecutable → ARQ-005R |
 | ARQ-005R | PDFs síncronos acotados + archivado (ver ADR-001) | P0 | Ninguna | EN CURSO (topes y avisos hechos; archivado pendiente de decisión) |
-| ARQ-006 | Cachear mapas por hash | P1 | ARQ-005R | PENDIENTE |
-| ARQ-007 | Optimizar monitor GPS y eliminar N+1 | P1 | Ninguna | PENDIENTE (cuantificado: 11 + P + 4F consultas) |
-| ARQ-008 | Validar índices con `EXPLAIN` | P1 | Ninguna | EN CURSO (evidencia lista; falta migración) |
+| ARQ-006 | Cachear mapas por hash | P1 | ARQ-005R | HECHO en código (2026-10-01): caché en disco por hash de la URL; ver §4.3 |
+| ARQ-007 | Optimizar monitor GPS y eliminar N+1 | P1 | Ninguna | HECHO en código (2026-10-01): consultas constantes, ver §4.4 |
+| ARQ-008 | Validar índices con `EXPLAIN` | P1 | Ninguna | HECHO en código (migración `2026_10_01_000001`, medida con 600 000 puntos); falta ejecutarla en producción |
 | ARQ-009 | Unificar SSE y polling | P1 | Ninguna | HECHO (frontend) |
 | ARQ-010 | Añadir cancelación y pausa de polling | P1 | ARQ-009 | HECHO (frontend) |
 | ARQ-011 | Crear cola local de puntos GPS | P2 | Ninguna | PENDIENTE (no requiere workers backend) |
