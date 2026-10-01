@@ -6,11 +6,14 @@ namespace App\Http\Requests\Fleet\OperationCard;
 
 use App\Traits\HandlesApiResponse;
 use Illuminate\Contracts\Validation\Validator;
+use App\Http\Requests\Concerns\RechazaDocumentosDeParticulares;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
 class StoreOperationCardRequest extends FormRequest
 {
+    use RechazaDocumentosDeParticulares;
+
     use HandlesApiResponse;
 
     public function authorize(): bool
@@ -33,6 +36,16 @@ class StoreOperationCardRequest extends FormRequest
             'internal_number' => 'sometimes|nullable|string|max:50',
             'status' => 'sometimes|required|boolean',
         ];
+    }
+
+    /**
+     * Reglas que dependen del tipo de servicio del vehículo (particulares).
+     *
+     * @return array<int, callable>
+     */
+    public function after(): array
+    {
+        return [fn (\Illuminate\Validation\Validator $validator) => $this->validarTarjetaContraVehiculo($validator)];
     }
 
     public function failedValidation(Validator $validator): never

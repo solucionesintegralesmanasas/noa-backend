@@ -168,12 +168,19 @@ class EmailLogService extends BaseService
             ->with(['vehicleDocuments', 'operationCards'])
             ->chunk(200, function ($vehicles) use (&$items, $companyUuid, $today) {
                 foreach ($vehicles as $vehicle) {
-                    if (! OwnCompany::esVehiculoPropio($vehicle, $companyUuid)) {
+                    // Los particulares no tienen tarjeta de operación, así que no se pueden reconocer como
+                    // propios por la empresa afiliada de la tarjeta: son de la empresa dueña del registro y
+                    // solo reportan SOAT y RTM.
+                    if (! $vehicle->esParticular() && ! OwnCompany::esVehiculoPropio($vehicle, $companyUuid)) {
                         continue;
                     }
 
                     foreach ($vehicle->vehicleDocuments as $document) {
                         if (! $document->expiry_date) {
+                            continue;
+                        }
+                        // Pólizas RCC/RCE históricas de un vehículo hoy particular: ya no aplican.
+                        if (! $vehicle->admiteTipoDocumento($document->document_type)) {
                             continue;
                         }
                         // Los reemplazados quedan INACTIVA al registrar el nuevo;
@@ -197,7 +204,7 @@ class EmailLogService extends BaseService
                     }
 
                     $tarjetas = $vehicle->operationCards
-                        ->filter(fn (OperationCard $t) => $t->expiration_date !== null)
+                        ->filter(fn (OperationCard $t) => $vehicle->requiereTarjetaOperacion() && $t->expiration_date !== null)
                         ->sortByDesc(fn (OperationCard $t) => (string) $t->expiration_date)
                         ->values();
 

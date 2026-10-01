@@ -40,10 +40,10 @@
                     <td>{{ $f['body_type'] ?? '-' }}</td>
                     <td>{{ $f['modality_label'] ?? '-' }}</td>
                     <td>{{ $f['soat_expiry'] ?? '-' }}</td>
-                    <td>{{ $f['rcc_expiry'] ?? '-' }}</td>
-                    <td>{{ $f['rce_expiry'] ?? '-' }}</td>
+                    <td>{{ ($f['es_particular'] ?? false) ? 'No aplica' : ($f['rcc_expiry'] ?? '-') }}</td>
+                    <td>{{ ($f['es_particular'] ?? false) ? 'No aplica' : ($f['rce_expiry'] ?? '-') }}</td>
                     <td>{{ $f['rtm_expiry'] ?? '-' }}</td>
-                    <td>{{ $f['operation_card_expiry'] ?? '-' }}</td>
+                    <td>{{ ($f['es_particular'] ?? false) ? 'No aplica' : ($f['operation_card_expiry'] ?? '-') }}</td>
                     <td>{{ $f['agreement_name'] ?? 'Sin convenio' }}</td>
                 </tr>
             @empty

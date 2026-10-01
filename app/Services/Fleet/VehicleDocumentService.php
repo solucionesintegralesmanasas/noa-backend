@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Fleet;
 
+use App\Exceptions\GeneralException;
 use App\Models\VehicleDocument;
 use App\Models\Vehicle;
 use App\Services\BaseService;
@@ -246,6 +247,8 @@ class VehicleDocumentService extends BaseService
 
     public function createVehicleDocument(array $data): Model
     {
+        $this->asegurarQueElVehiculoAdmite($data['vehicle_uuid'] ?? null, $data['document_type'] ?? null);
+
         return $this->transaction(function () use ($data) {
             // Marcar documentos anteriores del mismo tipo como INACTIVA
             VehicleDocument::where('vehicle_uuid', $data['vehicle_uuid'])
@@ -295,6 +298,13 @@ class VehicleDocumentService extends BaseService
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
 
+            // Solo si cambia el vehículo o el tipo: el historial existente se puede seguir editando.
+            $vehiculo = $data['vehicle_uuid'] ?? $record->vehicle_uuid;
+            $tipo = $data['document_type'] ?? $record->document_type;
+            if ($vehiculo !== $record->vehicle_uuid || strtoupper((string) $tipo) !== strtoupper((string) $record->document_type)) {
+                $this->asegurarQueElVehiculoAdmite($vehiculo, $tipo);
+            }
+
             $record->update([
                 'vehicle_uuid' => $data['vehicle_uuid'] ?? $record->vehicle_uuid,
                 'document_type' => $data['document_type'] ?? $record->document_type,
@@ -336,6 +346,23 @@ class VehicleDocumentService extends BaseService
         } catch (\Exception $e) {
             Logger::error('VehicleDocumentService@deleteVehicleDocument: '.$e->getMessage());
             throw $e;
+        }
+    }
+
+    /**
+     * Un vehículo particular no tiene pólizas RCC/RCE (solo SOAT y RTM). Defensa en el servicio
+     * por si se invoca fuera de un FormRequest.
+     *
+     * @throws GeneralException
+     */
+    private function asegurarQueElVehiculoAdmite(?string $vehicleUuid, ?string $tipo): void
+    {
+        $vehiculo = $vehicleUuid ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first() : null;
+
+        if ($vehiculo && ! $vehiculo->admiteTipoDocumento($tipo)) {
+            throw GeneralException::unprocessable(
+                'Un vehículo particular no tiene pólizas RCC/RCE: solo registra SOAT y tecnomecánica.'
+            );
         }
     }
 }
