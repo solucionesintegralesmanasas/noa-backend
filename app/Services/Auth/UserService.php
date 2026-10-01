@@ -7,6 +7,7 @@ namespace App\Services\Auth;
 use App\Models\ThirdParty;
 use App\Exceptions\GeneralException;
 use App\Models\User;
+use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -29,6 +30,8 @@ use Illuminate\Support\Facades\Auth;
  */
 class UserService extends BaseService
 {
+    use ProtegeRolesPrivilegiados;
+
     /**
      * Campos sobre los cuales se aplica la búsqueda libre.
      *
@@ -186,6 +189,9 @@ class UserService extends BaseService
             // Sincronización de roles RBAC - permite quitar roles enviando array sin ese rol
             if (array_key_exists('roles', $data)) {
                 $rolesToSync = array_values(array_filter((array) $data['roles']));
+                foreach (array_diff($rolesToSync, $record->getRoleNames()->all()) as $nuevo) {
+                    $this->asegurarRolAsignable((string) $nuevo);
+                }
                 $record->syncRoles($rolesToSync);
             }
 

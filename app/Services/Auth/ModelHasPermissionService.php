@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Auth;
 
 use App\Models\ModelHasPermission;
+use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -24,6 +25,8 @@ use Illuminate\Pagination\LengthAwarePaginator;
  */
 class ModelHasPermissionService extends BaseService
 {
+    use ProtegeRolesPrivilegiados;
+
     protected array $searchableFields = ['model_type'];
 
     protected function getModelInstance(): Model
@@ -59,6 +62,8 @@ class ModelHasPermissionService extends BaseService
      */
     public function createModelHasPermission(array $data): Model
     {
+        $this->asegurarPermisosPropios([(int) $data['permission_id']]);
+
         return $this->transaction(fn () => ModelHasPermission::create([
             'permission_id' => $data['permission_id'],
             'model_id' => $data['model_id'],
