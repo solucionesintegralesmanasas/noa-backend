@@ -54,7 +54,14 @@ class AuthenticationService
         // Limpiar los intentos fallidos en el rate limiter al iniciar sesión exitosamente
         RateLimiter::clear($this->getRateLimitKey($login, $ip));
 
-        event(new UserAuthenticated($user, $login, $ip));
+        // El registro de actividad nunca debe romper el login: si la tabla
+        // activity_log falta en producción o el listener falla, se registra
+        // el fallo y el login continúa.
+        try {
+            event(new UserAuthenticated($user, $login, $ip));
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return $this->processSuccessfulAuthentication($user);
     }
@@ -67,22 +74,44 @@ class AuthenticationService
     private function processSuccessfulAuthentication(User $user): array
     {
         $this->validateEmailVerification($user);
-        $user->update([
-            'last_login_at' => now(),
-            'failed_login_attempts' => 0,
-        ]);
+
+        // updateQuietly evita que el trait LogsActivity (Spatie) dispare un
+        // insert a activity_log que rompa el login si la tabla falta en prod.
+        // Si aun así falla, se reporta y el login continúa.
+        try {
+            $user->updateQuietly([
+                'last_login_at' => now(),
+                'failed_login_attempts' => 0,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         $tokens = $this->generateTokenPair($user);
-        $companies = $user->companies()->wherePivot('is_active', true)->get();
-        $defaultCompany = $companies->first();
 
         return [
             'status' => 'success',
             'access_token' => $tokens['access_token'],
             'refresh_token' => $tokens['refresh_token'],
-            'expires_in' => config('auth.tokens.access_token_hours') * 3600,
+            'expires_in' => $this->accessTokenHours() * 3600,
             'user' => $this->buildUserPayload($user),
         ];
+    }
+
+    /**
+     * Horas de vida del access token con valor por defecto seguro.
+     */
+    private function accessTokenHours(): int
+    {
+        return (int) (config('auth.tokens.access_token_hours') ?: 8);
+    }
+
+    /**
+     * Días de vida del refresh token con valor por defecto seguro.
+     */
+    private function refreshTokenDays(): int
+    {
+        return (int) (config('auth.tokens.refresh_token_days') ?: 30);
     }
 
     /**
@@ -92,18 +121,30 @@ class AuthenticationService
      */
     private function generateTokenPair(User $user): array
     {
-        return [
-            'access_token' => $user->createToken(
-                'access_token',
-                ['*'],
-                now()->addHours(config('auth.tokens.access_token_hours'))
-            )->plainTextToken,
-            'refresh_token' => $user->createToken(
-                'refresh_token',
-                ['refresh'],
-                now()->addDays(config('auth.tokens.refresh_token_days'))
-            )->plainTextToken,
-        ];
+        // Si la columna personal_access_tokens.expires_at no existe en
+        // producción (migración pendiente), createToken con expiración lanza
+        // QueryException. Se reintenta sin expiración antes que devolver 500.
+        try {
+            return [
+                'access_token' => $user->createToken(
+                    'access_token',
+                    ['*'],
+                    now()->addHours($this->accessTokenHours())
+                )->plainTextToken,
+                'refresh_token' => $user->createToken(
+                    'refresh_token',
+                    ['refresh'],
+                    now()->addDays($this->refreshTokenDays())
+                )->plainTextToken,
+            ];
+        } catch (\Illuminate\Database\QueryException $e) {
+            report($e);
+
+            return [
+                'access_token' => $user->createToken('access_token', ['*'])->plainTextToken,
+                'refresh_token' => $user->createToken('refresh_token', ['refresh'])->plainTextToken,
+            ];
+        }
     }
 
     /**
@@ -192,10 +233,10 @@ class AuthenticationService
         return cookie(
             'refresh_token',
             $refreshToken,
-            config('auth.tokens.refresh_token_days') * 24 * 60,
+            $this->refreshTokenDays() * 24 * 60,
             null,
             null,
-            request()->secure(),
+            (bool) request()->secure(),
             true,
             false,
             'lax'
@@ -237,7 +278,7 @@ class AuthenticationService
         return [
             'access_token' => $tokens['access_token'],
             'refresh_token' => $tokens['refresh_token'],
-            'expires_in' => config('auth.tokens.access_token_hours') * 3600,
+            'expires_in' => $this->accessTokenHours() * 3600,
             'message' => 'Tokens renovados exitosamente.',
         ];
     }
@@ -399,7 +440,7 @@ class AuthenticationService
      */
     public function extendTokenSession(PersonalAccessToken $token): array
     {
-        $newExpiration = now()->addHours(config('auth.tokens.access_token_hours'));
+        $newExpiration = now()->addHours($this->accessTokenHours());
         $token->update([
             'expires_at' => $newExpiration,
         ]);
@@ -418,28 +459,60 @@ class AuthenticationService
      */
     private function buildUserPayload(User $user): array
     {
-        $companies = $user->companies()->wherePivot('is_active', true)->get();
-        $defaultCompany = $companies->first();
+        // Los datos auxiliares (empresas, roles, conductor) nunca deben
+        // romper el login: cualquier fallo se reporta y se usan vacíos.
+        try {
+            $companies = $user->companies()->wherePivot('is_active', true)->get();
+        } catch (\Throwable $e) {
+            report($e);
+            $companies = collect();
+        }
 
-        $thirdPartyUuid = $defaultCompany?->pivot->third_party_uuid;
+        $defaultCompany = $companies->first();
+        $thirdPartyUuid = $defaultCompany?->pivot->third_party_uuid ?? null;
         $uuidDriver = null;
 
-        if ($user->hasRole('CONDUCTOR') && $thirdPartyUuid) {
-            $uuidDriver = $thirdPartyUuid; // Guardamos el UUID original del conductor
+        try {
+            $hasConductorRole = $user->hasRole('CONDUCTOR');
+        } catch (\Throwable $e) {
+            report($e);
+            $hasConductorRole = false;
+        }
 
-            // Buscamos el propietario/afiliado vinculado a la licencia del conductor
-            $affiliate = OwnerDriver::withoutGlobalScopes()->whereIn(
-                'driver_license_uuid',
-                DriverLicense::withoutGlobalScopes()
-                    ->where('third_party_uuid', $uuidDriver)
-                    ->whereIn('status', ['VIGENTE', 'ACTIVA'])
-                    ->pluck('uuid')
-            )->first();
+        if ($hasConductorRole && $thirdPartyUuid) {
+            try {
+                $uuidDriver = $thirdPartyUuid; // Guardamos el UUID original del conductor
 
-            if ($affiliate) {
-                // Reemplazamos el third_party_uuid por el del propietario/afiliado
-                $thirdPartyUuid = $affiliate->third_party_uuid;
+                // Buscamos el propietario/afiliado vinculado a la licencia del conductor
+                $affiliate = OwnerDriver::withoutGlobalScopes()->whereIn(
+                    'driver_license_uuid',
+                    DriverLicense::withoutGlobalScopes()
+                        ->where('third_party_uuid', $uuidDriver)
+                        ->whereIn('status', ['VIGENTE', 'ACTIVA'])
+                        ->pluck('uuid')
+                )->first();
+
+                if ($affiliate) {
+                    // Reemplazamos el third_party_uuid por el del propietario/afiliado
+                    $thirdPartyUuid = $affiliate->third_party_uuid;
+                }
+            } catch (\Throwable $e) {
+                report($e);
             }
+        }
+
+        try {
+            $roles = $user->getRoleNames();
+        } catch (\Throwable $e) {
+            report($e);
+            $roles = collect();
+        }
+
+        try {
+            $permissions = $user->getAllPermissions()->pluck('name');
+        } catch (\Throwable $e) {
+            report($e);
+            $permissions = collect();
         }
 
         return [
@@ -455,12 +528,12 @@ class AuthenticationService
                 return [
                     'uuid' => $c->uuid,
                     'name' => $c->business_name,
-                    'third_party_uuid' => $c->pivot->third_party_uuid,
-                    'logo' => $c->logo_url,
+                    'third_party_uuid' => $c->pivot->third_party_uuid ?? null,
+                    'logo' => $c->logo_url ?? null,
                 ];
             })->toArray(),
-            'roles' => $user->getRoleNames(),
-            'permissions' => $user->getAllPermissions()->pluck('name'),
+            'roles' => $roles,
+            'permissions' => $permissions,
         ];
     }
 }
