@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Auth;
 
 use App\Models\ModelHasRole;
+use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -24,6 +25,8 @@ use Illuminate\Pagination\LengthAwarePaginator;
  */
 class ModelHasRoleService extends BaseService
 {
+    use ProtegeRolesPrivilegiados;
+
     protected array $searchableFields = ['model_type'];
 
     protected function getModelInstance(): Model
@@ -59,6 +62,8 @@ class ModelHasRoleService extends BaseService
      */
     public function createModelHasRole(array $data): Model
     {
+        $this->asegurarRolAsignable((int) $data['role_id']);
+
         return $this->transaction(fn () => ModelHasRole::create([
             'role_id' => $data['role_id'],
             'model_id' => $data['model_id'],
@@ -71,6 +76,8 @@ class ModelHasRoleService extends BaseService
      */
     public function deleteByCompositeKey(int $roleId, int $modelId, string $modelType): void
     {
+        $this->asegurarRolNoPrivilegiado($roleId);
+
         $this->transaction(function () use ($roleId, $modelId, $modelType) {
             $record = $this->getByCompositeKey($roleId, $modelId, $modelType);
             if ($record) {

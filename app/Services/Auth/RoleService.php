@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Auth;
 
 use App\Models\Role;
+use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -26,6 +27,8 @@ use Illuminate\Support\Collection;
  */
 class RoleService extends BaseService
 {
+    use ProtegeRolesPrivilegiados;
+
     /**
      * Campos sobre los cuales se aplica la búsqueda libre.
      *
@@ -77,6 +80,9 @@ class RoleService extends BaseService
      */
     public function createRole(array $data): Model
     {
+        $this->asegurarNombreDeRolPermitido($data['name'] ?? null);
+        $this->asegurarPermisosPropios((array) ($data['permissions'] ?? []));
+
         return $this->transaction(function () use ($data) {
             $role = Role::create([
                 'name' => $data['name'],
@@ -103,6 +109,15 @@ class RoleService extends BaseService
                 throw new \RuntimeException('Rol no encontrado.');
             }
 
+            // Salvaguardas de escalada (ver ProtegeRolesPrivilegiados): ni se toca SUPERADMIN ni se
+            // renombra a él, y solo se conceden permisos propios (los que ya tiene el rol no cuentan).
+            $this->asegurarRolNoPrivilegiado($record);
+            $this->asegurarNombreDeRolPermitido($data['name'] ?? null);
+            if (isset($data['permissions'])) {
+                $actuales = $record->permissions->pluck('name')->all();
+                $this->asegurarPermisosPropios(array_values(array_diff((array) $data['permissions'], $actuales)));
+            }
+
             $record->update([
                 'name' => $data['name'] ?? $record->name,
                 'guard_name' => $data['guard_name'] ?? $record->guard_name,
@@ -122,6 +137,8 @@ class RoleService extends BaseService
      */
     public function deleteRole(int $id): void
     {
+        $this->asegurarRolEliminable($id);
+
         if (! $this->buildQuery()->where('id', $id)->delete()) {
             throw new \RuntimeException(
                 "No se pudo eliminar el rol con ID: {$id}"
