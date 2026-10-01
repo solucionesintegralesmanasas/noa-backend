@@ -337,6 +337,26 @@ class RoleSeeder extends Seeder
             'objects_contracts.update',
             'objects_contracts.delete',
 
+            'brands.index',
+            'brands.create',
+            'brands.update',
+            'brands.delete',
+
+            'vehicle_classes.index',
+            'vehicle_classes.create',
+            'vehicle_classes.update',
+            'vehicle_classes.delete',
+
+            'inspection_items.index',
+            'inspection_items.create',
+            'inspection_items.update',
+            'inspection_items.delete',
+
+            'withholdings.index',
+            'withholdings.create',
+            'withholdings.update',
+            'withholdings.delete',
+
             'contractors.index',
             'contractors.create',
             'contractors.update',
