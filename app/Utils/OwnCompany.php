@@ -27,7 +27,8 @@ class OwnCompany
     private static array $cache = [];
 
     /**
-     * Normaliza un nombre para compararlo de forma tolerante.
+     * Normaliza un nombre para compararlo de forma tolerante: mayúsculas, sin acentos ni
+     * signos, espacios colapsados y siglas unificadas (S.A.S, S A S y SAS dan "SAS").
      */
     public static function normalizarNombre(?string $nombre): string
     {
@@ -36,9 +37,17 @@ class OwnCompany
         }
 
         $normalizado = Str::ascii(mb_strtoupper(trim($nombre), 'UTF-8'));
+        // Los puntos se eliminan (no se vuelven espacio) para que "S.A.S." y "SAS" coincidan.
+        $normalizado = str_replace('.', '', $normalizado);
         $normalizado = (string) preg_replace('/[^A-Z0-9]+/', ' ', $normalizado);
+        $normalizado = trim((string) preg_replace('/\s+/', ' ', $normalizado));
 
-        return trim((string) preg_replace('/\s+/', ' ', $normalizado));
+        // Letras sueltas consecutivas ("S A S", "S. A. S.") forman una sigla: "SAS".
+        return (string) preg_replace_callback(
+            '/(?<![A-Z0-9])[A-Z](?: [A-Z](?![A-Z0-9]))+/',
+            fn (array $m) => str_replace(' ', '', $m[0]),
+            $normalizado
+        );
     }
 
     /**

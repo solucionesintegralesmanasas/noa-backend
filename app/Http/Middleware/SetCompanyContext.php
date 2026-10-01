@@ -41,9 +41,10 @@ class SetCompanyContext
 
             if (Auth::check()) {
                 $user = Auth::user();
-                $companyUser = $user->companies()->where('company_user.company_uuid', $company->uuid)->first()
-                    ?? $user->companies()->where('companies.uuid', $company->uuid)->first()
-                    ?? $user->companies()->first();
+                // Pertenencia estricta a la empresa pedida. No hay respaldo a "la primera empresa
+                // del usuario": con ese respaldo cualquier usuario autenticado podía operar sobre
+                // una empresa ajena enviando su UUID en X-Company-UUID. SUPERADMIN opera en cualquiera.
+                $companyUser = $user->companies()->where('companies.uuid', $company->uuid)->first();
 
                 if (! $companyUser && ! $user->hasRole('SUPERADMIN')) {
                     throw new AccessDeniedHttpException('Access denied to this company');

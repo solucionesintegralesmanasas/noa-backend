@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Services\Auth;
 
 use App\Models\ThirdParty;
+use App\Exceptions\GeneralException;
 use App\Models\User;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Servicio para la gestión de usuarios.
@@ -155,6 +157,7 @@ class UserService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid, ['*'], ['roles']);
+            $this->asegurarPuedeGestionar($record, (array) ($data['roles'] ?? []));
 
             $payload = [
                 'name' => $data['name'] ?? $record->name,
@@ -200,6 +203,8 @@ class UserService extends BaseService
      */
     public function deleteUser(string $uuid): void
     {
+        $this->asegurarPuedeGestionar($this->findByUuid($uuid, ['*'], ['roles']));
+
         if (! $this->delete($uuid)) {
             throw new \RuntimeException(
                 "No se pudo eliminar el usuario con UUID: {$uuid}"
@@ -212,6 +217,30 @@ class UserService extends BaseService
      */
     public function toggleUserStatus(string $uuid): bool
     {
+        $this->asegurarPuedeGestionar($this->findByUuid($uuid, ['*'], ['roles']));
+
         return $this->toggleStatus($uuid, 'status');
+    }
+
+    /**
+     * Solo un SUPERADMIN puede modificar, desactivar o eliminar a otro SUPERADMIN, y solo
+     * un SUPERADMIN puede conceder ese rol. Evita que un ADMIN_EMPRESA se eleve a sí mismo
+     * (o a un tercero) a SUPERADMIN a través de la edición de usuarios.
+     *
+     * @param  array<int, string>  $rolesSolicitados
+     *
+     * @throws GeneralException
+     */
+    private function asegurarPuedeGestionar(User $objetivo, array $rolesSolicitados = []): void
+    {
+        $actor = Auth::user();
+
+        if ($actor && $actor->hasRole('SUPERADMIN')) {
+            return;
+        }
+
+        if ($objetivo->hasRole('SUPERADMIN') || in_array('SUPERADMIN', $rolesSolicitados, true)) {
+            throw GeneralException::forbidden('Solo un SUPERADMIN puede gestionar usuarios SUPERADMIN.');
+        }
     }
 }

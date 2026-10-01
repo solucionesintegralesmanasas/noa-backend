@@ -113,19 +113,19 @@ Route::prefix('v1')->group(function () {
             $service->notifyExpiringDocuments();
 
             return response()->json(['success' => true, 'message' => 'Verificación y envío completados.']);
-        })->name('api.v1.public.cron.trigger');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.trigger');
 
         Route::get('/cron/sync-notifications', function (NotificationsService $service) {
             $service->syncNotifications();
 
             return response()->json(['success' => true, 'message' => 'Notificaciones sincronizadas correctamente.']);
-        })->name('api.v1.public.cron.sync');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.sync');
 
         Route::get('/cron/sync-social-security', function (SocialSecurityContributionService $service) {
             $result = $service->autoUpdateExpiredStatuses();
 
             return response()->json(['success' => true, 'message' => $result['message'], 'data' => $result]);
-        })->name('api.v1.public.cron.sync-social-security');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.sync-social-security');
 
         Route::get('/cron/run-all', function (
             EmailLogService $emailService,
@@ -137,7 +137,7 @@ Route::prefix('v1')->group(function () {
             $socialSecurityService->autoUpdateExpiredStatuses();
 
             return response()->json(['success' => true, 'message' => 'Todos los procesos automáticos se ejecutaron correctamente.']);
-        })->name('api.v1.public.cron.run-all');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.run-all');
     });
 
     // ─── SSE NOTIFICACIONES (fuera de auth:sanctum: EventSource no envía
@@ -145,7 +145,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/notifications/stream', [NotificationsController::class, 'stream'])->name('api.v1.notifications.stream');
 
     // ─── RUTAS PROTEGIDAS POR AUTENTICACIÓN (Sanctum) ───
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'authz'])->group(function () {
 
         // Perfil y Sesión
         Route::get('/me', [AuthController::class, 'me'])->name('api.v1.auth.me');
@@ -180,58 +180,61 @@ Route::prefix('v1')->group(function () {
         });
 
         // ─── MÓDULO AUTH: USUARIOS ───
+        // Administración de identidades: las lecturas siguen abiertas a usuarios autenticados (el frontend
+        // las usa para poblar formularios); las ESCRITURAS exigen rol. Sin esto cualquier usuario
+        // autenticado podía crear roles, concederse permisos o asignarse SUPERADMIN.
         Route::prefix('auth')->group(function () {
 
             // Usuarios
             Route::prefix('users')->group(function () {
                 Route::get('/', [UserController::class, 'index'])->name('api.v1.auth.users.index');
                 Route::get('/list', [UserController::class, 'list'])->name('api.v1.auth.users.list');
-                Route::post('/', [UserController::class, 'store'])->name('api.v1.auth.users.store');
+                Route::post('/', [UserController::class, 'store'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.store');
                 Route::get('/{uuid}', [UserController::class, 'show'])->name('api.v1.auth.users.show');
-                Route::put('/{uuid}', [UserController::class, 'update'])->name('api.v1.auth.users.update');
-                Route::delete('/{uuid}', [UserController::class, 'destroy'])->name('api.v1.auth.users.destroy');
-                Route::patch('/{uuid}/toggle-status', [UserController::class, 'toggleStatus'])->name('api.v1.auth.users.toggle-status');
+                Route::put('/{uuid}', [UserController::class, 'update'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.update');
+                Route::delete('/{uuid}', [UserController::class, 'destroy'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.destroy');
+                Route::patch('/{uuid}/toggle-status', [UserController::class, 'toggleStatus'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.toggle-status');
             });
 
             // Roles
             Route::prefix('roles')->group(function () {
                 Route::get('/', [RoleController::class, 'index'])->name('api.v1.auth.roles.index');
                 Route::get('/list', [RoleController::class, 'list'])->name('api.v1.auth.roles.list');
-                Route::post('/', [RoleController::class, 'store'])->name('api.v1.auth.roles.store');
+                Route::post('/', [RoleController::class, 'store'])->middleware('role:SUPERADMIN')->name('api.v1.auth.roles.store');
                 Route::get('/{id}', [RoleController::class, 'show'])->name('api.v1.auth.roles.show');
-                Route::put('/{id}', [RoleController::class, 'update'])->name('api.v1.auth.roles.update');
-                Route::delete('/{id}', [RoleController::class, 'destroy'])->name('api.v1.auth.roles.destroy');
+                Route::put('/{id}', [RoleController::class, 'update'])->middleware('role:SUPERADMIN')->name('api.v1.auth.roles.update');
+                Route::delete('/{id}', [RoleController::class, 'destroy'])->middleware('role:SUPERADMIN')->name('api.v1.auth.roles.destroy');
             });
 
             // Permisos
             Route::prefix('permissions')->group(function () {
                 Route::get('/', [PermissionController::class, 'index'])->name('api.v1.auth.permissions.index');
                 Route::get('/list', [PermissionController::class, 'list'])->name('api.v1.auth.permissions.list');
-                Route::post('/', [PermissionController::class, 'store'])->name('api.v1.auth.permissions.store');
+                Route::post('/', [PermissionController::class, 'store'])->middleware('role:SUPERADMIN')->name('api.v1.auth.permissions.store');
                 Route::get('/{id}', [PermissionController::class, 'show'])->name('api.v1.auth.permissions.show');
-                Route::put('/{id}', [PermissionController::class, 'update'])->name('api.v1.auth.permissions.update');
-                Route::delete('/{id}', [PermissionController::class, 'destroy'])->name('api.v1.auth.permissions.destroy');
+                Route::put('/{id}', [PermissionController::class, 'update'])->middleware('role:SUPERADMIN')->name('api.v1.auth.permissions.update');
+                Route::delete('/{id}', [PermissionController::class, 'destroy'])->middleware('role:SUPERADMIN')->name('api.v1.auth.permissions.destroy');
             });
 
             // Asignación directa de permisos a modelos (model_has_permissions)
             Route::prefix('model-has-permissions')->group(function () {
                 Route::get('/', [ModelHasPermissionController::class, 'index'])->name('api.v1.auth.model-has-permissions.index');
-                Route::post('/', [ModelHasPermissionController::class, 'store'])->name('api.v1.auth.model-has-permissions.store');
-                Route::delete('/{permissionId}/{modelId}/{modelType}', [ModelHasPermissionController::class, 'destroy'])->name('api.v1.auth.model-has-permissions.destroy');
+                Route::post('/', [ModelHasPermissionController::class, 'store'])->middleware('role:SUPERADMIN')->name('api.v1.auth.model-has-permissions.store');
+                Route::delete('/{permissionId}/{modelId}/{modelType}', [ModelHasPermissionController::class, 'destroy'])->middleware('role:SUPERADMIN')->name('api.v1.auth.model-has-permissions.destroy');
             });
 
             // Asignación de roles a modelos (model_has_roles)
             Route::prefix('model-has-roles')->group(function () {
                 Route::get('/', [ModelHasRoleController::class, 'index'])->name('api.v1.auth.model-has-roles.index');
-                Route::post('/', [ModelHasRoleController::class, 'store'])->name('api.v1.auth.model-has-roles.store');
-                Route::delete('/{roleId}/{modelId}/{modelType}', [ModelHasRoleController::class, 'destroy'])->name('api.v1.auth.model-has-roles.destroy');
+                Route::post('/', [ModelHasRoleController::class, 'store'])->middleware('role:SUPERADMIN')->name('api.v1.auth.model-has-roles.store');
+                Route::delete('/{roleId}/{modelId}/{modelType}', [ModelHasRoleController::class, 'destroy'])->middleware('role:SUPERADMIN')->name('api.v1.auth.model-has-roles.destroy');
             });
 
             // Permisos asignados a roles (role_has_permissions)
             Route::prefix('role-has-permissions')->group(function () {
                 Route::get('/', [RoleHasPermissionController::class, 'index'])->name('api.v1.auth.role-has-permissions.index');
-                Route::post('/', [RoleHasPermissionController::class, 'store'])->name('api.v1.auth.role-has-permissions.store');
-                Route::delete('/{permissionId}/{roleId}', [RoleHasPermissionController::class, 'destroy'])->name('api.v1.auth.role-has-permissions.destroy');
+                Route::post('/', [RoleHasPermissionController::class, 'store'])->middleware('role:SUPERADMIN')->name('api.v1.auth.role-has-permissions.store');
+                Route::delete('/{permissionId}/{roleId}', [RoleHasPermissionController::class, 'destroy'])->middleware('role:SUPERADMIN')->name('api.v1.auth.role-has-permissions.destroy');
             });
         });
 

@@ -69,8 +69,8 @@ class VehicleReportService extends BaseService
         ])->with([
             'vehicleClass:uuid,description',
             'thirdParty:uuid,first_name,last_name,company_name,document_number',
-            'vehicleDocuments:vehicle_uuid,document_type,expiry_date,status',
-            'operationCards:vehicle_uuid,operating_card_number,expiration_date,status',
+            'vehicleDocuments:uuid,vehicle_uuid,document_type,expiry_date,status',
+            'operationCards:uuid,vehicle_uuid,operating_card_number,expiration_date,status',
             'businessCollaborationAgreements:vehicle_uuid,contracting_entity_name,expiry_date,status',
             'driverVehicleAssignments:vehicle_uuid,project_uuid,third_party_uuid,is_active',
             'driverVehicleAssignments.project:uuid,project_name',
@@ -344,11 +344,14 @@ class VehicleReportService extends BaseService
      */
     public function mapRow(Vehicle $vehicle): array
     {
+        // Por tipo: vencimiento y uuid del documento más reciente (el frontend enlaza a su edición).
         $docs = [];
+        $docUuids = [];
         foreach ($vehicle->relationLoaded('vehicleDocuments') ? $vehicle->vehicleDocuments : collect() as $doc) {
             $key = strtoupper((string) $doc->document_type);
             if (! isset($docs[$key]) || $doc->expiry_date > $docs[$key]) {
                 $docs[$key] = $doc->expiry_date ? Carbon::parse($doc->expiry_date)->toDateString() : null;
+                $docUuids[$key] = $doc->uuid;
             }
         }
 
@@ -391,6 +394,11 @@ class VehicleReportService extends BaseService
             'rcc_expiry' => $docs['RCC'] ?? null,
             'rce_expiry' => $docs['RCE'] ?? null,
             'rtm_expiry' => $docs['RTM'] ?? null,
+            'soat_uuid' => $docUuids['SOAT'] ?? null,
+            'rcc_uuid' => $docUuids['RCC'] ?? null,
+            'rce_uuid' => $docUuids['RCE'] ?? null,
+            'rtm_uuid' => $docUuids['RTM'] ?? null,
+            'operation_card_uuid' => $card?->uuid,
             'operation_card_number' => $card?->operating_card_number,
             'operation_card_expiry' => $card?->expiration_date ? Carbon::parse($card->expiration_date)->toDateString() : null,
             'agreement_name' => $agreement?->contracting_entity_name,

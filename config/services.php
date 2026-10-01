@@ -65,4 +65,10 @@ return [
         'timeout' => (int) env('MAP_STATIC_TIMEOUT', 6),
     ],
 
+
+    // Secreto de los endpoints públicos de Web Cron (/api/v1/public/cron/*).
+    'cron' => [
+        'secret' => env('CRON_SECRET'),
+    ],
+
 ];
