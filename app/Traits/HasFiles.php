@@ -67,7 +67,15 @@ trait HasFiles
 
     public function getLogoUrlAttribute(): ?string
     {
-        return $this->getFirstMediaUrl('LOGO');
+        // Resiliente: si el servidor no tiene ext-fileinfo o el disco falla,
+        // se reporta y se retorna null en vez de romper al llamador (p. ej. login).
+        try {
+            return $this->getFirstMediaUrl('LOGO') ?: null;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 
     public function getSignatureAttribute(): ?Media
@@ -77,7 +85,13 @@ trait HasFiles
 
     public function getSignatureUrlAttribute(): ?string
     {
-        return $this->getFirstMediaUrl('FIRMA');
+        try {
+            return $this->getFirstMediaUrl('FIRMA') ?: null;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 
     public function getProfilePhotoAttribute(): ?Media
@@ -87,7 +101,13 @@ trait HasFiles
 
     public function getProfilePhotoUrlAttribute(): ?string
     {
-        return $this->getFirstMediaUrl('FOTO_PERFIL');
+        try {
+            return $this->getFirstMediaUrl('FOTO_PERFIL') ?: null;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 
     public function getVehiclePhotosAttribute(): Collection
@@ -282,9 +302,16 @@ trait HasFiles
         $photoUrl = null;
         $formattedMedia = [];
 
-        // Iteramos una sola vez sobre la relación pre-cargada
+        // Iteramos una sola vez sobre la relación pre-cargada.
+        // getUrl() puede lanzar Error si falta ext-fileinfo en el servidor:
+        // se reporta por ítem y se continúa en vez de romper la serialización.
         foreach ($this->media as $mediaItem) {
-            $url = $mediaItem->getUrl();
+            try {
+                $url = $mediaItem->getUrl();
+            } catch (\Throwable $e) {
+                report($e);
+                $url = '';
+            }
             $type = $mediaItem->collection_name;
 
             $formattedMedia[] = [
