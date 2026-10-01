@@ -427,7 +427,7 @@ class ThirdPartyController extends Controller
     public function uploadPhoto(Request $request, string $uuid): JsonResponse
     {
         $request->validate([
-            'photo' => ['required', 'file', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            'photo' => ['required', 'file', 'extensions:jpg,jpeg,png,webp', 'max:2048'],
         ]);
 
         try {
