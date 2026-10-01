@@ -6,11 +6,14 @@ namespace App\Http\Requests\Fleet\VehicleDocument;
 
 use App\Traits\HandlesApiResponse;
 use Illuminate\Contracts\Validation\Validator;
+use App\Http\Requests\Concerns\RechazaDocumentosDeParticulares;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
 class StoreVehicleDocumentRequest extends FormRequest
 {
+    use RechazaDocumentosDeParticulares;
+
     use HandlesApiResponse;
 
     public function authorize(): bool
@@ -33,6 +36,16 @@ class StoreVehicleDocumentRequest extends FormRequest
             'taker' => 'nullable|string|max:200',
             'status' => 'required|in:SI,NO,VIGENTE,INACTIVA,NO VIGENTE',
         ];
+    }
+
+    /**
+     * Reglas que dependen del tipo de servicio del vehículo (particulares).
+     *
+     * @return array<int, callable>
+     */
+    public function after(): array
+    {
+        return [fn (\Illuminate\Validation\Validator $validator) => $this->validarDocumentoContraVehiculo($validator)];
     }
 
     public function failedValidation(Validator $validator): never

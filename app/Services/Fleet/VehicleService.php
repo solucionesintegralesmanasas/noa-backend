@@ -207,7 +207,7 @@ class VehicleService extends BaseService
             });
         }
 
-        return $query->get(['uuid', 'company_uuid', 'vehicle_license_plate', 'vehicle_class_uuid']);
+        return $query->get(['uuid', 'company_uuid', 'vehicle_license_plate', 'vehicle_class_uuid', 'type_of_service']);
     }
 
     /**

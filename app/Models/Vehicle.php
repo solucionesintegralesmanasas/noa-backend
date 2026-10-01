@@ -393,4 +393,35 @@ class Vehicle extends Model
             'activity_log' => $this->activities,
         ];
     }
+
+    /** Tipo de servicio sin tarjeta de operación ni pólizas RCC/RCE (solo SOAT y RTM). */
+    public const SERVICIO_PARTICULAR = 'PARTICULAR';
+
+    /** Tipos de documento que un vehículo particular no puede tener. */
+    public const DOCUMENTOS_NO_APLICAN_A_PARTICULARES = ['RCC', 'RCE'];
+
+    /**
+     * Regla de negocio única: un vehículo particular no opera con tarjeta de operación
+     * ni con pólizas RCC/RCE. Ningún flujo debe comparar el tipo de servicio por su cuenta.
+     */
+    public function esParticular(): bool
+    {
+        return strtoupper((string) $this->type_of_service) === self::SERVICIO_PARTICULAR;
+    }
+
+    /** Si el vehículo debe tener tarjeta de operación (todo menos los particulares). */
+    public function requiereTarjetaOperacion(): bool
+    {
+        return ! $this->esParticular();
+    }
+
+    /** Si el vehículo admite documentos del tipo dado (SOAT, RTM, RCC, RCE). */
+    public function admiteTipoDocumento(?string $tipo): bool
+    {
+        if (! $this->esParticular()) {
+            return true;
+        }
+
+        return ! in_array(strtoupper((string) $tipo), self::DOCUMENTOS_NO_APLICAN_A_PARTICULARES, true);
+    }
 }
