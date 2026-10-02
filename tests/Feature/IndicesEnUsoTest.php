@@ -146,7 +146,7 @@ class IndicesEnUsoTest extends TestCase
             return "'".$valor->format('Y-m-d H:i:s')."'";
         }
 
-        return "'".str_replace("'", "''", (string) $valor)."'";
+        return DB::getPdo()->quote((string) $valor);
     }
 
     /** Plan de EXPLAIN de cada SELECT que el bloque ejecuta sobre la tabla. */
