@@ -59,6 +59,7 @@ return [
      */
     'resource_overrides' => [
         'rup' => 'rup_records',
+        'radicacion' => 'radicacion_to',
         'employment-contracts' => 'employmentContracts',
         'social-security-contributions' => 'security_contributions',
         'capacity-inventories' => 'capacity_inventory',

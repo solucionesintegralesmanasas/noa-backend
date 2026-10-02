@@ -183,4 +183,26 @@ class ThirdParty extends Model implements HasMedia
     {
         return $this->documentType();
     }
+
+    /**
+     * Nombre para mostrar del tercero.
+     *
+     * `third_parties` no tiene columna `name`: una persona natural se guarda en
+     * `first_name`/`last_name` y una jurídica en `company_name`. Este accesor
+     * unifica ambos casos con la misma prioridad que usa el listado de terceros.
+     */
+    public function getFullNameAttribute(): ?string
+    {
+        $nombre = trim((string) ($this->company_name
+            ?: trim(($this->first_name ?? '').' '.($this->last_name ?? ''))));
+
+        if ($nombre !== '') {
+            return $nombre;
+        }
+
+        // Último recurso: la razón social comercial.
+        $comercial = trim((string) $this->trade_name);
+
+        return $comercial !== '' ? $comercial : null;
+    }
 }

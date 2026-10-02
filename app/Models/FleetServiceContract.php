@@ -38,6 +38,9 @@ class FleetServiceContract extends Model
     protected $fillable = [
         'uuid',
         'procedure_uuid',
+        'company_uuid',
+        'vehicle_uuid',
+        'third_party_uuid',
         'item',
         'type_of_action',
         'issue_date',

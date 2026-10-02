@@ -6,7 +6,6 @@ namespace App\Services\Procedure;
 
 use App\Models\FleetServiceContract;
 use App\Services\BaseService;
-use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -74,29 +73,38 @@ class FleetServiceContractService extends BaseService
     {
         return $this->transaction(fn () => FleetServiceContract::create([
             'procedure_uuid' => $data['procedure_uuid'],
-            'item' => $data['item'],
-            'type_of_action' => $data['type_of_action'],
+            'company_uuid' => $data['company_uuid'] ?? null,
+            'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
+            'third_party_uuid' => $data['third_party_uuid'] ?? null,
+            'item' => $data['item'] ?? 1,
+            'type_of_action' => $data['type_of_action'] ?? 'C',
             'issue_date' => $data['issue_date'],
             'start_date' => $data['start_date'],
             'end_date' => $data['end_date'],
             'duration' => $data['duration'],
-            'contract_type' => $data['contract_type'],
+            'contract_type' => $data['contract_type'] ?? '1',
             'contract_number' => $data['contract_number'],
             'signature_validation' => $data['signature_validation'] ?? 'S',
-            'valuation_amount' => $data['valuation_amount'],
+            'valuation_amount' => $data['valuation_amount'] ?? 0,
         ]));
     }
 
     /**
      * Método updateFleetServiceContract.
      */
-    public function updateFleetServiceContract(string $uuid, array $data): Model
+    public function updateFleetServiceContract(string $uuid, array $data): bool
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
+            if (! $record) {
+                return false;
+            }
 
             $record->update([
                 'procedure_uuid' => $data['procedure_uuid'] ?? $record->procedure_uuid,
+                'company_uuid' => $data['company_uuid'] ?? $record->company_uuid,
+                'vehicle_uuid' => $data['vehicle_uuid'] ?? $record->vehicle_uuid,
+                'third_party_uuid' => $data['third_party_uuid'] ?? $record->third_party_uuid,
                 'item' => $data['item'] ?? $record->item,
                 'type_of_action' => $data['type_of_action'] ?? $record->type_of_action,
                 'issue_date' => $data['issue_date'] ?? $record->issue_date,
@@ -109,20 +117,15 @@ class FleetServiceContractService extends BaseService
                 'valuation_amount' => $data['valuation_amount'] ?? $record->valuation_amount,
             ]);
 
-            return $record->fresh();
+            return true;
         });
     }
 
     /**
      * Método deleteFleetServiceContract.
      */
-    public function deleteFleetServiceContract(string $uuid): void
+    public function deleteFleetServiceContract(string $uuid): bool
     {
-        try {
-            $this->delete($uuid);
-        } catch (\Exception $e) {
-            Logger::error('FleetServiceContractService@deleteFleetServiceContract: '.$e->getMessage());
-            throw $e;
-        }
+        return parent::delete($uuid);
     }
 }

@@ -379,6 +379,18 @@ class PermissionSeeder extends Seeder
             'fleet_service_contracts.update' => ['module' => 'Contratos de Flota', 'description' => 'Actualizar un contrato de servicio'],
             'fleet_service_contracts.delete' => ['module' => 'Contratos de Flota', 'description' => 'Eliminar un contrato de servicio'],
 
+            // --- Radicación TO (expediente + firma por enlace + TXT RUNT) ---
+            'radicacion_to.index'  => ['module' => 'Radicación TO', 'description' => 'Ver expedientes y ruta de radicación TO'],
+            'radicacion_to.create' => ['module' => 'Radicación TO', 'description' => 'Crear expediente y generar enlaces de firma'],
+            'radicacion_to.update' => ['module' => 'Radicación TO', 'description' => 'Avanzar pasos y generar TXT RUNT'],
+            'radicacion_to.delete' => ['module' => 'Radicación TO', 'description' => 'Cancelar expedientes de radicación'],
+
+            // --- Contratos de prestación de servicios (segunda tabla) ---
+            'service_provision_contracts.index'  => ['module' => 'Contratos de Prestación', 'description' => 'Listar contratos de prestación de servicios'],
+            'service_provision_contracts.create' => ['module' => 'Contratos de Prestación', 'description' => 'Crear contrato de prestación de servicios'],
+            'service_provision_contracts.update' => ['module' => 'Contratos de Prestación', 'description' => 'Actualizar contrato de prestación de servicios'],
+            'service_provision_contracts.delete' => ['module' => 'Contratos de Prestación', 'description' => 'Eliminar contrato de prestación de servicios'],
+
             // --- Inventario de Capacidad ---
             'capacity_inventory.index'  => ['module' => 'Inventario de Capacidad', 'description' => 'Listar todo el inventario de capacidad'],
             'capacity_inventory.create' => ['module' => 'Inventario de Capacidad', 'description' => 'Registrar un nuevo ítem en el inventario'],
