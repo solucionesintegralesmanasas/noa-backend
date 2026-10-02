@@ -20,6 +20,9 @@ class NotificacionesConsultasTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
 
+    /** Consultas extra por vehículo que hoy cuesta el sync (deuda; objetivo 0). */
+    private const PENDIENTE_POR_VEHICULO = 24;
+
     private string $empresa;
 
     protected function setUp(): void
@@ -62,6 +65,38 @@ class NotificacionesConsultasTest extends TestCase
         // Medido: 102 consultas con 3 vehículos y 2 licencias (incluye lecturas
         // por alerta y escrituras; ver nota en AGENTS.md sobre el N+1 restante).
         $this->assertPresupuesto(110, fn () => app(NotificationsService::class)->syncNotifications($this->empresa), 'Sincronización de notificaciones');
+    }
+
+    /** Consultas de un sync sobre datos frescos de una empresa nueva con $vehiculos vehículos. */
+    private function consultasDeSyncConVehiculos(int $vehiculos): int
+    {
+        $this->empresa = $this->insertar('companies', ['business_name' => 'Empresa sync '.$vehiculos, 'is_active' => true]);
+        for ($i = 1; $i <= $vehiculos; $i++) {
+            $this->vehiculoConVencimientos('V'.$vehiculos.'-'.str_pad((string) $i, 3, '0', STR_PAD_LEFT));
+        }
+
+        return $this->contarConsultas(fn () => app(NotificationsService::class)->syncNotifications($this->empresa));
+    }
+
+    /**
+     * Pendiente conocida: `syncNotifications` hace lecturas por alerta. Se mide
+     * cuántas consultas añade cada vehículo y se exige que no empeore; el objetivo
+     * es 0 (conteo constante) cuando se use `precargarVehiculos`. Si baja, quitar
+     * este tope y exigir igualdad entre volúmenes.
+     */
+    public function test_el_sync_no_empeora_su_costo_por_vehiculo(): void
+    {
+        $this->consultasDeSyncConVehiculos(1); // calentamiento: consultas de arranque
+        $pocos = $this->consultasDeSyncConVehiculos(2);
+        $muchos = $this->consultasDeSyncConVehiculos(6);
+
+        $porVehiculo = ($muchos - $pocos) / 4;
+        // Medido 2026-10-02: 24 por vehículo (con SOAT y tarjeta por vencer); 67 con 2 vehículos, 163 con 6.
+        $this->assertLessThanOrEqual(
+            self::PENDIENTE_POR_VEHICULO,
+            $porVehiculo,
+            "El sync cuesta $porVehiculo consultas por vehículo ($pocos con 2; $muchos con 6); tope: ".self::PENDIENTE_POR_VEHICULO
+        );
     }
 
     public function test_la_campana_no_crece_con_las_notificaciones(): void

@@ -74,11 +74,14 @@ class ReporteVehiculosConsultasTest extends TestCase
     {
         $this->sembrar(50, 'EXP');
 
-        $picoAntes = memory_get_peak_usage(true);
+        // El pico de memoria es monótono en el proceso: se reinicia para que lo que
+        // hayan consumido las pruebas anteriores (o el sembrado) no oculte el de la exportación.
+        memory_reset_peak_usage();
+        $base = memory_get_usage();
         $consultas = $this->contarConsultas(fn () => app(VehicleReportService::class)->allForExport(['company_uuid' => $this->empresa], 100));
-        $picoDespues = memory_get_peak_usage(true);
+        $consumo = memory_get_peak_usage() - $base;
 
         $this->assertLessThanOrEqual(11, $consultas, "Exportación hizo $consultas consultas"); // medido: 9
-        $this->assertLessThanOrEqual(16777216, $picoDespues - $picoAntes, 'La exportación de 50 vehículos superó 16 MB'); // medido: 4 MB
+        $this->assertLessThanOrEqual(16777216, $consumo, 'La exportación de 50 vehículos superó 16 MB'); // ver medición en AGENTS.md
     }
 }
