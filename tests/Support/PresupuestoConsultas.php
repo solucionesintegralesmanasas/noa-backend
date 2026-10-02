@@ -18,12 +18,15 @@ trait PresupuestoConsultas
     /** Número de consultas que ejecuta el bloque. */
     protected function contarConsultas(callable $bloque): int
     {
+        $estabaActivo = DB::logging();
         DB::flushQueryLog();
         DB::enableQueryLog();
         try {
             $bloque();
         } finally {
-            DB::disableQueryLog();
+            if (! $estabaActivo) {
+                DB::disableQueryLog();
+            }
         }
 
         return count(DB::getQueryLog());
@@ -48,6 +51,9 @@ trait PresupuestoConsultas
      */
     protected function assertConteoConstante(callable $medir, callable $ampliar, string $etiqueta): array
     {
+        // Calentamiento sin medir: las consultas de arranque (roles, permisos,
+        // caché de metadatos) se hacen una sola vez y no son crecimiento.
+        $medir();
         $pocos = $this->contarConsultas($medir);
         $ampliar();
         $muchos = $this->contarConsultas($medir);

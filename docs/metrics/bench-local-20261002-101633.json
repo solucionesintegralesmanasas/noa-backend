@@ -1,0 +1,75 @@
+{
+    "fecha": "2026-10-02T10:16:24-05:00",
+    "entorno": "local",
+    "base": "noa_test",
+    "motor": "10.4.32-MariaDB",
+    "etiqueta": "linea-base SPEC-004 (2026-10-02)",
+    "volumen": {
+        "puntos": 600000,
+        "alertas": 60000
+    },
+    "corridas": 5,
+    "consultas": {
+        "Q1 monitor: último punto por conductor (empresa, 1 día)": {
+            "mediana_ms": 30.85,
+            "filas_estimadas": "11500",
+            "indice": "idx_dl_company_recorded",
+            "tipo": "range",
+            "extra": "Using where; Using index; Using temporary; Using filesort"
+        },
+        "Q2 último punto de un conductor": {
+            "mediana_ms": 1.44,
+            "filas_estimadas": "75",
+            "indice": "idx_dl_recorded_at",
+            "tipo": "index",
+            "extra": "Using where"
+        },
+        "Q3 mapa del día por vehículo y empresa": {
+            "mediana_ms": 13.23,
+            "filas_estimadas": "289",
+            "indice": "idx_dl_company_vehicle_recorded",
+            "tipo": "range",
+            "extra": "Using index condition"
+        },
+        "Q4 mapa del día por proyecto y empresa": {
+            "mediana_ms": 155.6,
+            "filas_estimadas": "1073",
+            "indice": "idx_dl_company_project_recorded",
+            "tipo": "range",
+            "extra": "Using index condition"
+        },
+        "Q5 historial del conductor (rango de 1 día)": {
+            "mediana_ms": 11.19,
+            "filas_estimadas": "136",
+            "indice": "idx_dl_driver_company_recorded",
+            "tipo": "ref",
+            "extra": "Using index condition; Using where"
+        },
+        "Q6 punto anterior (ingesta)": {
+            "mediana_ms": 0.62,
+            "filas_estimadas": "6864",
+            "indice": "idx_dl_driver_recorded",
+            "tipo": "range",
+            "extra": "Using where"
+        },
+        "Q7 alertas no leídas, página 1": {
+            "mediana_ms": 1.57,
+            "filas_estimadas": "6302",
+            "indice": "idx_dla_company_read_created",
+            "tipo": "ref",
+            "extra": "Using where"
+        },
+        "Q8 alertas de la empresa, página 1": {
+            "mediana_ms": 0.99,
+            "filas_estimadas": "29713",
+            "indice": "idx_dla_company_created",
+            "tipo": "ref",
+            "extra": "Using where"
+        }
+    },
+    "escritura": {
+        "inserciones": 10000,
+        "total_ms": 2958.4,
+        "ms_por_mil": 295.84
+    }
+}

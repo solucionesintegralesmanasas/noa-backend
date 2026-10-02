@@ -1,6 +1,6 @@
 # SPEC-004 — Pruebas de rendimiento reproducibles
 
-**Estado:** BORRADOR (listo para publicar como issue con la etiqueta `ready-for-agent`; `gh` no está instalado en esta máquina, por eso queda como archivo)
+**Estado:** IMPLEMENTADO (2026-10-02: capas 1-4; ver "Cierre" al final). Origen: BORRADOR (quedó como archivo porque `gh` no está instalado en esta máquina).
 **Fecha:** 2026-10-02
 **Relacionado:** `PLAN-ARQUITECTURA-RENDIMIENTO-NOA.md` (ARQ-001, ARQ-014, ARQ-015), `docs/metrics/lighthouse.md` del frontend.
 
@@ -101,9 +101,17 @@ El resultado para el usuario del sistema: lo que hoy es rápido sigue siéndolo,
 - Pruebas de rendimiento del cliente nativo (Capacitor).
 - Cambios en la política de retención de datos GPS.
 
+## Cierre (2026-10-02)
+
+- **Capa 1:** presupuestos de consultas en la suite (`PresupuestoConsultas`, `DashboardConsultasTest`, `ListadosFlotaConsultasTest`, `HistorialGpsConsultasTest`, `NotificacionesConsultasTest`, `ReporteVehiculosConsultasTest`).
+- **Capa 2:** `IndicesEnUsoTest` (plan de `EXPLAIN` de las consultas reales).
+- **Capa 3:** comando versionado `perf:bench seed|run|limpiar` con semilla fija, guard de base desechable y archivo comparable; `run` acepta `--entorno=produccion` y cada entorno compara solo con su historial.
+- **Capa 4:** `docs/metrics/README.md` (esquema único, reglas y protocolo de producción) y `docs/metrics/cifras-vigentes.md` (documento único de cifras).
+- Queda fuera del spec y como deuda con red de seguridad: `syncNotifications` (24 consultas por vehículo) y el respaldo del monitor (solo `LIMIT 500`); cada mejora debe bajar el tope de su prueba. La medición con motor y datos de producción sigue pendiente (protocolo en `docs/metrics/README.md`).
+
 ## Further Notes
 
 - **Cifras de referencia vigentes (laboratorio, 2026-10-01):** con 600 000 puntos GPS en una base desechable, el monitor GPS pasó de 948 ms a 36 ms, el mapa del día por vehículo de 973 ms a 3,5 ms y por proyecto de 936 ms a 117 ms; la ingesta de un punto, de 16 a 7 consultas (independiente del número de geocercas); el monitor de flota, a un número constante de consultas. Detalle en el plan (§4.1 a §4.5).
-- **Evidencia hoy frágil:** el banco que produjo esas cifras estaba en una carpeta temporal de la sesión; este spec incluye rescatarlo al repositorio.
+- **Evidencia rescatada (2026-10-02):** el banco que produjo esas cifras vivía en una carpeta temporal; ahora es el comando versionado `perf:bench`.
 - **Lección registrada:** una base de desarrollo con migraciones pendientes da cifras engañosas; el protocolo debe verificar el estado de migraciones antes de medir.
 - **Pendiente de datos reales:** repetir las mediciones con volúmenes de producción y confirmar la política de retención GPS (ver §10 y §11 del plan).
