@@ -1,7 +1,6 @@
 <?php
 
 use App\Exceptions\Handler;
-use App\Http\Middleware\ChatRateLimiter;
 use App\Http\Middleware\ForceJsonResponse;
 use App\Http\Middleware\SetCompanyContext;
 use App\Http\Middleware\WebCronMiddleware;
@@ -37,7 +36,6 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->alias([
-            'chat.limiter' => ChatRateLimiter::class,
             'permission' => PermissionMiddleware::class,
             'role' => RoleMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,

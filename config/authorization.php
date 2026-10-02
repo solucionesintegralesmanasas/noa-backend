@@ -43,7 +43,6 @@ return [
      */
     'exempt_prefixes' => [
         'api.v1.2fa',
-        'api.v1.assistant',       // el chatbot no crea datos: cada consulta que hace ya pasa por su propia ruta
         'api.v1.auth',            // /auth/* ya exige rol en sus escrituras
         'api.v1.dashboard',
         'api.v1.notifications',

@@ -461,18 +461,6 @@ class PermissionSeeder extends Seeder
             'service_delivery_control_sheets.cold_chain_pdf' => ['module' => 'Hojas de Entrega', 'description' => 'Generar PDF de cadena de frío de entrega'],
             'service_delivery_control_sheets.close_exception' => ['module' => 'Hojas de Entrega', 'description' => 'Cerrar una hoja de control con excepción aprobada (evidencia incompleta)'],
 
-            // --- Configuración del Asistente ---
-            'assistant_configuration.index'  => ['module' => 'Configuración del Asistente', 'description' => 'Listar todas las configuraciones del asistente'],
-            'assistant_configuration.create' => ['module' => 'Configuración del Asistente', 'description' => 'Crear una nueva configuración del asistente'],
-            'assistant_configuration.update' => ['module' => 'Configuración del Asistente', 'description' => 'Actualizar una configuración del asistente'],
-            'assistant_configuration.delete' => ['module' => 'Configuración del Asistente', 'description' => 'Eliminar una configuración del asistente'],
-
-            // --- Asistente ---
-            'assistant.index'  => ['module' => 'Asistente', 'description' => 'Listar todos los asistentes'],
-            'assistant.create' => ['module' => 'Asistente', 'description' => 'Crear un nuevo asistente'],
-            'assistant.update' => ['module' => 'Asistente', 'description' => 'Actualizar un asistente'],
-            'assistant.delete' => ['module' => 'Asistente', 'description' => 'Eliminar un asistente'],
-
             // --- Usuarios ---
             'users.index'    => ['module' => 'Usuarios', 'description' => 'Listar todos los usuarios'],
             'users.create'   => ['module' => 'Usuarios', 'description' => 'Crear un nuevo usuario'],
