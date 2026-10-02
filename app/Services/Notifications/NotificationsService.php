@@ -1787,22 +1787,31 @@ class NotificationsService extends BaseService
             ];
 
             $vehiclesQuery->chunk(100, function ($vehicles) use (&$alerts, $maintenanceCatalog) {
+                // Kilometrajes por lote (una sola consulta por tabla): N vehículos = 2 consultas, no 2N.
+                $uuids = $vehicles->pluck('uuid')->all();
+                $kmInspecciones = DB::table('vehicle_inspections')
+                    ->whereIn('vehicle_uuid', $uuids)
+                    ->groupBy('vehicle_uuid')
+                    ->selectRaw('vehicle_uuid, max(mileage) as km')
+                    ->pluck('km', 'vehicle_uuid');
+                $kmMantenimiento = DB::table('maintenance')
+                    ->whereIn('vehicle_uuid', $uuids)
+                    ->where('maintenance_type', 'PREVENTIVA')
+                    ->where('status', '!=', 'Anulado')
+                    ->groupBy('vehicle_uuid')
+                    ->selectRaw('vehicle_uuid, max(mileage) as km')
+                    ->pluck('km', 'vehicle_uuid');
+
                 foreach ($vehicles as $vehicle) {
                     // Kilometraje actual del vehículo (mayor kilometraje reportado en sus inspecciones)
-                    $currentMileage = DB::table('vehicle_inspections')
-                        ->where('vehicle_uuid', $vehicle->uuid)
-                        ->max('mileage');
+                    $currentMileage = $kmInspecciones[$vehicle->uuid] ?? null;
 
                     if (is_null($currentMileage) || $currentMileage <= 0) {
                         continue;
                     }
 
                     // Kilometraje del último mantenimiento preventivo realizado
-                    $lastMaintenanceMileage = DB::table('maintenance')
-                        ->where('vehicle_uuid', $vehicle->uuid)
-                        ->where('maintenance_type', 'PREVENTIVA')
-                        ->where('status', '!=', 'Anulado')
-                        ->max('mileage') ?? 0;
+                    $lastMaintenanceMileage = $kmMantenimiento[$vehicle->uuid] ?? 0;
 
                     foreach ($maintenanceCatalog as $interval => $details) {
                         // 1. Encontrar todos los hitos pasados en el rango (lastMaintenanceMileage, currentMileage]
