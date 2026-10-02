@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Procedure;
 
 use App\Http\Controllers\Controller;
-use App\Models\ContractSignature;
+use App\Http\Requests\Procedure\Radicacion\GenerarTxtRequest;
+use App\Http\Requests\Procedure\Radicacion\StoreEnlaceFirmaRequest;
+use App\Http\Requests\Procedure\Radicacion\StoreExpedienteRadicacionRequest;
 use App\Services\Procedure\ContractSignatureService;
 use App\Services\Procedure\RadicacionDocumentoService;
 use App\Services\Procedure\RadicacionService;
@@ -45,33 +47,16 @@ class RadicacionController extends Controller
         }
     }
 
-    public function enlaceFirma(Request $request): JsonResponse
+    public function enlaceFirma(StoreEnlaceFirmaRequest $request): JsonResponse
     {
         try {
-            $data = $request->validate([
-                'company_uuid' => 'required|uuid', 'contract_origin' => 'required|in:ADMIN_FLOTA,PRESTACION',
-                'contract_uuid' => 'required|uuid', 'signer_role' => 'required|in:PROPIETARIO,REP_LEGAL,CLIENTE,TESTIGO',
-                'signer_name' => 'required|string', 'signer_document' => 'required|string',
-                'signer_email' => 'nullable|email', 'signer_phone' => 'nullable|string',
-                'enviar_correo' => 'nullable|boolean',
-            ]);
+            $data = $request->validated();
             $res = $this->firmas->crearEnlace($data);
             $firma = $res['firma'];
 
             $correo = ['enviado' => false, 'mensaje' => null];
             if ($request->boolean('enviar_correo')) {
-                $contrato = $firma->contract_origin === 'ADMIN_FLOTA'
-                    ? \App\Models\FleetServiceContract::where('uuid', $firma->contract_uuid)->first()
-                    : \App\Models\ServiceProvisionContract::where('uuid', $firma->contract_uuid)->first();
-                $empresa = $contrato?->company ?? \App\Models\Company::where('uuid', $firma->company_uuid)->first();
-
-                $correo = $this->firmas->enviarPorCorreo($firma, $res['url'], [
-                    'nombre_firmante' => $firma->signer_name,
-                    'empresa' => $empresa?->business_name ?? 'Transportadora',
-                    'documento' => $res['documento'],
-                    'expira' => \Carbon\Carbon::parse($res['expira_en'])->translatedFormat('d/m/Y \a\l\a\s H:i'),
-                    'rol' => $firma->signer_role,
-                ]);
+                $correo = $this->firmas->notificarEnlacePorCorreo($firma, $res['url'], $res['documento'], $res['expira_en']);
             }
 
             return $this->successResponse([
@@ -87,20 +72,10 @@ class RadicacionController extends Controller
         }
     }
 
-    public function crearExpediente(Request $request): JsonResponse
+    public function crearExpediente(StoreExpedienteRadicacionRequest $request): JsonResponse
     {
         try {
-            $data = $request->validate([
-                'link_type' => 'required|in:NUEVO_VEHICULO,CAMBIO_DE_EMPRESA,RENOVACION,DESVINCULACION_MUTUO,DESVINCULACION_UNILATERAL',
-                'company_uuid' => 'nullable|uuid',
-                'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
-                'vehicle_uuid' => 'required|uuid|exists:vehicles,uuid',
-                'procedure_code' => 'required|string|max:50',
-                'date_of_creation' => 'required|date',
-                'city_uuid' => 'required|uuid|exists:cities,uuid',
-                'subject' => 'nullable|string|max:255',
-                'territorial_director_uuid' => 'required|uuid|exists:territorial_directors,uuid',
-            ]);
+            $data = $request->validated();
             $res = $this->radicacion->crearExpediente($data);
 
             return $this->successResponse($res, 'Expediente de radicación creado.', 201);
@@ -143,10 +118,10 @@ class RadicacionController extends Controller
         }
     }
 
-    public function generarTxt(Request $request, string $uuid): JsonResponse
+    public function generarTxt(GenerarTxtRequest $request, string $uuid): JsonResponse
     {
         try {
-            $origin = $request->validate(['origin' => 'required|in:ADMIN_FLOTA,PRESTACION'])['origin'];
+            $origin = $request->validated()['origin'];
             $hijo = $this->radicacion->findByUuid($uuid);
             $val = $this->radicacion->validarRequisitos($hijo);
             if (! $val['ok']) {
@@ -176,34 +151,38 @@ class RadicacionController extends Controller
      */
     public function showPublic(string $token): JsonResponse
     {
-        $firma = ContractSignature::where('token_hash', hash('sha256', $token))->firstOrFail();
-        $contexto = $this->firmas->contextoDe($firma);
+        try {
+            $firma = $this->firmas->findByToken($token);
+            $contexto = $this->firmas->contextoDe($firma);
 
-        $expediente = $contexto['procedimiento_uuid']
-            ? \App\Models\Procedure::where('uuid', $contexto['procedimiento_uuid'])->first()
-            : null;
+            $expediente = $contexto['procedimiento_uuid']
+                ? $this->radicacion->findByUuid($contexto['procedimiento_uuid'])
+                : null;
 
-        // El mismo enlace sirve para ver el PDF antes de firmar y para descargarlo ya firmado.
-        // La firma debe ser relativa porque la ruta usa el middleware `signed:relative`.
-        $vigencia = $firma->expires_at->isPast() ? now() : $firma->expires_at;
+            // El mismo enlace sirve para ver el PDF antes de firmar y para descargarlo ya firmado.
+            // La firma debe ser relativa porque la ruta usa el middleware `signed:relative`.
+            $vigencia = $firma->expires_at->isPast() ? now() : $firma->expires_at;
 
-        return $this->successResponse([
-            'firmante' => $firma->signer_name,
-            'documento' => $firma->signer_document,
-            'contrato' => $contexto['documento'],
-            'numero_contrato' => $contexto['numero'],
-            'estado' => $firma->status,
-            'expirado' => $firma->expires_at->isPast(),
-            'expira_en' => $firma->expires_at->toIso8601String(),
-            'vehiculo' => $expediente?->vehicle?->vehicle_license_plate,
-            'empresa' => $expediente?->company?->business_name,
-            'url_documento' => $contexto['documento']
-                ? $this->urlPublicaDocumento('api.v1.public.contracts.documento', $token, $vigencia)
-                : null,
-            'url_documento_descarga' => $contexto['documento']
-                ? $this->urlPublicaDocumento('api.v1.public.contracts.documento-descarga', $token, $vigencia)
-                : null,
-        ], 'Detalle de firma.');
+            return $this->successResponse([
+                'firmante' => $firma->signer_name,
+                'documento' => $firma->signer_document,
+                'contrato' => $contexto['documento'],
+                'numero_contrato' => $contexto['numero'],
+                'estado' => $firma->status,
+                'expirado' => $firma->expires_at->isPast(),
+                'expira_en' => $firma->expires_at->toIso8601String(),
+                'vehiculo' => $expediente?->vehicle?->vehicle_license_plate,
+                'empresa' => $expediente?->company?->business_name,
+                'url_documento' => $contexto['documento']
+                    ? $this->urlPublicaDocumento('api.v1.public.contracts.documento', $token, $vigencia)
+                    : null,
+                'url_documento_descarga' => $contexto['documento']
+                    ? $this->urlPublicaDocumento('api.v1.public.contracts.documento-descarga', $token, $vigencia)
+                    : null,
+            ], 'Detalle de firma.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
     }
 
     /**
@@ -232,7 +211,7 @@ private function urlPublicaDocumento(string $ruta, string $token, \Illuminate\Su
     public function documentoPublico(Request $request, string $token): Response
     {
         try {
-            $firma = ContractSignature::where('token_hash', hash('sha256', $token))->firstOrFail();
+            $firma = $this->firmas->findByToken($token);
             $contexto = $this->firmas->contextoDe($firma);
 
             if (! $contexto['procedimiento_uuid'] || ! $contexto['documento']) {
