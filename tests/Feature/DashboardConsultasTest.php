@@ -8,6 +8,7 @@ use App\Services\Dashboard\DashboardService;
 use App\Services\Notifications\NotificationsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use App\Models\User;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -58,10 +59,11 @@ class DashboardConsultasTest extends TestCase
         return $this->insertar('vehicles', ['company_uuid' => $empresa, 'vehicle_license_plate' => $placa, 'is_active' => true]);
     }
 
-    private function documento(string $vehiculo, string $tipo, string $vence): void
+    private function documento(string $empresa, string $vehiculo, string $tipo, string $vence): void
     {
         $this->insertar('vehicle_documents', [
-            'vehicle_uuid' => $vehiculo, 'document_type' => $tipo, 'expiry_date' => $vence, 'status' => 'VIGENTE',
+            'company_uuid' => $empresa, 'vehicle_uuid' => $vehiculo,
+            'document_type' => $tipo, 'expiry_date' => $vence, 'status' => 'VIGENTE',
         ]);
     }
 
@@ -71,9 +73,10 @@ class DashboardConsultasTest extends TestCase
         $this->vehiculo($empresa, 'DASH001');
         $this->vehiculo($empresa, 'DASH002');
 
-        $medir = function (): void {
+        $medir = function (): array {
             Cache::flush();
-            app(DashboardService::class)->getSummary(30);
+
+            return app(DashboardService::class)->getSummary(30);
         };
         $ampliar = function () use ($empresa): void {
             for ($i = 3; $i <= 12; $i++) {
@@ -82,6 +85,10 @@ class DashboardConsultasTest extends TestCase
         };
 
         $this->assertConteoConstante($medir, $ampliar, 'Resumen del dashboard');
+        // Cordura: el resumen se midió con vehículos de la empresa, no sobre vacío.
+        $resumen = $medir();
+        $enServicio = collect($resumen['stats'])->firstWhere('label', 'Vehículos en Servicio');
+        $this->assertMedicionConDatos((int) ($enServicio['current'] ?? 0), 'Resumen del dashboard');
         // Medido: 8 conteos del resumen (km, conductores, FUEC y vehículos, actual y anterior).
         $this->assertPresupuesto(14, $medir, 'Resumen del dashboard');
     }
@@ -91,7 +98,7 @@ class DashboardConsultasTest extends TestCase
         $empresa = $this->empresa();
         foreach (['ALR001', 'ALR002'] as $placa) {
             $v = $this->vehiculo($empresa, $placa);
-            $this->documento($v, 'SOAT', '2026-12-31');
+            $this->documento($empresa, $v, 'SOAT', Carbon::today()->addDays(3)->toDateString());
         }
 
         $medir = function (): void {
@@ -105,6 +112,9 @@ class DashboardConsultasTest extends TestCase
         };
 
         $this->assertConteoConstante($medir, $ampliar, 'Alertas del dashboard');
+        // Cordura: hay alertas reales (documentos por vencer y faltantes), no una lista vacía.
+        Cache::flush();
+        $this->assertMedicionConDatos(count(app(DashboardService::class)->getAlerts()), 'Alertas del dashboard');
         // Medido: 12 consultas (una por lector de notificaciones, con lotes de 100).
         $this->assertPresupuesto(14, $medir, 'Alertas del dashboard');
     }

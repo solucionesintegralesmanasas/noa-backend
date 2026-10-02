@@ -44,6 +44,16 @@ trait PresupuestoConsultas
     }
 
     /**
+     * Cordura antes de fiarse de un tope: si el flujo midió sobre un conjunto
+     * vacío (p. ej. al sembrado le falta `company_uuid` y el listado no devuelve
+     * filas), el conteo es falso y el tope no protege nada.
+     */
+    protected function assertMedicionConDatos(int $filas, string $etiqueta): void
+    {
+        $this->assertGreaterThan(0, $filas, "$etiqueta midió sobre un conjunto vacío (revisar el sembrado)");
+    }
+
+    /**
      * El bloque hace las mismas consultas antes y después de ampliar los datos
      * (detecta N+1 aunque el total absoluto parezca pequeño).
      *

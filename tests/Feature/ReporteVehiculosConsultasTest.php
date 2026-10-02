@@ -66,6 +66,7 @@ class ReporteVehiculosConsultasTest extends TestCase
         $medir = fn () => app(VehicleReportService::class)->paginateReport(['company_uuid' => $this->empresa], 15, 1);
         $ampliar = fn () => $this->sembrar(13, 'REP', 3);
 
+        $this->assertMedicionConDatos($medir()->total(), 'Reporte de vehículos');
         $this->assertConteoConstante($medir, $ampliar, 'Reporte de vehículos');
         $this->assertPresupuesto(12, $medir, 'Reporte de vehículos'); // medido: 10 (conteo + página + 8 relaciones)
     }
@@ -78,9 +79,13 @@ class ReporteVehiculosConsultasTest extends TestCase
         // hayan consumido las pruebas anteriores (o el sembrado) no oculte el de la exportación.
         memory_reset_peak_usage();
         $base = memory_get_usage();
-        $consultas = $this->contarConsultas(fn () => app(VehicleReportService::class)->allForExport(['company_uuid' => $this->empresa], 100));
+        $filas = null;
+        $consultas = $this->contarConsultas(function () use (&$filas) {
+            $filas = app(VehicleReportService::class)->allForExport(['company_uuid' => $this->empresa], 100);
+        });
         $consumo = memory_get_peak_usage() - $base;
 
+        $this->assertMedicionConDatos($filas->count(), 'Exportación de vehículos');
         $this->assertLessThanOrEqual(11, $consultas, "Exportación hizo $consultas consultas"); // medido: 9
         $this->assertLessThanOrEqual(16777216, $consumo, 'La exportación de 50 vehículos superó 16 MB'); // ver medición en AGENTS.md
     }

@@ -46,9 +46,9 @@ class ListadosFlotaConsultasTest extends TestCase
         ]);
     }
 
-    private function sembrar(int $n, string $prefijo): void
+    private function sembrar(int $n, string $prefijo, int $desde = 1): void
     {
-        for ($i = 1; $i <= $n; $i++) {
+        for ($i = $desde; $i < $desde + $n; $i++) {
             $placa = $prefijo.str_pad((string) $i, 3, '0', STR_PAD_LEFT);
             $v = $this->vehiculo($placa);
             $this->insertar('vehicle_documents', [
@@ -69,8 +69,10 @@ class ListadosFlotaConsultasTest extends TestCase
     {
         $this->sembrar(2, 'VEH');
         $medir = fn () => app(VehicleService::class)->getAllVehiclesWithPagination(15, 1, '', $this->empresa);
-        $ampliar = fn () => $this->sembrar(13, 'VEH');
+        $ampliar = fn () => $this->sembrar(13, 'VEH', 3);
 
+        // Cordura: el listado devuelve filas (sin `company_uuid` daría un tope falso).
+        $this->assertMedicionConDatos($medir()->total(), 'Listado de vehículos');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de vehículos');
         $this->assertPresupuesto(8, $medir, 'Listado de vehículos'); // medido: 6 (conteo + página + 4 relaciones)
     }
@@ -79,8 +81,9 @@ class ListadosFlotaConsultasTest extends TestCase
     {
         $this->sembrar(2, 'DOC');
         $medir = fn () => app(VehicleDocumentService::class)->getAllVehicleDocumentsWithPagination(15, 1, '', $this->empresa);
-        $ampliar = fn () => $this->sembrar(13, 'DOC');
+        $ampliar = fn () => $this->sembrar(13, 'DOC', 3);
 
+        $this->assertMedicionConDatos($medir()->total(), 'Listado de documentos');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de documentos');
         $this->assertPresupuesto(6, $medir, 'Listado de documentos'); // medido: 4 (conteo + página + vehículo + tercero)
     }
@@ -89,8 +92,9 @@ class ListadosFlotaConsultasTest extends TestCase
     {
         $this->sembrar(2, 'TAR');
         $medir = fn () => app(OperationCardService::class)->getAllOperationCardsWithPagination(15, 1, '', $this->empresa);
-        $ampliar = fn () => $this->sembrar(13, 'TAR');
+        $ampliar = fn () => $this->sembrar(13, 'TAR', 3);
 
+        $this->assertMedicionConDatos($medir()->total(), 'Listado de tarjetas');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de tarjetas');
         $this->assertPresupuesto(5, $medir, 'Listado de tarjetas'); // medido: 3 (conteo + página + vehículo)
     }
@@ -99,8 +103,9 @@ class ListadosFlotaConsultasTest extends TestCase
     {
         $this->sembrar(2, 'TER');
         $medir = fn () => app(ThirdPartyService::class)->getAllThirdPartiesWithPagination(15, 1, '', $this->empresa);
-        $ampliar = fn () => $this->sembrar(13, 'TER');
+        $ampliar = fn () => $this->sembrar(13, 'TER', 3);
 
+        $this->assertMedicionConDatos($medir()->total(), 'Listado de terceros');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de terceros');
         $this->assertPresupuesto(6, $medir, 'Listado de terceros'); // medido: 4 (conteo + página + licencias)
     }
