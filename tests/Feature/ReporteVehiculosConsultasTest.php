@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Exports\VehicleReportExport;
+use App\Services\Pdf\PdfService;
 use App\Services\Reports\VehicleReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Maatwebsite\Excel\Facades\Excel;
 use Tests\Support\InsertaFilas;
 use Tests\Support\PresupuestoConsultas;
 use Tests\TestCase;
@@ -89,5 +92,57 @@ class ReporteVehiculosConsultasTest extends TestCase
         $this->assertMedicionConDatos($filas->count(), 'Exportación de vehículos');
         $this->assertLessThanOrEqual(9, $consultas, "Exportación hizo $consultas consultas"); // medido: 9
         $this->assertLessThanOrEqual(16777216, $consumo, 'La exportación de 50 vehículos superó 16 MB'); // ver medición en AGENTS.md
+    }
+
+    /**
+     * US9: presupuesto del RENDER real del PDF del reporte (hoy solo se mide
+     * `allForExport`, no la generación del archivo).
+     */
+    public function test_el_pdf_del_reporte_tiene_tope_de_consultas_y_memoria(): void
+    {
+        $this->sembrar(50, 'ES');
+        $filtros = ['company_uuid' => $this->empresa, 'filter_type' => 'document'];
+        $filas = app(VehicleReportService::class)->allForExport($filtros, 100);
+
+        memory_reset_peak_usage();
+        $base = memory_get_usage();
+        $pdf = null;
+        $consultas = $this->contarConsultas(function () use ($filas, $filtros, &$pdf) {
+            $result = app(PdfService::class)->generateVehicleReportPdf($filas, $filtros);
+            $pdf = $result['pdf']->output(); // fuerza el render real de DomPDF
+        });
+        $consumo = memory_get_peak_usage() - $base;
+
+        $this->assertMedicionConDatos($filas->count(), 'PDF de vehículos');
+        $this->assertStringStartsWith('%PDF', (string) $pdf, 'El render del PDF no produjo un archivo válido');
+        $this->assertLessThanOrEqual(0, $consultas, "El render del PDF hizo $consultas consultas"); // medido: 0
+        $this->assertLessThanOrEqual(25165824, $consumo, 'El render del PDF superó el tope de memoria'); // medido: 21287416 (~20,3 MB); tope 24 MB
+    }
+
+    /**
+     * US9: presupuesto del RENDER real del Excel del reporte (hoy solo se mide
+     * `allForExport`, no la generación del archivo).
+     */
+    public function test_el_excel_del_reporte_tiene_tope_de_consultas_y_memoria(): void
+    {
+        $this->sembrar(50, 'XS');
+        $filtros = ['company_uuid' => $this->empresa, 'filter_type' => 'document'];
+
+        memory_reset_peak_usage();
+        $base = memory_get_usage();
+        $bytes = null;
+        $consultas = $this->contarConsultas(function () use ($filtros, &$bytes) {
+            // `Excel::raw` genera el .xlsx en memoria y ejercita collection():
+            // re-corre `allForExport`, luego PhpSpreadsheet construye el archivo.
+            $bytes = Excel::raw(
+                new VehicleReportExport($filtros, app(VehicleReportService::class)),
+                \Maatwebsite\Excel\Excel::XLSX
+            );
+        });
+        $consumo = memory_get_peak_usage() - $base;
+
+        $this->assertNotEmpty($bytes, 'El render del Excel no produjo salida');
+        $this->assertLessThanOrEqual(9, $consultas, "La exportación Excel hizo $consultas consultas"); // medido: 9 (allForExport)
+        $this->assertLessThanOrEqual(29360128, $consumo, 'La exportación Excel superó el tope de memoria'); // medido: 25018232 (~23,9 MB); tope 28 MB
     }
 }
