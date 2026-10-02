@@ -92,12 +92,12 @@ class FleetServiceContractService extends BaseService
     /**
      * Método updateFleetServiceContract.
      */
-    public function updateFleetServiceContract(string $uuid, array $data): bool
+    public function updateFleetServiceContract(string $uuid, array $data): ?Model
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
             if (! $record) {
-                return false;
+                return null;
             }
 
             $record->update([
@@ -117,7 +117,7 @@ class FleetServiceContractService extends BaseService
                 'valuation_amount' => $data['valuation_amount'] ?? $record->valuation_amount,
             ]);
 
-            return true;
+            return $record->fresh();
         });
     }
 
