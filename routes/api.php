@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
+use App\Http\Controllers\Api\V1\AssistantController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -919,6 +920,16 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}/documento/{documento}', [RadicacionController::class, 'documento'])->name('api.v1.procedure.radicacion.documento');
             });
         });
+
+        // ─── MÓDULO ASISTENTE (chatbot por reglas, SOLO LECTURA) ───
+        // El bot no habla con ninguna IA externa: `AssistantService` puntúa
+        // palabras clave contra `config/assistant.php` y consulta esta misma API
+        // por HTTP interna reenviando el token Bearer del usuario (para que
+        // `auth:sanctum` y `authz` sigan aplicando). La barrera de seguridad es
+        // `App\Services\RouteCatalog` (allowlist de GET con auth:sanctum).
+        Route::post('/assistant', [AssistantController::class, 'send'])
+            ->middleware('throttle:20,1')
+            ->name('api.v1.assistant.send');
 
         // ─── MÓDULO CHAT ASISTENTE (OCULTO TEMPORALMENTE) ───
         // Route::prefix('chat')->group(function () {
