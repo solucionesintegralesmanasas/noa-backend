@@ -127,7 +127,8 @@ Cuando te pida analizar, verificar la conexión de las APIs o diseñar component
 ## Convención de Commits
 
 - Mensajes directos en español, en una sola línea, formato `tipo(scope): descripción corta`.
-- Sin cuerpo ni bullets, salvo que el cambio lo exija para entenderse.
+- Sin cuerpo ni bullets, salvo que el cambio lo exija para entenderse. Cuando lo exija: un cuerpo breve (una o dos frases, o tres puntos como máximo), nunca el listado de archivos o de cambios punto por punto.
+- **Cuándo commitear:** solo después de revisar el código, mediante una skill de revisión (`/code-review`) o una revisión propia contra los estándares de este archivo, o cuando el usuario lo solicite explícitamente. No commitear código sin revisar; si la revisión encuentra hallazgos, se corrigen antes de commitear y los topes de las pruebas de rendimiento se ajustan a lo medido.
 - Tipos: feat, fix, refactor, perf, style, docs, test, build, ci, chore.
 
 ## Agent skills
