@@ -38,6 +38,10 @@ return new class extends Migration
         Schema::table('procedures', function (Blueprint $table) {
             $table->dropColumn(['simit_clear', 'soat_valid', 'rtm_valid', 'old_card_number', 'radicado_number', 'payment_status', 'resolution_number']);
         });
+        // Antes de estrechar el ENUM hay que devolver los valores nuevos a uno
+        // válido del enum antiguo, o el ALTER falla con STRICT_TRANS_TABLES.
+        DB::statement("UPDATE procedures SET procedure_type = 'TARJETA_DE_OPERACION' WHERE procedure_type = 'RENOVACION_TARJETA'");
+        DB::statement("UPDATE procedures SET procedure_type = 'DESVINCULACION' WHERE procedure_type IN ('DESVINCULACION_MUTUO','DESVINCULACION_UNILATERAL')");
         DB::statement("ALTER TABLE procedures MODIFY COLUMN procedure_type ENUM('CARTA_DE_ACEPTACION','CAPACIDAD_TRANSPORTADORA','INCLUSION_DE_POLIZAS','TARJETA_DE_OPERACION','DESVINCULACION')");
     }
 };
