@@ -20,6 +20,7 @@ use Tests\TestCase;
  * alertas de geocerca) y que el número de consultas NO dependa de cuántas geocercas tenga la empresa
  * (antes: 5 + 5 × N según el plan; el estado previo se consultaba hasta 2 veces por geocerca).
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class IngestaGpsTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;

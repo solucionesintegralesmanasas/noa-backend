@@ -19,6 +19,7 @@ use Tests\TestCase;
  * planilla del día. Estas pruebas fijan el comportamiento observable y que el número de consultas
  * NO crezca con la cantidad de conductores (antes: 11 + P + 4F).
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class MonitorFlotaTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;

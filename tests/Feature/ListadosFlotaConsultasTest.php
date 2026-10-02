@@ -17,6 +17,7 @@ use Tests\TestCase;
  * SPEC-004: los listados paginados de flota declaran su presupuesto.
  * Agregar una relación no debe multiplicar las consultas por fila.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class ListadosFlotaConsultasTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
@@ -74,7 +75,7 @@ class ListadosFlotaConsultasTest extends TestCase
         // Cordura: el listado devuelve filas (sin `company_uuid` daría un tope falso).
         $this->assertMedicionConDatos($medir()->total(), 'Listado de vehículos');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de vehículos');
-        $this->assertPresupuesto(8, $medir, 'Listado de vehículos'); // medido: 6 (conteo + página + 4 relaciones)
+        $this->assertPresupuesto(6, $medir, 'Listado de vehículos'); // medido: 6 (conteo + página + 4 relaciones)
     }
 
     public function test_el_listado_de_documentos_no_crece_con_las_filas(): void
@@ -85,7 +86,7 @@ class ListadosFlotaConsultasTest extends TestCase
 
         $this->assertMedicionConDatos($medir()->total(), 'Listado de documentos');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de documentos');
-        $this->assertPresupuesto(6, $medir, 'Listado de documentos'); // medido: 4 (conteo + página + vehículo + tercero)
+        $this->assertPresupuesto(4, $medir, 'Listado de documentos'); // medido: 4 (conteo + página + vehículo + tercero)
     }
 
     public function test_el_listado_de_tarjetas_no_crece_con_las_filas(): void
@@ -96,7 +97,7 @@ class ListadosFlotaConsultasTest extends TestCase
 
         $this->assertMedicionConDatos($medir()->total(), 'Listado de tarjetas');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de tarjetas');
-        $this->assertPresupuesto(5, $medir, 'Listado de tarjetas'); // medido: 3 (conteo + página + vehículo)
+        $this->assertPresupuesto(3, $medir, 'Listado de tarjetas'); // medido: 3 (conteo + página + vehículo)
     }
 
     public function test_el_listado_de_terceros_no_crece_con_las_filas(): void
@@ -107,6 +108,6 @@ class ListadosFlotaConsultasTest extends TestCase
 
         $this->assertMedicionConDatos($medir()->total(), 'Listado de terceros');
         $this->assertConteoConstante($medir, $ampliar, 'Listado de terceros');
-        $this->assertPresupuesto(6, $medir, 'Listado de terceros'); // medido: 4 (conteo + página + licencias)
+        $this->assertPresupuesto(4, $medir, 'Listado de terceros'); // medido: 4 (conteo + página + licencias)
     }
 }

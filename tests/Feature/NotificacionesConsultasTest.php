@@ -16,6 +16,7 @@ use Tests\TestCase;
  * declaran su presupuesto. El sync escribe una vez (no admite re-medición
  * sobre los mismos datos); la campana es una agregación constante.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class NotificacionesConsultasTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
@@ -115,6 +116,20 @@ class NotificacionesConsultasTest extends TestCase
 
         $this->assertConteoConstante($medir, $ampliar, 'Conteo de la campana');
         // Medido: 1 consulta (agregado por prioridad).
-        $this->assertPresupuesto(2, $medir, 'Conteo de la campana');
+        $this->assertPresupuesto(1, $medir, 'Conteo de la campana');
+    }
+
+    public function test_el_mantenimiento_preventivo_detecta_los_hitos_vencidos(): void
+    {
+        $vehiculo = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresa, 'vehicle_license_plate' => 'MTO001', 'is_active' => true,
+        ]);
+        $this->insertar('vehicle_inspections', ['vehicle_uuid' => $vehiculo, 'mileage' => 25000]);
+
+        $alertas = app(NotificationsService::class)->notificationsForPreventativeMaintenance($this->empresa);
+        $hitos = array_column(array_filter($alertas, fn ($a) => $a['status'] === 'VENCIDO'), 'milestone');
+        sort($hitos);
+
+        $this->assertSame([10000, 20000], $hitos);
     }
 }

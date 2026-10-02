@@ -14,6 +14,7 @@ use Tests\TestCase;
  * SPEC-004: el reporte de vehículos y su exportación declaran su presupuesto
  * de consultas y de memoria. Crecer la flota no debe romperlos.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class ReporteVehiculosConsultasTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
@@ -68,7 +69,7 @@ class ReporteVehiculosConsultasTest extends TestCase
 
         $this->assertMedicionConDatos($medir()->total(), 'Reporte de vehículos');
         $this->assertConteoConstante($medir, $ampliar, 'Reporte de vehículos');
-        $this->assertPresupuesto(12, $medir, 'Reporte de vehículos'); // medido: 10 (conteo + página + 8 relaciones)
+        $this->assertPresupuesto(10, $medir, 'Reporte de vehículos'); // medido: 10 (conteo + página + 8 relaciones)
     }
 
     public function test_la_exportacion_tiene_tope_de_consultas_y_de_memoria(): void
@@ -86,7 +87,7 @@ class ReporteVehiculosConsultasTest extends TestCase
         $consumo = memory_get_peak_usage() - $base;
 
         $this->assertMedicionConDatos($filas->count(), 'Exportación de vehículos');
-        $this->assertLessThanOrEqual(11, $consultas, "Exportación hizo $consultas consultas"); // medido: 9
+        $this->assertLessThanOrEqual(9, $consultas, "Exportación hizo $consultas consultas"); // medido: 9
         $this->assertLessThanOrEqual(16777216, $consumo, 'La exportación de 50 vehículos superó 16 MB'); // ver medición en AGENTS.md
     }
 }

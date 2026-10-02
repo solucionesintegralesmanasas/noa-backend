@@ -11,7 +11,6 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Tests\Support\InsertaFilas;
-use Tests\Support\PresupuestoConsultas;
 use Tests\TestCase;
 
 /**
@@ -22,9 +21,10 @@ use Tests\TestCase;
  * Con volumen mínimo el optimizador podría elegir un recorrido completo, así
  * que estas pruebas siembran miles de puntos antes de medir.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class IndicesEnUsoTest extends TestCase
 {
-    use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
+    use RefreshDatabase, InsertaFilas;
 
     private string $empresa;
 
@@ -195,8 +195,6 @@ class IndicesEnUsoTest extends TestCase
         $reales = [];
         foreach ($planes as $plano) {
             foreach ($plano['filas'] as $fila) {
-                // Las tablas derivadas (<derived>, <subqueryN>) se omiten: son
-                // temporales ya materializadas, no recorridos de la tabla.
                 if (str_starts_with((string) ($fila['table'] ?? ''), '<')) {
                     continue;
                 }
