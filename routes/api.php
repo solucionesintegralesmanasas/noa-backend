@@ -69,6 +69,8 @@ use App\Http\Controllers\Api\V1\Notifications\NotificationsController;
 use App\Http\Controllers\Api\V1\Procedure\CapacityInventoryController;
 use App\Http\Controllers\Api\V1\Procedure\FleetServiceContractController;
 use App\Http\Controllers\Api\V1\Procedure\ProcedureController;
+use App\Http\Controllers\Api\V1\Procedure\RadicacionController;
+use App\Http\Controllers\Api\V1\Procedure\ServiceProvisionContractController;
 use App\Http\Controllers\Api\V1\Procedure\TerritorialDirectorController;
 use App\Http\Controllers\Api\V1\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetController;
 use App\Http\Controllers\Api\V1\Settings\SystemConfigurationController;
@@ -101,6 +103,17 @@ Route::prefix('v1')->group(function () {
             ->name('api.v1.public.service-delivery-control-sheets.show');
         Route::post('/public/service-delivery-control-sheets/{uuid}', [ServiceDeliveryControlSheetController::class, 'signPublic'])
             ->name('api.v1.public.service-delivery-control-sheets.sign');
+        Route::get('/public/contracts/sign/{token}', [RadicacionController::class, 'showPublic'])
+            ->name('api.v1.public.contracts.sign-show');
+        Route::post('/public/contracts/sign/{token}', [RadicacionController::class, 'signPublic'])
+            ->name('api.v1.public.contracts.sign');
+        Route::get('/public/contracts/sign/{token}/documento', [RadicacionController::class, 'documentoPublico'])
+            ->name('api.v1.public.contracts.documento');
+        // Ruta aparte para descargar: el middleware `signed` incluye todos los
+        // parámetros de la URL en el hash, así que "descargar" no puede ser un
+        // query param agregado por el cliente; tiene su propia ruta firmada.
+        Route::get('/public/contracts/sign/{token}/documento/descargar', [RadicacionController::class, 'documentoPublico'])
+            ->name('api.v1.public.contracts.documento-descarga');
     });
 
     // ─── RUTAS PÚBLICAS (Sin Autenticación) ───
@@ -881,6 +894,29 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [FleetServiceContractController::class, 'show'])->name('api.v1.procedure.fleet-service-contracts.show');
                 Route::put('/{uuid}', [FleetServiceContractController::class, 'update'])->name('api.v1.procedure.fleet-service-contracts.update');
                 Route::delete('/{uuid}', [FleetServiceContractController::class, 'destroy'])->name('api.v1.procedure.fleet-service-contracts.destroy');
+            });
+
+            // Contratos de Prestación de Servicios
+            Route::prefix('service-provision-contracts')->group(function () {
+                Route::get('/', [ServiceProvisionContractController::class, 'index'])->name('api.v1.procedure.service-provision-contracts.index');
+                Route::get('/list', [ServiceProvisionContractController::class, 'list'])->name('api.v1.procedure.service-provision-contracts.list');
+                Route::post('/', [ServiceProvisionContractController::class, 'store'])->name('api.v1.procedure.service-provision-contracts.store');
+                Route::get('/{uuid}', [ServiceProvisionContractController::class, 'show'])->name('api.v1.procedure.service-provision-contracts.show');
+                Route::put('/{uuid}', [ServiceProvisionContractController::class, 'update'])->name('api.v1.procedure.service-provision-contracts.update');
+                Route::delete('/{uuid}', [ServiceProvisionContractController::class, 'destroy'])->name('api.v1.procedure.service-provision-contracts.destroy');
+            });
+
+            // Radicación TO: ruta, validación, firma por enlace y TXT RUNT
+            Route::prefix('radicacion')->group(function () {
+                Route::get('/expedientes', [RadicacionController::class, 'expedientes'])->name('api.v1.procedure.radicacion.expedientes');
+                Route::post('/expediente', [RadicacionController::class, 'crearExpediente'])->name('api.v1.procedure.radicacion.expediente');
+                Route::get('/{uuid}/detalle', [RadicacionController::class, 'detalle'])->name('api.v1.procedure.radicacion.detalle');
+                Route::post('/{uuid}/avanzar', [RadicacionController::class, 'avanzar'])->name('api.v1.procedure.radicacion.avanzar');
+                Route::get('/{uuid}/ruta', [RadicacionController::class, 'ruta'])->name('api.v1.procedure.radicacion.ruta');
+                Route::get('/{uuid}/validar', [RadicacionController::class, 'validar'])->name('api.v1.procedure.radicacion.validar');
+                Route::post('/enlace-firma', [RadicacionController::class, 'enlaceFirma'])->name('api.v1.procedure.radicacion.enlace-firma');
+                Route::post('/{uuid}/txt', [RadicacionController::class, 'generarTxt'])->name('api.v1.procedure.radicacion.txt');
+                Route::get('/{uuid}/documento/{documento}', [RadicacionController::class, 'documento'])->name('api.v1.procedure.radicacion.documento');
             });
         });
 

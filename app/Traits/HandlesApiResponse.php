@@ -523,6 +523,17 @@ trait HandlesApiResponse
             $e instanceof ConnectionException => Response::HTTP_SERVICE_UNAVAILABLE,
             $e instanceof PDOException => Response::HTTP_SERVICE_UNAVAILABLE,
 
+            // Excepciones HTTP/Symfony.
+            // Deben evaluarse ANTES que \RuntimeException: HttpException (y sus
+            // subclases, como NotFoundHttpException) extienden de RuntimeException,
+            // y evaluarlas después convertía todo abort(403/404/422) en un 500.
+            $e instanceof AuthenticationException => Response::HTTP_UNAUTHORIZED,
+            $e instanceof AuthorizationException => Response::HTTP_FORBIDDEN,
+            $e instanceof NotFoundHttpException => Response::HTTP_NOT_FOUND,
+            $e instanceof MethodNotAllowedHttpException => Response::HTTP_METHOD_NOT_ALLOWED,
+            $e instanceof TooManyRequestsHttpException => Response::HTTP_TOO_MANY_REQUESTS,
+            $e instanceof HttpException => $e->getStatusCode(),
+
             // Excepciones de Argumentos/Runtime
             $e instanceof \InvalidArgumentException => Response::HTTP_BAD_REQUEST,
             $e instanceof \RuntimeException => Response::HTTP_INTERNAL_SERVER_ERROR,
@@ -531,14 +542,6 @@ trait HandlesApiResponse
             // Errores de PHP (TypeError, ParseError, etc.)
             $e instanceof \TypeError => Response::HTTP_INTERNAL_SERVER_ERROR,
             $e instanceof \Error => Response::HTTP_INTERNAL_SERVER_ERROR,
-
-            // Excepciones HTTP/Symfony
-            $e instanceof AuthenticationException => Response::HTTP_UNAUTHORIZED,
-            $e instanceof AuthorizationException => Response::HTTP_FORBIDDEN,
-            $e instanceof NotFoundHttpException => Response::HTTP_NOT_FOUND,
-            $e instanceof MethodNotAllowedHttpException => Response::HTTP_METHOD_NOT_ALLOWED,
-            $e instanceof TooManyRequestsHttpException => Response::HTTP_TOO_MANY_REQUESTS,
-            $e instanceof HttpException => $e->getStatusCode(),
 
             default => Response::HTTP_INTERNAL_SERVER_ERROR,
         };

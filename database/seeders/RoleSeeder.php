@@ -327,6 +327,16 @@ class RoleSeeder extends Seeder
             'fleet_service_contracts.update',
             'fleet_service_contracts.delete',
 
+            'radicacion_to.index',
+            'radicacion_to.create',
+            'radicacion_to.update',
+            'radicacion_to.delete',
+
+            'service_provision_contracts.index',
+            'service_provision_contracts.create',
+            'service_provision_contracts.update',
+            'service_provision_contracts.delete',
+
             'capacity_inventory.index',
             'capacity_inventory.create',
             'capacity_inventory.update',
