@@ -10,6 +10,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Tests\Support\InsertaFilas;
+use Tests\Support\PresupuestoConsultas;
 use Tests\TestCase;
 
 /**
@@ -17,9 +22,10 @@ use Tests\TestCase;
  * planilla del día. Estas pruebas fijan el comportamiento observable y que el número de consultas
  * NO crezca con la cantidad de conductores (antes: 11 + P + 4F).
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class MonitorFlotaTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
 
     protected function setUp(): void
     {
@@ -64,7 +70,6 @@ class MonitorFlotaTest extends TestCase
 
         return $uuid;
     }
-
     private string $empresa;
 
     private function empresa(): string
@@ -222,31 +227,23 @@ class MonitorFlotaTest extends TestCase
 
     public function test_el_numero_de_consultas_no_crece_con_la_cantidad_de_conductores(): void
     {
-        $contar = function (): int {
-            DB::flushQueryLog();
-            DB::enableQueryLog();
-            app(LocationTrackingService::class)->getActiveDrivers($this->empresa());
-            $n = count(DB::getQueryLog());
-            DB::disableQueryLog();
-
-            return $n;
-        };
+        $medir = fn () => app(LocationTrackingService::class)->getActiveDrivers($this->empresa());
 
         // 1 conductor con planilla y 1 sin ella
         $a = $this->conductor('HHH888');
         $this->planilla($a['vehiculo'], '2026-09-30', 1, $a['proyecto']);
         $this->conductor('III999');
-        $conPocos = $contar();
-
         // 12 conductores más, la mayoría sin planilla de hoy (el caso que antes costaba 4 consultas c/u)
-        for ($i = 0; $i < 12; $i++) {
-            $d = $this->conductor('ZZ'.str_pad((string) $i, 4, '0', STR_PAD_LEFT));
-            if ($i % 3 === 0) {
-                $this->planilla($d['vehiculo'], '2026-09-30', 1, $d['proyecto']);
+        $ampliar = function () {
+            for ($i = 0; $i < 12; $i++) {
+                $d = $this->conductor('ZZ'.str_pad((string) $i, 4, '0', STR_PAD_LEFT));
+                if ($i % 3 === 0) {
+                    $this->planilla($d['vehiculo'], '2026-09-30', 1, $d['proyecto']);
+                }
             }
-        }
-        $conMuchos = $contar();
+        };
 
-        $this->assertSame($conPocos, $conMuchos, "Con 2 conductores: $conPocos consultas; con 14: $conMuchos");
+        [$pocos, $muchos] = $this->assertConteoConstante($medir, $ampliar, 'Monitor de flota');
+        $this->assertLessThanOrEqual(25, $pocos, "Monitor de flota hizo $pocos consultas con 2 conductores");
     }
 }

@@ -11,6 +11,11 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Tests\Support\InsertaFilas;
+use Tests\Support\PresupuestoConsultas;
 use Tests\TestCase;
 
 /**
@@ -18,9 +23,10 @@ use Tests\TestCase;
  * alertas de geocerca) y que el número de consultas NO dependa de cuántas geocercas tenga la empresa
  * (antes: 5 + 5 × N según el plan; el estado previo se consultaba hasta 2 veces por geocerca).
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class IngestaGpsTest extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
 
     private string $empresa;
 
@@ -69,7 +75,6 @@ class IngestaGpsTest extends TestCase
 
         return $uuid;
     }
-
     private function empresa(): string
     {
         return $this->empresa ??= $this->insertar('companies', ['business_name' => 'Empresa GPS', 'is_active' => true]);
@@ -195,27 +200,26 @@ class IngestaGpsTest extends TestCase
         $this->sesion();
         $this->punto(4.6100, -74.0000, '09:00:00');
 
-        DB::flushQueryLog();
-        DB::enableQueryLog();
-        $this->punto(4.6105, -74.0000, '09:01:00'); // fuera de toda geocerca: sin alertas
-        $n = count(DB::getQueryLog());
-        DB::disableQueryLog();
-
-        return $n;
+// Fuera de toda geocerca: sin alertas.
+        return $this->contarConsultas(fn () => $this->punto(4.6105, -74.0000, '09:01:00'));
     }
 
     public function test_el_numero_de_consultas_no_crece_con_la_cantidad_de_geocercas(): void
     {
-        $sin = $this->consultasDeUnPunto();
-
         // Mismo escenario con 6 geocercas lejanas que vigilan entrada y salida.
-        $this->conductor = $this->nuevoConductor();
-        for ($i = 0; $i < 6; $i++) {
-            $this->geocerca(['center_lat' => 4.9 + $i / 100, 'center_lng' => -74.5]);
-        }
-        $con = $this->consultasDeUnPunto();
+        $ampliar = function () {
+            $this->conductor = $this->nuevoConductor();
+            for ($i = 0; $i < 6; $i++) {
+                $this->geocerca(['center_lat' => 4.9 + $i / 100, 'center_lng' => -74.5]);
+            }
+        };
 
-        $this->assertSame($sin + 0, $con - 0, "Sin geocercas: $sin consultas; con 6: $con");
+        // La primera medición siembra el escenario sin geocercas; la ampliación lo repite con 6.
+        $sin = $this->contarConsultas($medir);
+        $ampliar();
+        $con = $this->contarConsultas($medir);
+
+        $this->assertSame($sin, $con, "Sin geocercas: $sin consultas; con 6: $con");
     }
 
     public function test_un_punto_hace_pocas_consultas(): void
