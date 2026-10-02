@@ -13,6 +13,7 @@ use Tests\TestCase;
  * ARQ-006: el mapa estático del recorrido se descarga una sola vez por trazado exacto.
  * La red se sustituye por un doble; la clave de caché es el hash de la URL completa.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class CacheMapasRutaTest extends TestCase
 {
     protected function setUp(): void

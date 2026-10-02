@@ -16,6 +16,7 @@ use Tests\TestCase;
  * SPEC-004: el historial y las estadísticas GPS declaran su presupuesto.
  * El rango y la paginación acotan el trabajo: más puntos no son más consultas.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class HistorialGpsConsultasTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
@@ -73,7 +74,7 @@ class HistorialGpsConsultasTest extends TestCase
         $ampliar = fn () => $this->sembrarPuntos(480);
 
         $this->assertConteoConstante($medir, $ampliar, 'Historial del conductor');
-        $this->assertPresupuesto(4, $medir, 'Historial del conductor'); // medido: 2 (conteo + página)
+        $this->assertPresupuesto(2, $medir, 'Historial del conductor'); // medido: 2 (conteo + página)
     }
 
     public function test_las_estadisticas_no_crecen_con_los_puntos_del_rango(): void
@@ -83,7 +84,7 @@ class HistorialGpsConsultasTest extends TestCase
         $ampliar = fn () => $this->sembrarPuntos(480);
 
         $this->assertConteoConstante($medir, $ampliar, 'Estadísticas del conductor');
-        $this->assertPresupuesto(6, $medir, 'Estadísticas del conductor'); // medido: 4 (agregados + sesiones)
+        $this->assertPresupuesto(4, $medir, 'Estadísticas del conductor'); // medido: 4 (agregados + sesiones)
     }
 
     public function test_el_mapa_no_crece_con_los_puntos_del_rango(): void
@@ -93,6 +94,6 @@ class HistorialGpsConsultasTest extends TestCase
         $ampliar = fn () => $this->sembrarPuntos(480);
 
         $this->assertConteoConstante($medir, $ampliar, 'Mapa del conductor');
-        $this->assertPresupuesto(5, $medir, 'Mapa del conductor'); // medido: 3 (resúmenes o cubetas)
+        $this->assertPresupuesto(3, $medir, 'Mapa del conductor'); // medido: 3 (resúmenes o cubetas)
     }
 }

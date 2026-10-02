@@ -183,21 +183,21 @@ class PerfBench extends Command
     /** @return array<string, array{0: string, 1: array}> */
     private function consultas(): array
     {
-        $d = self::uuid('2', 4);
-        $v = self::uuid('3', 4);
-        $p = self::uuid('4', 4);
-        $e = self::EMPRESA;
+        $conductor = self::uuid('2', 4);
+        $vehiculo = self::uuid('3', 4);
+        $proyecto = self::uuid('4', 4);
+        $empresa = self::EMPRESA;
         $dia = ['2026-09-20 00:00:00', '2026-09-20 23:59:59'];
 
         return [
-            'Q1 monitor: último punto por conductor (empresa, 1 día)' => ['select max(id) from driver_locations where company_uuid = ? and recorded_at >= ? group by third_party_uuid', [$e, '2026-09-29 12:00:00']],
-            'Q2 último punto de un conductor' => ['select * from driver_locations where third_party_uuid = ? order by recorded_at desc limit 1', [$d]],
-            'Q3 mapa del día por vehículo y empresa' => ['select id,latitude,longitude from driver_locations where recorded_at between ? and ? and vehicle_uuid = ? and company_uuid = ? order by recorded_at asc', [...$dia, $v, $e]],
-            'Q4 mapa del día por proyecto y empresa' => ['select id,latitude,longitude from driver_locations where recorded_at between ? and ? and project_uuid = ? and company_uuid = ? order by recorded_at asc', [...$dia, $p, $e]],
-            'Q5 historial del conductor (rango de 1 día)' => ['select * from driver_locations where third_party_uuid = ? and company_uuid = ? and recorded_at between ? and ? order by recorded_at asc', [$d, $e, ...$dia]],
-            'Q6 punto anterior (ingesta)' => ['select * from driver_locations where third_party_uuid = ? and recorded_at <= ? order by recorded_at desc, id desc limit 1', [$d, '2026-09-25 10:00:00']],
-            'Q7 alertas no leídas, página 1' => ['select * from driver_location_alerts where company_uuid = ? and is_read = 0 order by created_at desc limit 15', [$e]],
-            'Q8 alertas de la empresa, página 1' => ['select * from driver_location_alerts where company_uuid = ? order by created_at desc limit 15', [$e]],
+            'Q1 monitor: último punto por conductor (empresa, 1 día)' => ['select max(id) from driver_locations where company_uuid = ? and recorded_at >= ? group by third_party_uuid', [$empresa, '2026-09-29 12:00:00']],
+            'Q2 último punto de un conductor' => ['select * from driver_locations where third_party_uuid = ? order by recorded_at desc limit 1', [$conductor]],
+            'Q3 mapa del día por vehículo y empresa' => ['select id,latitude,longitude from driver_locations where recorded_at between ? and ? and vehicle_uuid = ? and company_uuid = ? order by recorded_at asc', [...$dia, $vehiculo, $empresa]],
+            'Q4 mapa del día por proyecto y empresa' => ['select id,latitude,longitude from driver_locations where recorded_at between ? and ? and project_uuid = ? and company_uuid = ? order by recorded_at asc', [...$dia, $proyecto, $empresa]],
+            'Q5 historial del conductor (rango de 1 día)' => ['select * from driver_locations where third_party_uuid = ? and company_uuid = ? and recorded_at between ? and ? order by recorded_at asc', [$conductor, $empresa, ...$dia]],
+            'Q6 punto anterior (ingesta)' => ['select * from driver_locations where third_party_uuid = ? and recorded_at <= ? order by recorded_at desc, id desc limit 1', [$conductor, '2026-09-25 10:00:00']],
+            'Q7 alertas no leídas, página 1' => ['select * from driver_location_alerts where company_uuid = ? and is_read = 0 order by created_at desc limit 15', [$empresa]],
+            'Q8 alertas de la empresa, página 1' => ['select * from driver_location_alerts where company_uuid = ? order by created_at desc limit 15', [$empresa]],
         ];
     }
 
@@ -216,6 +216,8 @@ class PerfBench extends Command
             'entorno' => $entorno,
             'base' => $base,
             'motor' => DB::selectOne('select version() v')->v,
+            'laravel' => app()->version(),
+            'php' => PHP_VERSION,
             'etiqueta' => (string) $this->option('etiqueta'),
             'volumen' => ['puntos' => $puntos, 'alertas' => DB::table('driver_location_alerts')->count()],
             'corridas' => $corridas,

@@ -3,6 +3,8 @@
     "entorno": "local",
     "base": "noa_test",
     "motor": "10.4.32-MariaDB",
+    "laravel": "12.69.3",
+    "php": "8.2.12",
     "etiqueta": "linea-base SPEC-004 (2026-10-02)",
     "volumen": {
         "puntos": 600000,

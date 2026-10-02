@@ -13,6 +13,7 @@ use Tests\TestCase;
  * SPEC-004, capa 3: el banco de volumen (`perf:bench`) se niega a tocar bases
  * que no sean desechables y es reproducible con su semilla fija.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class BancoVolumenTest extends TestCase
 {
     use RefreshDatabase;
@@ -68,7 +69,9 @@ class BancoVolumenTest extends TestCase
             ->assertSuccessful();
         File::shouldHaveReceived('put')->once()->withArgs(function (string $ruta, string $contenido): bool {
             return str_contains($ruta, 'bench-produccion-')
-                && str_contains($contenido, '"entorno": "produccion"');
+                && str_contains($contenido, '"entorno": "produccion"')
+                && str_contains($contenido, '"laravel"')
+                && str_contains($contenido, '"php"');
         });
     }
 }
