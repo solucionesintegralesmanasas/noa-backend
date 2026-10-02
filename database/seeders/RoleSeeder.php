@@ -401,11 +401,6 @@ class RoleSeeder extends Seeder
             // no quede abierta para siempre ni exija inventar evidencia.
             'service_delivery_control_sheets.close_exception',
 
-            'assistant_configuration.index',
-            'assistant_configuration.create',
-            'assistant_configuration.update',
-            'assistant_configuration.delete',
-
             'projects.index',
             'projects.create',
             'projects.update',

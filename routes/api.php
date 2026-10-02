@@ -23,7 +23,6 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
-use App\Http\Controllers\Api\V1\AssistantController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -41,7 +40,6 @@ use App\Http\Controllers\Api\V1\Catalogs\TributeController;
 use App\Http\Controllers\Api\V1\Catalogs\TypeOfDocumentController;
 use App\Http\Controllers\Api\V1\Catalogs\VehicleClassController;
 use App\Http\Controllers\Api\V1\Catalogs\WithholdingController;
-use App\Http\Controllers\Api\V1\Chat\ChatController;
 use App\Http\Controllers\Api\V1\ContractExtraction\ContractorController;
 use App\Http\Controllers\Api\V1\ContractExtraction\FuecController;
 use App\Http\Controllers\Api\V1\ContractExtraction\FuecPassengerController;
@@ -921,32 +919,6 @@ Route::prefix('v1')->group(function () {
             });
         });
 
-        // ─── MÓDULO ASISTENTE (chatbot por reglas, SOLO LECTURA) ───
-        // El bot no habla con ninguna IA externa: `AssistantService` puntúa
-        // palabras clave contra `config/assistant.php` y consulta esta misma API
-        // por HTTP interna reenviando el token Bearer del usuario (para que
-        // `auth:sanctum` y `authz` sigan aplicando). La barrera de seguridad es
-        // `App\Services\RouteCatalog` (allowlist de GET con auth:sanctum).
-        Route::post('/assistant', [AssistantController::class, 'send'])
-            ->middleware('throttle:20,1')
-            ->name('api.v1.assistant.send');
-
-        // ─── MÓDULO CHAT ASISTENTE (OCULTO TEMPORALMENTE) ───
-        // Route::prefix('chat')->group(function () {
-        //     Route::prefix('sessions')->group(function () {
-        //         Route::get('/', [ChatController::class, 'index'])->name('api.v1.chat.sessions.index');
-        //         Route::post('/', [ChatController::class, 'store'])->name('api.v1.chat.sessions.store');
-        //         Route::get('/{uuid}', [ChatController::class, 'show'])->name('api.v1.chat.sessions.show');
-        //         Route::post('/{uuid}/messages', [ChatController::class, 'send'])->name('api.v1.chat.sessions.send')
-        //             ->middleware('chat.limiter');
-        //         Route::delete('/{uuid}', [ChatController::class, 'destroy'])->name('api.v1.chat.sessions.destroy');
-        //     });
-        //
-        //     Route::post('/messages/{uuid}/feedback', [ChatController::class, 'rateFeedback'])->name('api.v1.chat.messages.feedback');
-        // });
-
-        // ─── MÓDULO NOTIFICACIONES ───
-
         // ─── MÓDULO NOTIFICACIONES ───
         Route::prefix('notifications')->group(function () {
             Route::get('/', [NotificationsController::class, 'index'])->name('api.v1.notifications.index');
@@ -1040,7 +1012,8 @@ Route::prefix('v1')->group(function () {
         });
 
         // ─── MÓDULO CONFIGURACIONES ───
-        Route::prefix('settings')->group(function () {            Route::prefix('system-configurations')->group(function () {
+        Route::prefix('settings')->group(function () {
+            Route::prefix('system-configurations')->group(function () {
                 Route::get('/', [SystemConfigurationController::class, 'index'])->name('api.v1.settings.system-configurations.index');
                 Route::post('/', [SystemConfigurationController::class, 'store'])->name('api.v1.settings.system-configurations.store');
                 Route::get('/company/{companyUuid}', [SystemConfigurationController::class, 'showByCompany'])->name('api.v1.settings.system-configurations.company');
