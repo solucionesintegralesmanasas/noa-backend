@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Procedure;
 
 use App\Mail\FirmaContratoMail;
+use App\Models\Company;
 use App\Models\ContractSignature;
 use App\Models\FleetServiceContract;
 use App\Models\ServiceProvisionContract;
@@ -106,6 +107,44 @@ class ContractSignatureService extends BaseService
     }
 
     /**
+     * Resuelve la empresa asociada a la firma, ya sea la del contrato o, si no
+     * se puede determinar, la de la firma misma.
+     */
+    public function empresaDelFirma(ContractSignature $firma): ?Company
+    {
+        $contrato = $firma->contract_origin === 'ADMIN_FLOTA'
+            ? FleetServiceContract::where('uuid', $firma->contract_uuid)->first()
+            : ServiceProvisionContract::where('uuid', $firma->contract_uuid)->first();
+
+        return $contrato?->company ?? Company::where('uuid', $firma->company_uuid)->first();
+    }
+
+    /**
+     * Envía el enlace de firma al correo del firmante, referenciando el PDF
+     * principal del contrato. Si falla, el enlace sigue siendo válido.
+     *
+     * @return array{enviado: bool, mensaje: string|null}
+     */
+    public function notificarEnlacePorCorreo(ContractSignature $firma, string $url, string $documento, string $expiraEn): array
+    {
+        return $this->enviarPorCorreo($firma, $url, [
+            'nombre_firmante' => $firma->signer_name,
+            'empresa' => $this->empresaDelFirma($firma)?->business_name ?? 'Transportadora',
+            'documento' => $documento,
+            'expira' => \Carbon\Carbon::parse($expiraEn)->translatedFormat('d/m/Y \a\l\a\s H:i'),
+            'rol' => $firma->signer_role,
+        ]);
+    }
+
+    /**
+     * Busca una firma por el token en claro que llegó en la URL.
+     */
+    public function findByToken(string $token): ContractSignature
+    {
+        return ContractSignature::where('token_hash', hash('sha256', $token))->firstOrFail();
+    }
+
+    /**
      * Envía el enlace de firma al correo del firmante, si tiene uno registrado.
      *
      * @return array{enviado: bool, mensaje: string}
@@ -142,8 +181,7 @@ class ContractSignatureService extends BaseService
 
     public function firmarPorToken(string $token, array $evidencia): ContractSignature
     {
-        $hash = hash('sha256', $token);
-        $firma = ContractSignature::where('token_hash', $hash)->firstOrFail();
+        $firma = $this->findByToken($token);
         abort_if($firma->status !== 'PENDIENTE', 422, 'Enlace ya usado o revocado.');
         abort_if($firma->expires_at->isPast(), 422, 'Enlace expirado.');
 
