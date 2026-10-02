@@ -13,6 +13,7 @@ use Tests\TestCase;
  * ARQ-008: los índices compuestos de tracking existen y la migración es reversible.
  * Las cifras que los justifican están en el propio archivo de la migración.
  */
+#[\PHPUnit\Framework\Attributes\Group('perf')]
 class IndicesTrackingTest extends TestCase
 {
     use RefreshDatabase;

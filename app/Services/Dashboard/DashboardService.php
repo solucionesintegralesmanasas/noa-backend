@@ -850,6 +850,10 @@ class DashboardService
             return null;
         }
 
-        return $user->company_uuid ?? null;
+        // `users` no tiene `company_uuid`: la empresa es la que fijó `SetCompanyContext`
+        // o, sin contexto, la primera del usuario. Debe ser explícita porque además
+        // forma la clave de caché; con `null` todas las empresas compartían la misma.
+        return request()->attributes->get('current_company_uuid')
+            ?? $user->companies()->first()?->uuid;
     }
 }
