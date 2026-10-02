@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\Notification;
 use App\Services\Notifications\NotificationsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Tests\Support\InsertaFilas;
 use Tests\Support\PresupuestoConsultas;
 use Tests\TestCase;
@@ -20,9 +22,6 @@ use Tests\TestCase;
 class NotificacionesConsultasTest extends TestCase
 {
     use RefreshDatabase, PresupuestoConsultas, InsertaFilas;
-
-    /** Consultas extra por vehículo que hoy cuesta el sync (deuda; objetivo 0). */
-    private const PENDIENTE_POR_VEHICULO = 24;
 
     private string $empresa;
 
@@ -63,9 +62,9 @@ class NotificacionesConsultasTest extends TestCase
         $this->conductorConLicencia('Dos');
 
         // El sync escribe: se mide una sola vez sobre datos frescos.
-        // Medido: 102 consultas con 3 vehículos y 2 licencias (incluye lecturas
-        // por alerta y escrituras; ver nota en AGENTS.md sobre el N+1 restante).
-        $this->assertPresupuesto(110, fn () => app(NotificationsService::class)->syncNotifications($this->empresa), 'Sincronización de notificaciones');
+        // Medido: 22 consultas constantes con 3 vehículos y 2 licencias (lectores +
+        // precarga del estado + upsert en bloque; ya no crece con la flota).
+        $this->assertPresupuesto(22, fn () => app(NotificationsService::class)->syncNotifications($this->empresa), 'Sincronización de notificaciones');
     }
 
     /** Consultas de un sync sobre datos frescos de una empresa nueva con $vehiculos vehículos. */
@@ -80,10 +79,9 @@ class NotificacionesConsultasTest extends TestCase
     }
 
     /**
-     * Pendiente conocida: `syncNotifications` hace lecturas por alerta. Se mide
-     * cuántas consultas añade cada vehículo y se exige que no empeore; el objetivo
-     * es 0 (conteo constante) cuando se use `precargarVehiculos`. Si baja, quitar
-     * este tope y exigir igualdad entre volúmenes.
+     * Pendiente conocida: `syncNotifications` hacía lecturas y escrituras por
+     * alerta. Ya no: la empresa la trae el lector, el estado existente se
+     * precarga y las escrituras van en bloque, así que el coste es constante.
      */
     public function test_el_sync_no_empeora_su_costo_por_vehiculo(): void
     {
@@ -92,12 +90,33 @@ class NotificacionesConsultasTest extends TestCase
         $muchos = $this->consultasDeSyncConVehiculos(6);
 
         $porVehiculo = ($muchos - $pocos) / 4;
-        // Medido 2026-10-02: 24 por vehículo (con SOAT y tarjeta por vencer); 67 con 2 vehículos, 163 con 6.
-        $this->assertLessThanOrEqual(
-            self::PENDIENTE_POR_VEHICULO,
-            $porVehiculo,
-            "El sync cuesta $porVehiculo consultas por vehículo ($pocos con 2; $muchos con 6); tope: ".self::PENDIENTE_POR_VEHICULO
-        );
+        $this->assertSame(0, $porVehiculo, "El sync cuesta $porVehiculo consultas por vehículo ($pocos con 2; $muchos con 6)");
+    }
+
+    public function test_el_sync_actualiza_sin_duplicar_y_conserva_el_estado_leido(): void
+    {
+        $this->vehiculoConVencimientos('SYN001');
+        app(NotificationsService::class)->syncNotifications($this->empresa);
+        $antes = Notification::where('company_uuid', $this->empresa)->count();
+        $this->assertGreaterThan(0, $antes);
+
+        $primera = Notification::where('company_uuid', $this->empresa)->first();
+        $primera->update(['status' => 'LEIDA']);
+
+        app(NotificationsService::class)->syncNotifications($this->empresa);
+
+        $this->assertSame($antes, Notification::where('company_uuid', $this->empresa)->count(), 'El sync duplicó notificaciones');
+        $this->assertSame('LEIDA', Notification::where('uuid', $primera->uuid)->value('status'), 'El sync revivió una notificación leída');
+    }
+
+    public function test_el_sync_no_escribe_en_el_registro_de_actividad(): void
+    {
+        $this->vehiculoConVencimientos('ACT001');
+        $antes = DB::table('activity_log')->count();
+
+        app(NotificationsService::class)->syncNotifications($this->empresa);
+
+        $this->assertSame($antes, DB::table('activity_log')->count(), 'El sync escribió en activity_log');
     }
 
     public function test_la_campana_no_crece_con_las_notificaciones(): void

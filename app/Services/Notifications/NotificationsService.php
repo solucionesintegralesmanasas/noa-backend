@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Servicio de negocio para la gestión integral y persistencia de alertas y notificaciones.
@@ -387,8 +388,8 @@ class NotificationsService extends BaseService
             // 1. Documentos de Vehículo
             foreach (array_merge($vehicleDocs['expired'] ?? [], $vehicleDocs['expiring_soon'] ?? [], $vehicleDocs['missing'] ?? []) as $alert) {
                 $vUuid = $alert['vehicle_uuid'] ?? null;
-                $vehicle = $vUuid ? Vehicle::query()->where('uuid', '=', $vUuid, 'and')->first() : null;
-                $cUuid = $companyUuid ?? $vehicle?->company_uuid ?? null;
+                // La empresa la trae el propio lector: sin consulta por alerta (N+1 del cron).
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -424,8 +425,7 @@ class NotificationsService extends BaseService
             // 2. Tarjetas de Operación
             foreach (array_merge($operationCards['expired'] ?? [], $operationCards['expiring_soon'] ?? [], $operationCards['missing'] ?? []) as $alert) {
                 $vUuid = $alert['vehicle_uuid'] ?? null;
-                $vehicle = $vUuid ? Vehicle::query()->where('uuid', '=', $vUuid, 'and')->first() : null;
-                $cUuid = $companyUuid ?? $vehicle?->company_uuid ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -453,8 +453,7 @@ class NotificationsService extends BaseService
             // 3. Licencias de Conducción
             foreach (array_merge($driverLicenses['expired'] ?? [], $driverLicenses['expiring_soon'] ?? []) as $alert) {
                 $licUuid = $alert['license_uuid'] ?? null;
-                $license = $licUuid ? DriverLicense::query()->where('uuid', '=', $licUuid, 'and')->first() : null;
-                $cUuid = $companyUuid ?? $license?->company_uuid ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -481,8 +480,7 @@ class NotificationsService extends BaseService
             // 4. Primera RTM
             foreach (array_merge($firstRtm['expired'] ?? [], $firstRtm['expiring_soon'] ?? []) as $alert) {
                 $vUuid = $alert['vehicle_uuid'] ?? null;
-                $vehicle = $vUuid ? Vehicle::query()->where('uuid', '=', $vUuid, 'and')->first() : null;
-                $cUuid = $companyUuid ?? $vehicle?->company_uuid ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -509,13 +507,7 @@ class NotificationsService extends BaseService
             // 5. Convenios
             foreach (array_merge($agreements['expired'] ?? [], $agreements['expiring_soon'] ?? []) as $alert) {
                 $agUuid = $alert['agreement_uuid'] ?? null;
-                $agreement = $agUuid ? BusinessCollaborationAgreement::query()->where('uuid', '=', $agUuid, 'and')->first() : null;
-                $cUuid = $companyUuid ?? $agreement?->company_uuid ?? null;
-                if (! $cUuid) {
-                    $vUuid = $alert['vehicle_uuid'] ?? null;
-                    $vehicle = $vUuid ? Vehicle::query()->where('uuid', '=', $vUuid, 'and')->first() : null;
-                    $cUuid = $vehicle?->company_uuid;
-                }
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -544,12 +536,11 @@ class NotificationsService extends BaseService
             // 6. Cobros de Administración
             foreach (array_merge($affiliateCharges['expired'] ?? [], $affiliateCharges['expiring_soon'] ?? []) as $alert) {
                 $chUuid = $alert['charge_uuid'] ?? null;
-                $charge = $chUuid ? AffiliateAdminCharge::query()->where('uuid', '=', $chUuid, 'and')->first() : null;
-                $cUuid = $companyUuid ?? $charge?->company_uuid ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
-                $vUuid = $charge?->vehicle_uuid ?? null;
+                $vUuid = $alert['vehicle_uuid'] ?? null;
 
                 $activeAlerts[] = [
                     'company_uuid' => $cUuid,
@@ -574,7 +565,7 @@ class NotificationsService extends BaseService
             // 7. Inspecciones Pendientes (Obligatoria diaria)
             foreach ($pendingInspections as $alert) {
                 $vUuid = $alert['vehicle_uuid'] ?? null;
-                $cUuid = $companyUuid ?? Vehicle::query()->where('uuid', '=', $vUuid)->value('company_uuid') ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -601,7 +592,7 @@ class NotificationsService extends BaseService
             // 8. Mantenimiento Preventivo (Kilometraje)
             foreach ($preventativeMaintenance as $alert) {
                 $vUuid = $alert['vehicle_uuid'] ?? null;
-                $cUuid = $companyUuid ?? Vehicle::query()->where('uuid', '=', $vUuid)->value('company_uuid') ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -641,8 +632,7 @@ class NotificationsService extends BaseService
             // 9. Seguridad Social (Aportes en Mora)
             foreach ($socialSecurity['mora'] as $alert) {
                 $tpUuid = $alert['third_party_uuid'] ?? null;
-                $thirdParty = $tpUuid ? ThirdParty::query()->where('uuid', '=', $tpUuid)->first() : null;
-                $cUuid = $companyUuid ?? $thirdParty?->company_uuid ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
                 if (! $cUuid) {
                     continue;
                 }
@@ -679,39 +669,56 @@ class NotificationsService extends BaseService
 
             $activeNotificationUuids = [];
 
-            foreach ($activeAlerts as $alertData) {
-                $existing = Notification::query()
-                    ->where('company_uuid', '=', $alertData['company_uuid'], 'and')
-                    ->where('type', '=', $alertData['type'], 'and')
-                    ->where('entity_uuid', '=', $alertData['entity_uuid'], 'and')
-                    ->first();
-
-                if ($existing) {
-                    $existing->update([
-                        'title' => $alertData['title'],
-                        'message' => $alertData['message'],
-                        'priority' => $alertData['priority'] ?? 'NORMAL',
-                        'days_left' => $alertData['days_left'],
-                        'expiry_date' => $alertData['expiry_date'],
-                        'extra_data' => $alertData['extra_data'],
-                    ]);
-                    $activeNotificationUuids[] = $existing->uuid;
-                } else {
-                    $newNotif = Notification::create([
-                        'company_uuid' => $alertData['company_uuid'],
-                        'type' => $alertData['type'],
-                        'title' => $alertData['title'],
-                        'message' => $alertData['message'],
-                        'status' => 'PENDIENTE',
-                        'priority' => $alertData['priority'] ?? 'NORMAL',
-                        'entity_uuid' => $alertData['entity_uuid'],
-                        'entity_type' => $alertData['entity_type'],
-                        'days_left' => $alertData['days_left'],
-                        'expiry_date' => $alertData['expiry_date'],
-                        'extra_data' => $alertData['extra_data'],
-                    ]);
-                    $activeNotificationUuids[] = $newNotif->uuid;
+            // Una sola consulta para saber qué alertas ya existen: antes era un
+            // SELECT por alerta (N+1 que crecía con la flota).
+            $existentes = collect();
+            if (! empty($activeAlerts)) {
+                $tipos = array_values(array_unique(array_column($activeAlerts, 'type')));
+                $consulta = Notification::query()->whereIn('type', $tipos);
+                if ($companyUuid) {
+                    $consulta->where('company_uuid', $companyUuid);
                 }
+                $existentes = $consulta->get()->keyBy(
+                    fn (Notification $n) => $n->company_uuid.'|'.$n->type.'|'.$n->entity_uuid
+                );
+            }
+
+            // El sync es dato derivado, no una acción de usuario. Las escrituras van
+            // en bloque (`upsert` por `uuid`, que no dispara eventos de modelo) para
+            // que el coste no crezca con la flota; `status` y `created_at` no se
+            // tocan al actualizar, así que una notificación leída sigue leída.
+            $ahora = now();
+            $filas = [];
+            foreach ($activeAlerts as $alertData) {
+                $clave = $alertData['company_uuid'].'|'.$alertData['type'].'|'.$alertData['entity_uuid'];
+                $uuid = $existentes->get($clave)?->uuid ?? (string) Str::uuid();
+                $activeNotificationUuids[] = $uuid;
+                $filas[] = [
+                    'uuid' => $uuid,
+                    'company_uuid' => $alertData['company_uuid'],
+                    'type' => $alertData['type'],
+                    'title' => $alertData['title'],
+                    'message' => $alertData['message'],
+                    'status' => 'PENDIENTE',
+                    'priority' => $alertData['priority'] ?? 'NORMAL',
+                    'entity_uuid' => $alertData['entity_uuid'],
+                    'entity_type' => $alertData['entity_type'],
+                    'days_left' => $alertData['days_left'],
+                    'expiry_date' => $alertData['expiry_date'] instanceof \DateTimeInterface
+                        ? $alertData['expiry_date']->format('Y-m-d H:i:s')
+                        : $alertData['expiry_date'],
+                    'extra_data' => json_encode($alertData['extra_data']),
+                    'created_at' => $ahora,
+                    'updated_at' => $ahora,
+                ];
+            }
+
+            foreach (array_chunk($filas, 500) as $lote) {
+                Notification::upsert(
+                    $lote,
+                    ['uuid'],
+                    ['title', 'message', 'priority', 'days_left', 'expiry_date', 'extra_data', 'updated_at']
+                );
             }
 
             // Eliminar de base de datos alertas resueltas
@@ -987,6 +994,7 @@ class NotificationsService extends BaseService
                                 'vehicle_uuid' => $vehicle->uuid,
                                 'vehicle_license_plate' => $vehicle->vehicle_license_plate,
                                 'third_party_uuid' => $vehicle->third_party_uuid,
+                                'company_uuid' => $vehicle->company_uuid,
                                 'document_type' => $mandatoryType,
                                 'status' => 'FALTANTE',
                                 'date' => $today->toDateTimeString(),
@@ -1013,6 +1021,7 @@ class NotificationsService extends BaseService
                             'vehicle_uuid' => $vehicle->uuid,
                             'vehicle_license_plate' => $vehicle->vehicle_license_plate,
                             'third_party_uuid' => $vehicle->third_party_uuid,
+                            'company_uuid' => $vehicle->company_uuid,
                         ];
 
                         if ($expiryDate->lt($today)) {
@@ -1111,6 +1120,7 @@ class NotificationsService extends BaseService
                             'vehicle_uuid' => $vehicle->uuid,
                             'vehicle_license_plate' => $vehicle->vehicle_license_plate,
                             'third_party_uuid' => $vehicle->third_party_uuid,
+                            'company_uuid' => $vehicle->company_uuid,
                             'message' => "Falta registrar la Tarjeta de Operación para el vehículo {$vehicle->vehicle_license_plate}.",
                         ];
 
@@ -1129,6 +1139,7 @@ class NotificationsService extends BaseService
                                 'vehicle_uuid' => $latestCard->vehicle_uuid,
                                 'vehicle_license_plate' => $vehicle->vehicle_license_plate,
                                 'third_party_uuid' => $vehicle->third_party_uuid,
+                                'company_uuid' => $vehicle->company_uuid,
                             ];
 
                             if ($expirationDate->lt($today)) {
@@ -1213,6 +1224,7 @@ class NotificationsService extends BaseService
                     'license_number' => $license->number,
                     'category' => $license->category,
                     'third_party_uuid' => $license->third_party_uuid,
+                    'company_uuid' => $license->company_uuid,
                     'driver_name' => $driverName ?: null,
                 ];
 
@@ -1298,6 +1310,7 @@ class NotificationsService extends BaseService
                     'vehicle_uuid' => $vehicle->uuid,
                     'vehicle_license_plate' => $vehicle->vehicle_license_plate,
                     'third_party_uuid' => $vehicle->third_party_uuid,
+                    'company_uuid' => $vehicle->company_uuid,
                     'registration_date' => $registrationDate->toDateString(),
                     'first_rtm_due_date' => $firstRtmDue->toDateString(),
                 ];
@@ -1382,6 +1395,7 @@ class NotificationsService extends BaseService
                     'vehicle_uuid' => $agreement->vehicle_uuid,
                     'license_plate' => $agreement->vehicle->vehicle_license_plate ?? null,
                     'entity_name' => $agreement->contracting_entity_name,
+                    'company_uuid' => $agreement->company_uuid,
                 ];
 
                 if ($expirationDate->lt($today)) {
@@ -1462,6 +1476,7 @@ class NotificationsService extends BaseService
                         'charge_uuid' => $charge->uuid,
                         'vehicle_uuid' => $charge->vehicle_uuid,
                         'vehicle_license_plate' => $vehiclePlate,
+                        'company_uuid' => $charge->company_uuid,
                         'amount' => $charge->amount,
                         'due_date' => $dueDate->toDateString(),
                         'date' => $dueDate->toDateTimeString(),
@@ -1474,6 +1489,7 @@ class NotificationsService extends BaseService
                         'charge_uuid' => $charge->uuid,
                         'vehicle_uuid' => $charge->vehicle_uuid,
                         'vehicle_license_plate' => $vehiclePlate,
+                        'company_uuid' => $charge->company_uuid,
                         'amount' => $charge->amount,
                         'due_date' => $dueDate->toDateString(),
                         'date' => $dueDate->toDateTimeString(),
@@ -1732,6 +1748,7 @@ class NotificationsService extends BaseService
                     $pending[] = [
                         'vehicle_uuid' => $vehicle->uuid,
                         'vehicle_license_plate' => $vehicle->vehicle_license_plate,
+                        'company_uuid' => $vehicle->company_uuid,
                         'message' => "El vehículo {$vehicle->vehicle_license_plate} no cuenta con una inspección preoperacional registrada para el día de hoy. Por favor registrarla de forma obligatoria.",
                     ];
                 }
@@ -1824,6 +1841,7 @@ class NotificationsService extends BaseService
                             $alerts[] = [
                                 'vehicle_uuid' => $vehicle->uuid,
                                 'vehicle_license_plate' => $vehicle->vehicle_license_plate,
+                                'company_uuid' => $vehicle->company_uuid,
                                 'milestone' => $milestone,
                                 'interval' => $interval,
                                 'status' => 'VENCIDO',
@@ -1842,6 +1860,7 @@ class NotificationsService extends BaseService
                                 $alerts[] = [
                                     'vehicle_uuid' => $vehicle->uuid,
                                     'vehicle_license_plate' => $vehicle->vehicle_license_plate,
+                                    'company_uuid' => $vehicle->company_uuid,
                                     'milestone' => $nextMilestone,
                                     'interval' => $interval,
                                     'status' => 'PROXIMO',
@@ -1911,6 +1930,7 @@ class NotificationsService extends BaseService
                 $mora[] = [
                     'third_party_uuid' => $contribution->third_party_uuid,
                     'third_party_name' => $name,
+                    'company_uuid' => $thirdParty->company_uuid,
                     'contribution_uuid' => $contribution->uuid,
                     'billing_period' => $contribution->billing_period?->toDateString(),
                     'days_left' => null,
