@@ -145,9 +145,10 @@ class ServiceProvisionContractController extends Controller
             if (! $record) {
                 return $this->errorResponse('El registro de Contrato de Prestación que desea actualizar no existe.', 404);
             }
-            $updated = $this->serviceProvisionContractService->update($uuid, $request->validated());
+            $this->serviceProvisionContractService->update($uuid, $request->validated());
+            $record = $this->serviceProvisionContractService->getByUuid($uuid);
 
-            return $this->successResponse($updated, 'Registro de Contrato de Prestación actualizado con éxito.');
+            return $this->successResponse($record, 'Registro de Contrato de Prestación actualizado con éxito.');
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
