@@ -184,7 +184,7 @@
                         </td>
                     </tr>
                     @php
-                        $license = $record->driver ? $record->driver->driverLicenses->first() : null;
+                        $license = $record->driver ? $record->driver->licenciaActual() : null;
                     @endphp
                     <tr>
                         <td><b>N° LICENCIA:</b></td>

@@ -144,6 +144,30 @@ class ThirdParty extends Model implements HasMedia
     }
 
     /**
+     * Licencia a mostrar (PDF del FUEC, formularios): la ACTIVA más reciente;
+     * si no hay ninguna ACTIVA, la más reciente; si no hay licencias, null.
+     * La relación no viene ordenada (orden de BD: la más vieja primero), así
+     * que tomar `driverLicenses->first()` muestra la vencida/vieja.
+     */
+    public function licenciaActual(): ?DriverLicense
+    {
+        $licencias = $this->driverLicenses;
+        if ($licencias->isEmpty()) {
+            return null;
+        }
+
+        $activas = $licencias->filter(
+            fn (DriverLicense $l) => $l->status === 1 || $l->status === true
+                || mb_strtoupper(trim((string) $l->status)) === 'ACTIVA'
+        );
+        $candidatas = $activas->isNotEmpty() ? $activas : $licencias;
+
+        return $candidatas->sortByDesc(
+            fn (DriverLicense $l) => $l->expiration_date ? strtotime((string) $l->expiration_date) : 0
+        )->first();
+    }
+
+    /**
      * Obtiene los proyectos a los que pertenece el tercero (conductor).
      *
      * El pivote incluye el vehículo asignado a cada conductor en el proyecto.
