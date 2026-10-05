@@ -228,6 +228,8 @@ class ThirdPartyService extends BaseService
     public function createThirdParty(array $data): Model
     {
         return $this->transaction(function () use ($data) {
+            $this->asegurarCorreoLibreDeOtroTercero((string) $data['email'], (string) $data['company_uuid']);
+
             $thirdParty = ThirdParty::create([
                 'company_uuid' => $data['company_uuid'],
                 'person_type' => $data['person_type'],
@@ -292,6 +294,57 @@ class ThirdPartyService extends BaseService
      * (p. ej. ADMIN_EMPRESA, SUPERADMIN) se preservan.
      */
     private const MANAGED_ACCESS_ROLES = ['EMPLEADO', 'AFILIADO', 'CONDUCTOR'];
+
+    /**
+     * Rechaza (422) guardar un tercero con el correo del usuario de OTRO tercero de la empresa: el usuario es único
+     * por correo y guardarlo lo re-enlazaría y le cambiaría el rol (pasó con TURISVAL y su conductor).
+     *
+     * @throws \Illuminate\Validation\ValidationException
+     */
+    private function asegurarCorreoLibreDeOtroTercero(string $email, string $companyUuid, ?string $excluirUuid = null): void
+    {
+        $otro = $email !== '' ? $this->correoEnUsoPorOtroTercero($email, $companyUuid, $excluirUuid) : null;
+        if ($otro) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'email' => "Este correo ya es el usuario de «{$otro['nombre']}» (".(implode(', ', $otro['roles']) ?: 'sin rol').'). Use otro correo para este tercero.',
+            ]);
+        }
+    }
+
+    /**
+     * ¿El correo ya es el usuario de OTRO tercero de la empresa? El usuario es único por correo: guardar un
+     * tercero con ese correo re-enlaza al usuario (y le cambia el rol), como pasó con TURISVAL y su conductor.
+     * Alimenta el aviso previo del formulario (`email-check`) y el bloqueo al guardar. Devuelve null si el correo
+     * es libre o ya pertenece a `$excluirUuid`.
+     *
+     * @return array{nombre: string, roles: array<int, string>}|null
+     */
+    public function correoEnUsoPorOtroTercero(string $email, string $companyUuid, ?string $excluirUuid = null): ?array
+    {
+        $usuario = User::where('email', $email)->first();
+        if (! $usuario) {
+            return null;
+        }
+
+        $enlazado = $usuario->companies()
+            ->where('company_user.company_uuid', $companyUuid)
+            ->whereNotNull('company_user.third_party_uuid')
+            ->first()?->pivot?->third_party_uuid;
+
+        if (! $enlazado || $enlazado === $excluirUuid) {
+            return null;
+        }
+
+        $tercero = ThirdParty::query()->where('uuid', $enlazado)->first();
+        if (! $tercero) {
+            return null;
+        }
+
+        return [
+            'nombre' => $tercero->company_name ?: trim($tercero->first_name.' '.$tercero->last_name),
+            'roles' => $usuario->getRoleNames()->all(),
+        ];
+    }
 
     /**
      * Crea (o recupera) el usuario vinculado al tercero y le asigna los roles
@@ -466,6 +519,8 @@ class ThirdPartyService extends BaseService
             if (! $record) {
                 throw new \RuntimeException('ThirdParty not found.');
             }
+
+            $this->asegurarCorreoLibreDeOtroTercero((string) ($data['email'] ?? $record->email), (string) $record->company_uuid, $record->uuid);
 
             $record->update([
                 'person_type' => $data['person_type'] ?? $record->person_type,

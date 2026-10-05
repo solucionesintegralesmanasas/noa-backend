@@ -564,6 +564,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [ThirdPartyController::class, 'index'])->name('api.v1.third-parties.index');
             Route::get('/list', [ThirdPartyController::class, 'list'])->name('api.v1.third-parties.list');
             Route::post('/', [ThirdPartyController::class, 'store'])->name('api.v1.third-parties.store');
+            Route::get('/email-check', [ThirdPartyController::class, 'emailCheck'])->name('api.v1.third-parties.email-check');
             Route::get('/{uuid}', [ThirdPartyController::class, 'show'])->name('api.v1.third-parties.show');
             Route::get('/{uuid}/technical-sheet', [ThirdPartyController::class, 'technicalSheet'])->name('api.v1.third-parties.technical-sheet');
             Route::get('/{uuid}/technical-sheet/pdf', [ThirdPartyController::class, 'technicalSheetPdf'])->name('api.v1.third-parties.technical-sheet.pdf');
@@ -1002,12 +1003,12 @@ Route::prefix('v1')->group(function () {
         // ─── MÓDULO REPORTES ───
         Route::prefix('reports')->group(function () {
             Route::prefix('vehicles')->group(function () {
-                Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'index'])->name('api.v1.reports.vehicles.index');
-                Route::get('/catalogs/affiliated-companies', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'affiliatedCompanies'])->name('api.v1.reports.vehicles.affiliated-companies');
-                Route::get('/catalogs/agreements', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'agreements'])->name('api.v1.reports.vehicles.agreements');
-                Route::get('/catalogs/drivers', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'drivers'])->name('api.v1.reports.vehicles.drivers');
-                Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'excel'])->name('api.v1.reports.vehicles.excel');
-                Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'pdf'])->name('api.v1.reports.vehicles.pdf');
+                Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'index'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.index');
+                Route::get('/catalogs/affiliated-companies', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'affiliatedCompanies'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.affiliated-companies');
+                Route::get('/catalogs/agreements', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'agreements'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.agreements');
+                Route::get('/catalogs/drivers', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'drivers'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.drivers');
+                Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'excel'])->middleware('permission:reports.vehicles.export-excel')->name('api.v1.reports.vehicles.excel');
+                Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'pdf'])->middleware('permission:reports.vehicles.export-pdf')->name('api.v1.reports.vehicles.pdf');
             });
         });
 

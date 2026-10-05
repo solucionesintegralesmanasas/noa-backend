@@ -154,10 +154,11 @@ class LocationTrackingService extends BaseService
      * Obtiene la lista de conductores con sesión GPS activa en tiempo real.
      * Filtra por sesiones con status='active' y retorna la última ubicación de cada uno.
      */
-    public function getActiveDrivers(?string $companyUuid): \Illuminate\Support\Collection
+    public function getActiveDrivers(?string $companyUuid, ?array $soloConductores = null): \Illuminate\Support\Collection
     {
         $activeDriverUuids = DriverLocationSession::query()
             ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
+            ->when($soloConductores !== null, fn ($q) => $q->whereIn('third_party_uuid', $soloConductores))
             ->where('status', 'active')
             ->pluck('third_party_uuid');
 

@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1\Fleet;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Tracking\StoreLocationRequest;
+use App\Services\Tracking\AlcanceAfiliado;
 use App\Services\Tracking\LocationTrackingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -177,9 +178,11 @@ class DriverLocationController extends Controller
     public function activeDrivers(Request $request): JsonResponse
     {
         try {
-            $companyUuid = $request->user()->companies()->first()?->uuid;
+            $companyUuid = $request->attributes->get('current_company_uuid') ?? $request->user()->companies()->first()?->uuid;
 
-            $drivers = $this->trackingService->getActiveDrivers($companyUuid);
+            // Un afiliado solo ve a sus conductores (AlcanceAfiliado); admin y superadmin ven toda la empresa.
+            $alcance = AlcanceAfiliado::paraUsuario($request->user(), $companyUuid);
+            $drivers = $this->trackingService->getActiveDrivers($companyUuid, $alcance['conductores'] ?? null);
 
             return $this->successResponse($drivers, 'Conductores activos recuperados.');
         } catch (\Throwable $e) {
@@ -197,9 +200,14 @@ class DriverLocationController extends Controller
             new OA\Response(response: 200, description: 'Última ubicación del conductor.'),
         ]
     )]
-    public function lastLocation(string $uuid): JsonResponse
+    public function lastLocation(Request $request, string $uuid): JsonResponse
     {
         try {
+            $companyUuid = $request->attributes->get('current_company_uuid') ?? $request->user()->companies()->first()?->uuid;
+            if (! AlcanceAfiliado::permiteConductor($request->user(), $companyUuid, $uuid)) {
+                return $this->notFoundResponse('No se encontró ubicación para este conductor.');
+            }
+
             $location = $this->trackingService->getLastLocation($uuid);
 
             if (! $location) {
@@ -225,7 +233,7 @@ class DriverLocationController extends Controller
     public function alerts(Request $request): JsonResponse
     {
         try {
-            $companyUuid = $request->user()->companies()->first()->uuid ?? null;
+            $companyUuid = $request->attributes->get('current_company_uuid') ?? $request->user()->companies()->first()?->uuid;
             $perPage = (int) $request->query('per_page', '15');
             $onlyUnread = $request->boolean('only_unread', false);
 
