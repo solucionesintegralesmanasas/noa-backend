@@ -129,11 +129,66 @@ class DriverLicenseService extends BaseService
     }
 
     /**
+     * Estado normalizado para comparar (tolera minúsculas y espacios).
+     */
+    private static function estadoNormalizado(mixed $estado): string
+    {
+        return mb_strtoupper(trim((string) $estado));
+    }
+
+    /**
+     * Indica si una licencia cuenta como vigente: estado ACTIVA y sin vencer
+     * por fecha (sin fecha o vence hoy/después).
+     */
+    private static function esVigente(mixed $licencia): bool
+    {
+        if (self::estadoNormalizado($licencia->status ?? null) !== 'ACTIVA') {
+            return false;
+        }
+        if (empty($licencia->expiration_date)) {
+            return true;
+        }
+
+        return \Carbon\Carbon::parse($licencia->expiration_date)->gte(today());
+    }
+
+    /**
+     * ¿Tiene el conductor otra licencia vigente distinta de la indicada?
+     */
+    private function otraVigente(string $thirdPartyUuid, ?string $ignorarUuid = null): bool
+    {
+        return DriverLicense::where('third_party_uuid', $thirdPartyUuid)
+            ->when($ignorarUuid, fn ($q) => $q->where('uuid', '!=', $ignorarUuid))
+            ->get(['uuid', 'status', 'expiration_date'])
+            ->contains(fn ($licencia) => self::esVigente($licencia));
+    }
+
+    /**
+     * Marca VENCIDA cualquier otra licencia ACTIVA del conductor (limpieza de
+     * estados rancios al activar la nueva; las SUSPENDIDA/CANCELADA/VENCIDA no
+     * se tocan).
+     */
+    private function marcarAnterioresVencidas(string $thirdPartyUuid, ?string $exceptoUuid = null): void
+    {
+        DriverLicense::where('third_party_uuid', $thirdPartyUuid)
+            ->when($exceptoUuid, fn ($q) => $q->where('uuid', '!=', $exceptoUuid))
+            ->whereRaw("UPPER(TRIM(status)) = 'ACTIVA'")
+            ->update(['status' => 'VENCIDA', 'updated_at' => now()]);
+    }
+
+    /**
      * Método createDriverLicense.
      */
     public function createDriverLicense(array $data): Model
     {
         return $this->transaction(function () use ($data) {
+            if (self::estadoNormalizado($data['status'] ?? 'ACTIVA') === 'ACTIVA'
+                && $this->otraVigente($data['third_party_uuid'])) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'status' => 'El conductor ya tiene una licencia vigente. Solo se puede crear una nueva cuando la anterior esté vencida.',
+                ]);
+            }
+
             $license = DriverLicense::create([
                 'company_uuid' => $data['company_uuid'],
                 'third_party_uuid' => $data['third_party_uuid'],
@@ -150,6 +205,10 @@ class DriverLicenseService extends BaseService
                 'driver_license_uuid' => $license->uuid,
                 'third_party_uuid' => $data['affiliate_uuid'] ?? $license->third_party_uuid, // Affiliate UUID
             ]);
+
+            if (self::estadoNormalizado($license->status) === 'ACTIVA') {
+                $this->marcarAnterioresVencidas($license->third_party_uuid, $license->uuid);
+            }
 
             try {
                 app(\App\Services\Notifications\NotificationsService::class)->syncNotifications($license->company_uuid);
@@ -168,6 +227,13 @@ class DriverLicenseService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
+
+            $estadoNuevo = self::estadoNormalizado($data['status'] ?? $record->status);
+            if ($estadoNuevo === 'ACTIVA' && $this->otraVigente($record->third_party_uuid, $uuid)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'status' => 'El conductor ya tiene otra licencia vigente. Solo se puede activar una cuando la anterior esté vencida.',
+                ]);
+            }
 
             $record->update([
                 'third_party_uuid' => $data['third_party_uuid'] ?? $record->third_party_uuid,
@@ -192,6 +258,10 @@ class DriverLicenseService extends BaseService
                         'third_party_uuid' => $targetAffiliateUuid,
                     ]);
                 }
+            }
+
+            if (self::estadoNormalizado($record->fresh()->status) === 'ACTIVA') {
+                $this->marcarAnterioresVencidas($record->third_party_uuid, $record->uuid);
             }
 
             try {
