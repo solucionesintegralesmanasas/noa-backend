@@ -242,7 +242,7 @@
     <!-- DRIVER LICENSE -->
     <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 10px;">LICENCIA(S) DE CONDUCCIÓN</div>
     @php
-        $license = $driver->driverLicenses->first();
+        $license = $driver->licenciaActual();
     @endphp
     <table class="table-dashed text-center">
         <tr>

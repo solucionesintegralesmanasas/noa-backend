@@ -356,9 +356,10 @@
                             {{ $conductor->last_name }}</td>
                         <td class="text-center"><strong>CÉDULA:</strong><br> {{ $conductor->document_number }}</td>
                         <td class="text-center"><strong>LICENCIA:</strong><br>
-                            {{ $conductor->driver_licenses->first()->number ?? 'N/A' }}</td>
+                            @php($licencia = $conductor->licenciaActual())
+                            {{ $licencia?->number ?? 'N/A' }}</td>
                         <td class="text-center"><strong>VIGENCIA:</strong><br>
-                            {{ $conductor->driver_licenses->first() ? \Carbon\Carbon::parse($conductor->driver_licenses->first()->expiration_date)->format('d/m/Y') : 'N/A' }}
+                            {{ $licencia?->expiration_date ? \Carbon\Carbon::parse($licencia->expiration_date)->format('d/m/Y') : 'N/A' }}
                         </td>
                     </tr>
                 @endif
