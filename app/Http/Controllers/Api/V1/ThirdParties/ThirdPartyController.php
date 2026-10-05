@@ -95,6 +95,45 @@ class ThirdPartyController extends Controller
     }
 
     #[OA\Get(
+        path: '/api/v1/third-parties/email-check',
+        summary: 'Avisar si un correo ya es el usuario de otro tercero (no bloquea)',
+        operationId: 'emailCheckThirdParty',
+        tags: ['Tercero'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'email', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'email')),
+            new OA\Parameter(name: 'exclude_uuid', in: 'query', required: false, description: 'Tercero que se está editando', schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'en_uso y, si aplica, el tercero dueño del usuario.'),
+        ]
+    )]
+    public function emailCheck(Request $request): JsonResponse
+    {
+        try {
+            $datos = $request->validate([
+                'email' => ['required', 'email'],
+                'exclude_uuid' => ['nullable', 'uuid'],
+            ]);
+            $companyUuid = (string) $request->attributes->get('current_company_uuid');
+
+            $otro = $companyUuid !== ''
+                ? $this->thirdPartyService->correoEnUsoPorOtroTercero($datos['email'], $companyUuid, $datos['exclude_uuid'] ?? null)
+                : null;
+
+            // El nombre y los roles del dueño solo los ven los administradores: a un afiliado se le diría quién es
+            // otro afiliado de la empresa. El aviso de "correo en uso" sí lo recibe cualquiera.
+            $detalle = $request->user()->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA']) ? $otro : null;
+
+            return $this->successResponse(['en_uso' => $otro !== null, 'tercero' => $detalle], 'Verificación de correo realizada.');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
         path: '/api/v1/third-parties/{uuid}',
         summary: 'Obtener detalle de Tercero por UUID',
         operationId: 'showThirdParty',

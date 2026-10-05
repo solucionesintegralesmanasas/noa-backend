@@ -427,8 +427,6 @@ class RoleSeeder extends Seeder
             'vehicles.history_pdf',
             'vehicles.technical_sheet_pdf',
 
-            'reports.vehicles.index',
-
             'vehicle_documents.index',
 
             'operation_cards.index',
@@ -462,6 +460,10 @@ class RoleSeeder extends Seeder
             'fuec.index',
             'fuec.create',
             'fuec.profile',
+
+            // Rastreo de SUS conductores (AlcanceAfiliado acota el resultado en el backend).
+            'locations.view',
+            'locations.history',
 
         ], 'and', false)->get();
         $conductorPerms = Permission::query()->whereIn('name', [

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Fleet;
 
 use App\Http\Controllers\Controller;
+use App\Services\Tracking\AlcanceAfiliado;
 use App\Services\Tracking\LocationHistoryService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -57,7 +58,8 @@ class LocationHistoryController extends Controller
         ]);
 
         $this->validarRango($validated['start_date'], $validated['end_date']);
-        $companyUuid = $request->user()->companies()->first()->uuid ?? null;
+        $companyUuid = $request->attributes->get('current_company_uuid') ?? $request->user()->companies()->first()?->uuid;
+        $this->asegurarConductorVisible($request, $companyUuid, $uuid);
 
         try {
             if (($validated['mode'] ?? 'points') === 'map') {
@@ -89,6 +91,14 @@ class LocationHistoryController extends Controller
             return $this->successResponse($result['data'], 'Historial de ruta recuperado.', 200, $result['meta']);
         } catch (\Throwable $e) {
             return $this->handleException($e);
+        }
+    }
+
+    /** Un afiliado solo consulta el recorrido de sus conductores: los demás responden 404, como si no existieran. */
+    private function asegurarConductorVisible(Request $request, ?string $companyUuid, string $conductorUuid): void
+    {
+        if (! AlcanceAfiliado::permiteConductor($request->user(), $companyUuid, $conductorUuid)) {
+            abort(404, 'No se encontró el conductor.');
         }
     }
 
@@ -142,7 +152,8 @@ class LocationHistoryController extends Controller
         }
 
         try {
-            $companyUuid = $request->user()->companies()->first()->uuid ?? null;
+            $companyUuid = $request->attributes->get('current_company_uuid') ?? $request->user()->companies()->first()?->uuid;
+            $this->asegurarConductorVisible($request, $companyUuid, $uuid);
 
             $stats = $this->historyService->getDriverStats(
                 $uuid,

@@ -89,6 +89,40 @@ abstract class BaseService
     }
 
     /**
+     * Tablas de flota cuyo acceso por UUID (show, update, delete) se limita al afiliado dueño.
+     * Fuera de esta lista el comportamiento no cambia; ampliarla exige su prueba en AislamientoAfiliadoTest.
+     */
+    private const TABLAS_AISLADAS_POR_AFILIADO = [
+        'vehicles', 'vehicle_documents', 'operation_cards', 'vehicle_inspections', 'owners_drivers',
+    ];
+
+    /**
+     * Aplica al acceso por UUID el mismo filtro de afiliado que los listados, para que conocer el UUID
+     * de un registro de otro afiliado de la empresa no baste para leerlo, editarlo o borrarlo.
+     *
+     * Solo AFILIADO: el CONDUCTOR queda fuera a propósito (SPEC-005, fuera de alcance) y por ahora
+     * puede abrir por UUID registros de otros afiliados de su empresa; cerrarlo requiere su propio spec.
+     * Sin empresa resoluble el acceso se cierra (no se devuelve nada) en vez de quedar abierto.
+     */
+    protected function aislarPorAfiliado(Builder $query): void
+    {
+        $user = Auth::user();
+        if (! $user || ! $user->hasRole('AFILIADO') || ! in_array($this->model->getTable(), self::TABLAS_AISLADAS_POR_AFILIADO, true)) {
+            return;
+        }
+
+        $companyUuid = request()->attributes->get('current_company_uuid')
+            ?? $user->companies()->first()?->uuid;
+        if (! $companyUuid) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $this->aplicarFiltroAfiliado($query, $companyUuid, false);
+    }
+
+    /**
      * Obtiene todos los registros.
      */
     public function all(array $columns = ['*'], array $relations = []): Collection
@@ -120,7 +154,10 @@ abstract class BaseService
     public function findByUuid(string $uuid, array $columns = ['*'], array $relations = []): ?Model
     {
         try {
-            return $this->query()->with($relations)->where('uuid', $uuid)->first($columns);
+            $query = $this->query()->with($relations)->where('uuid', $uuid);
+            $this->aislarPorAfiliado($query);
+
+            return $query->first($columns);
         } catch (Throwable $e) {
             Logger::error(class_basename($this) . '#findByUuid error: ' . $e->getMessage(), $e);
             throw $e;
@@ -355,9 +392,20 @@ abstract class BaseService
             });
         }
 
-        // Filtro adicional por third_party_uuid para AFILIADO / CONDUCTOR
+        $this->aplicarFiltroAfiliado($query, $companyUuid);
+    }
+
+    /**
+     * Restringe la consulta a lo que ve el AFILIADO (y el CONDUCTOR si $incluirConductor) autenticado:
+     * sus vehículos, conductores y documentos, no los de otros afiliados de la misma empresa.
+     */
+    protected function aplicarFiltroAfiliado(Builder $query, string $companyUuid, bool $incluirConductor = true): void
+    {
+        $table = $this->model->getTable();
+        $fillable = $this->model->getFillable();
         $user = Auth::user();
-        if ($user && ($user->hasRole('AFILIADO') || $user->hasRole('CONDUCTOR'))) {
+
+        if ($user && ($user->hasRole('AFILIADO') || ($incluirConductor && $user->hasRole('CONDUCTOR')))) {
             $thirdPartyUuid = request()->attributes->get('current_third_party_uuid');
 
             if (! $thirdPartyUuid) {
@@ -497,6 +545,14 @@ abstract class BaseService
                 } elseif (method_exists($this->model, 'thirdParty')) {
                     $query->whereHas('thirdParty', function ($q) use ($affiliateUuid) {
                         $q->where('third_parties.uuid', $affiliateUuid);
+                    });
+                } elseif ($user->hasRole('AFILIADO') && method_exists($this->model, 'vehicle')) {
+                    // Documentos, tarjetas, mantenimientos...: pertenecen al afiliado por su vehículo.
+                    $query->whereHas('vehicle', function ($q) use ($affiliateUuid) {
+                        $q->where(function ($w) use ($affiliateUuid) {
+                            $w->where('vehicles.third_party_uuid', $affiliateUuid)
+                                ->orWhereHas('owners', fn ($o) => $o->where('third_party_uuid', $affiliateUuid));
+                        });
                     });
                 }
             }
