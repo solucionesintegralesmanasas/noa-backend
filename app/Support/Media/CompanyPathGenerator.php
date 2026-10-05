@@ -81,12 +81,12 @@ class CompanyPathGenerator implements PathGenerator
      */
     private function buildPath(Media $media): string
     {
-        $model = $media->model;
+        $model = $this->modeloDuenio($media);
         $company = null;
 
         if ($model instanceof Company) {
             $company = $model;
-        } elseif (method_exists($model, 'company') && $model->company) {
+        } elseif ($model !== null && method_exists($model, 'company') && $model->company) {
             $company = $model->company;
         }
 
@@ -103,6 +103,20 @@ class CompanyPathGenerator implements PathGenerator
         // Fallback seguro: usamos el UUID del media (no el ID numérico)
         // para evitar colisiones en discos remotos como Google Drive / S3
         return 'fallback/'.($media->uuid ?? $media->id).'/';
+    }
+
+    /**
+     * Resuelve el modelo dueño SIN colgarlo de `$media->model`: hidratarlo ahí lo mete en el grafo que se está
+     * serializando (archivo → dueño → archivos → ...) y provocaba la recursión de SPEC-006. Si la relación ya
+     * estaba cargada se reutiliza; si no, se consulta aparte.
+     */
+    private function modeloDuenio(Media $media): ?\Illuminate\Database\Eloquent\Model
+    {
+        if ($media->relationLoaded('model')) {
+            return $media->getRelation('model');
+        }
+
+        return $media->model()->getResults();
     }
 
     /**

@@ -31,6 +31,13 @@ class SystemConfiguration extends Model implements HasMedia
 
     protected $table = 'system_configuration';
 
+    /**
+     * La relación de archivos no se serializa (SPEC-006): cada archivo calcula su URL cargando el modelo dueño,
+     * que vuelve a incluir sus archivos, y con instancias nuevas el guard antirrecursión no la frena.
+     * Lo que consumen el frontend y los PDFs son las tres URLs de `toArray()`.
+     */
+    protected $hidden = ['media'];
+
     protected $fillable = [
         'uuid',
         'company_uuid',
@@ -161,11 +168,21 @@ class SystemConfiguration extends Model implements HasMedia
         $array = parent::toArray();
 
         // Inyectar URLs de media sin recursión
-        $array['ministry_logo_url'] = $this->ministry_logo_url;
-        $array['super_logo_url'] = $this->super_logo_url;
-        $array['letterhead_url'] = $this->letterhead_url;
+        $array['ministry_logo_url'] = $this->urlSegura('ministry_logo_url');
+        $array['super_logo_url'] = $this->urlSegura('super_logo_url');
+        $array['letterhead_url'] = $this->urlSegura('letterhead_url');
 
         return $array;
+    }
+
+    /** Un adjunto roto (archivo faltante, colección vacía) degrada a URL vacía y nunca tumba la petición. */
+    private function urlSegura(string $accesor): string
+    {
+        try {
+            return (string) $this->{$accesor};
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     public function company(): BelongsTo
