@@ -908,15 +908,15 @@ Route::prefix('v1')->group(function () {
 
             // Radicación TO: ruta, validación, firma por enlace y TXT RUNT
             Route::prefix('radicacion')->group(function () {
-                Route::get('/expedientes', [RadicacionController::class, 'expedientes'])->name('api.v1.procedure.radicacion.expedientes');
-                Route::post('/expediente', [RadicacionController::class, 'crearExpediente'])->name('api.v1.procedure.radicacion.expediente');
-                Route::get('/{uuid}/detalle', [RadicacionController::class, 'detalle'])->name('api.v1.procedure.radicacion.detalle');
-                Route::post('/{uuid}/avanzar', [RadicacionController::class, 'avanzar'])->name('api.v1.procedure.radicacion.avanzar');
-                Route::get('/{uuid}/ruta', [RadicacionController::class, 'ruta'])->name('api.v1.procedure.radicacion.ruta');
-                Route::get('/{uuid}/validar', [RadicacionController::class, 'validar'])->name('api.v1.procedure.radicacion.validar');
-                Route::post('/enlace-firma', [RadicacionController::class, 'enlaceFirma'])->name('api.v1.procedure.radicacion.enlace-firma');
-                Route::post('/{uuid}/txt', [RadicacionController::class, 'generarTxt'])->name('api.v1.procedure.radicacion.txt');
-                Route::get('/{uuid}/documento/{documento}', [RadicacionController::class, 'documento'])->name('api.v1.procedure.radicacion.documento');
+                Route::get('/expedientes', [RadicacionController::class, 'expedientes'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.expedientes');
+                Route::post('/expediente', [RadicacionController::class, 'crearExpediente'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.expediente');
+                Route::get('/{uuid}/detalle', [RadicacionController::class, 'detalle'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.detalle');
+                Route::post('/{uuid}/avanzar', [RadicacionController::class, 'avanzar'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.avanzar');
+                Route::get('/{uuid}/ruta', [RadicacionController::class, 'ruta'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.ruta');
+                Route::get('/{uuid}/validar', [RadicacionController::class, 'validar'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.validar');
+                Route::post('/enlace-firma', [RadicacionController::class, 'enlaceFirma'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.enlace-firma');
+                Route::post('/{uuid}/txt', [RadicacionController::class, 'generarTxt'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.txt');
+                Route::get('/{uuid}/documento/{documento}', [RadicacionController::class, 'documento'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.documento');
             });
         });
 

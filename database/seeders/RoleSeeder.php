@@ -330,7 +330,6 @@ class RoleSeeder extends Seeder
             'radicacion_to.index',
             'radicacion_to.create',
             'radicacion_to.update',
-            'radicacion_to.delete',
 
             'service_provision_contracts.index',
             'service_provision_contracts.create',

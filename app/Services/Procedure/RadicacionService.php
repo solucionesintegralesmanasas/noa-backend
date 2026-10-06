@@ -305,6 +305,15 @@ class RadicacionService extends BaseService
     {
         return $this->transaction(function () use ($hijoUuid) {
             $hijo = Procedure::where('uuid', $hijoUuid)->firstOrFail();
+            if ($hijo->status === 'COMPLETADO') {
+                abort(422, 'Este paso ya fue completado.');
+            }
+            if ($hijo->parent_procedure_uuid) {
+                $expediente = Procedure::where('uuid', $hijo->parent_procedure_uuid)->firstOrFail();
+                if (! $this->puedeAvanzar($expediente, $hijo->procedure_type)) {
+                    abort(422, 'Debe completar el paso anterior antes de avanzar en este.');
+                }
+            }
             $val = $this->validarRequisitos($hijo);
             if (! $val['ok']) {
                 abort(422, $val['mensaje'] ?? 'No cumple los requisitos del paso.');

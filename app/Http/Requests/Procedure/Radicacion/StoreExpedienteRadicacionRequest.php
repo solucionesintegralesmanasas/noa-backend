@@ -8,13 +8,14 @@ use App\Traits\HandlesApiResponse;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Validation\Rule;
 
 /**
  * Petición de validación para crear un expediente de radicación.
  */
 class StoreExpedienteRadicacionRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaEmpresaDelContexto;
 
     public function authorize(): bool
     {
@@ -25,10 +26,15 @@ class StoreExpedienteRadicacionRequest extends FormRequest
     {
         return [
             'link_type' => 'required|in:NUEVO_VEHICULO,CAMBIO_DE_EMPRESA,RENOVACION,DESVINCULACION_MUTUO,DESVINCULACION_UNILATERAL',
-            'company_uuid' => 'nullable|uuid',
+            'company_uuid' => ['nullable', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
             'vehicle_uuid' => 'required|uuid|exists:vehicles,uuid',
-            'procedure_code' => 'required|string|max:50',
+            'procedure_code' => [
+                'required', 'string', 'max:50',
+                Rule::unique('procedures', 'procedure_code')
+                    ->where(fn ($q) => $q->where('company_uuid', $this->input('company_uuid') ?? $this->attributes->get('current_company_uuid'))
+                        ->where(fn ($w) => $w->whereNull('parent_procedure_uuid')->orWhere('parent_procedure_uuid', ''))),
+            ],
             'date_of_creation' => 'required|date',
             'city_uuid' => 'required|uuid|exists:cities,uuid',
             'subject' => 'nullable|string|max:255',
@@ -45,6 +51,7 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'vehicle_uuid.required' => 'El vehículo es obligatorio.',
             'vehicle_uuid.exists' => 'El vehículo no existe.',
             'procedure_code.required' => 'El código de trámite es obligatorio.',
+            'procedure_code.unique' => 'Ya existe un trámite con este código en la empresa.',
             'date_of_creation.required' => 'La fecha de radicación es obligatoria.',
             'city_uuid.required' => 'La ciudad es obligatoria.',
             'city_uuid.exists' => 'La ciudad no existe.',

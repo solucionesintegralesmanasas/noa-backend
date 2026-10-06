@@ -383,7 +383,6 @@ class PermissionSeeder extends Seeder
             'radicacion_to.index'  => ['module' => 'Radicación TO', 'description' => 'Ver expedientes y ruta de radicación TO'],
             'radicacion_to.create' => ['module' => 'Radicación TO', 'description' => 'Crear expediente y generar enlaces de firma'],
             'radicacion_to.update' => ['module' => 'Radicación TO', 'description' => 'Avanzar pasos y generar TXT RUNT'],
-            'radicacion_to.delete' => ['module' => 'Radicación TO', 'description' => 'Cancelar expedientes de radicación'],
 
             // --- Contratos de prestación de servicios (segunda tabla) ---
             'service_provision_contracts.index'  => ['module' => 'Contratos de Prestación', 'description' => 'Listar contratos de prestación de servicios'],
