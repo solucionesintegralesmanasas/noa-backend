@@ -96,6 +96,25 @@ class ThirdParty extends Model implements HasMedia
     ];
 
     /**
+     * Campos de nombre que se guardan siempre en mayúsculas (consistencia de afiliados y conductores).
+     *
+     * @var array<int, string>
+     */
+    public const CAMPOS_EN_MAYUSCULAS = ['first_name', 'last_name', 'company_name', 'trade_name'];
+
+    /**
+     * Normaliza a mayúsculas los nombres, razón social y nombre comercial al asignarlos.
+     */
+    public function setAttribute($key, $value)
+    {
+        if (in_array($key, self::CAMPOS_EN_MAYUSCULAS, true) && is_string($value)) {
+            $value = mb_strtoupper(trim(preg_replace('/\s+/u', ' ', $value) ?? $value), 'UTF-8');
+        }
+
+        return parent::setAttribute($key, $value);
+    }
+
+    /**
      * Obtiene la empresa propietaria del tercero.
      */
     public function company(): BelongsTo
