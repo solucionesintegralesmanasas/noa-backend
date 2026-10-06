@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\Support\InsertaFilas;
@@ -68,7 +69,11 @@ class RadicacionFirmaTest extends TestCase
         Schema::enableForeignKeyConstraints();
 
         setPermissionsTeamId(null);
-        $user->assignRole(Role::findOrCreate('ADMIN_EMPRESA', 'api'));
+        $rol = Role::findOrCreate('ADMIN_EMPRESA', 'api');
+        foreach (['index', 'create', 'update'] as $accion) {
+            $rol->givePermissionTo(Permission::findOrCreate("radicacion_to.{$accion}", 'api'));
+        }
+        $user->assignRole($rol);
 
         DB::table('company_user')->insert([
             'user_id' => $user->id,

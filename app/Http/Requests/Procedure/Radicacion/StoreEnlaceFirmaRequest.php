@@ -14,7 +14,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
  */
 class StoreEnlaceFirmaRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaEmpresaDelContexto;
 
     public function authorize(): bool
     {
@@ -24,7 +24,7 @@ class StoreEnlaceFirmaRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'company_uuid' => 'required|uuid',
+            'company_uuid' => ['required', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'contract_origin' => 'required|in:ADMIN_FLOTA,PRESTACION',
             'contract_uuid' => 'required|uuid',
             'signer_role' => 'required|in:PROPIETARIO,REP_LEGAL,CLIENTE,TESTIGO',
