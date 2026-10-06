@@ -304,7 +304,8 @@ class RadicacionService extends BaseService
     public function avanzarPaso(string $hijoUuid): array
     {
         return $this->transaction(function () use ($hijoUuid) {
-            $hijo = Procedure::where('uuid', $hijoUuid)->firstOrFail();
+            // Bloqueo de fila: dos clics simultáneos no deben cerrar el mismo paso dos veces.
+            $hijo = Procedure::where('uuid', $hijoUuid)->lockForUpdate()->firstOrFail();
             if ($hijo->status === 'COMPLETADO') {
                 abort(422, 'Este paso ya fue completado.');
             }
