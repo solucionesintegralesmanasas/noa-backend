@@ -423,7 +423,7 @@ class ThirdPartyService extends BaseService
 
         $firstName = $data['first_name'] ?? $thirdParty->first_name ?? $data['trade_name'] ?? $thirdParty->trade_name ?? $data['company_name'] ?? $thirdParty->company_name ?? 'Usuario';
         $lastName = $data['last_name'] ?? $thirdParty->last_name ?? '';
-        $fullName = trim($firstName.' '.$lastName);
+        $fullName = mb_strtoupper(trim($firstName.' '.$lastName), 'UTF-8');
 
         // user_name y contraseña temporal = número de documento (el usuario debe cambiarla)
         $documentNumber = $data['document_number'] ?? $thirdParty->document_number;

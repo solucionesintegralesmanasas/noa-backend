@@ -141,4 +141,26 @@ class RadicacionHttpTest extends TestCase
             ->assertStatus(422)
             ->assertJsonFragment(['field' => 'procedure_code', 'code' => 'INVALID_FIELD_VALUE']);
     }
+
+    public function test_el_enlace_de_firma_rechaza_un_contrato_de_otra_empresa(): void
+    {
+        $ajena = $this->insertar('companies', ['business_name' => 'Ajena', 'is_active' => true]);
+        $procAjeno = $this->insertar('procedures', ['company_uuid' => $ajena]);
+        $contratoAjeno = $this->insertar('service_provision_contracts', [
+            'company_uuid' => $ajena, 'procedure_uuid' => $procAjeno, 'contract_number' => 'SPC-AJENO',
+            'issue_date' => '2026-01-01', 'start_date' => '2026-02-01', 'end_date' => '2026-12-31',
+            'duration' => 300, 'status' => 'PENDIENTE_FIRMA',
+        ]);
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/radicacion/enlace-firma', [
+                'company_uuid' => $this->empresa, 'contract_origin' => 'PRESTACION', 'contract_uuid' => $contratoAjeno,
+                'signer_role' => 'REP_LEGAL', 'signer_name' => 'Firmante', 'signer_document' => '123',
+            ])
+            ->assertStatus(422)
+            ->assertJsonFragment(['field' => 'contract_uuid']);
+
+        $this->assertSame(0, DB::table('contract_signatures')->where('contract_uuid', $contratoAjeno)->count());
+    }
 }

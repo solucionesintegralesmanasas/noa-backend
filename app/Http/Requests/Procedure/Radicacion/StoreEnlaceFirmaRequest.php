@@ -26,7 +26,7 @@ class StoreEnlaceFirmaRequest extends FormRequest
         return [
             'company_uuid' => ['required', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'contract_origin' => 'required|in:ADMIN_FLOTA,PRESTACION',
-            'contract_uuid' => 'required|uuid',
+            'contract_uuid' => ['required', 'uuid', $this->reglaContratoDeLaEmpresa()],
             'signer_role' => 'required|in:PROPIETARIO,REP_LEGAL,CLIENTE,TESTIGO',
             'signer_name' => 'required|string',
             'signer_document' => 'required|string',
@@ -69,5 +69,27 @@ class StoreEnlaceFirmaRequest extends FormRequest
     public function failedValidation(Validator $validator): never
     {
         throw new HttpResponseException($this->validationErrorResponse($validator->errors()->toArray()));
+    }
+
+    /**
+     * El contrato debe existir y pertenecer a la empresa de la petición: sin esto se podía generar
+     * un enlace público de firma (y de descarga del PDF) para el contrato de otra empresa.
+     */
+    private function reglaContratoDeLaEmpresa(): \Closure
+    {
+        return function (string $attribute, mixed $value, \Closure $fail): void {
+            $modelo = $this->input('contract_origin') === 'ADMIN_FLOTA'
+                ? \App\Models\FleetServiceContract::class
+                : \App\Models\ServiceProvisionContract::class;
+
+            $existe = $modelo::withoutGlobalScopes()
+                ->where('uuid', $value)
+                ->where('company_uuid', $this->input('company_uuid'))
+                ->exists();
+
+            if (! $existe) {
+                $fail('El contrato no existe en la empresa.');
+            }
+        };
     }
 }
