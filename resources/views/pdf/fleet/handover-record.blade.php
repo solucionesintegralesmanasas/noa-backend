@@ -125,6 +125,11 @@
 </head>
 <body>
 
+    @if (!empty($letterhead ?? null))
+        <div style="text-align:center;margin-bottom:6px;">
+            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+        </div>
+    @endif
     {{-- ============ ENCABEZADO CON LOGO Y CÓDIGO ============ --}}
     <table class="header-container">
         <tr>
@@ -408,7 +413,7 @@
     </table>
 
     <div class="footer-info">
-        Fecha: {{ $generation_date ?? date('d/m/Y') }} &nbsp; Versión: 001 &nbsp; Código: M-F-059 &nbsp; Página 1 de 1
+        Fecha: {{ $generation_date ?? date('d/m/Y') }} &nbsp; Versión: 001 &nbsp; Código: M-F-059
     </div>
 
 </body>

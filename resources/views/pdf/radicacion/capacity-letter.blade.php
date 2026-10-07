@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <title>Solicitud de capacidad transportadora</title>
-    @include('pdf.radicacion._estilos')
+    @include('pdf.radicacion.partials.styles')
 </head>
 
 <body>
-    @include('pdf.radicacion._encabezado')
+    @include('pdf.radicacion.partials.header')
 
     <div class="titulo">Solicitud de capacidad transportadora</div>
 
@@ -92,7 +92,7 @@
         especial.
     </p>
 
-    @include('pdf.radicacion._firmas', [
+    @include('pdf.radicacion.partials.signatures', [
         'izquierda' => [
             'firma' => $empresa['firma_representante'] ?? null,
             'nombre' => $empresa['representante'] ?? '',

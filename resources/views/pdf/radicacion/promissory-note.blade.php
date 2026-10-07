@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <title>Pagaré y carta de instrucciones</title>
-    @include('pdf.radicacion._estilos')
+    @include('pdf.radicacion.partials.styles')
 </head>
 
 <body>
-    @include('pdf.radicacion._encabezado')
+    @include('pdf.radicacion.partials.header')
 
     <div class="titulo">Pagaré No. {{ $vinculacion['numero'] ?? '' }}</div>
 
@@ -88,7 +88,7 @@
         del Código de Comercio.
     </p>
 
-    @include('pdf.radicacion._firmas', [
+    @include('pdf.radicacion.partials.signatures', [
         'izquierda' => [
             'firma' => $vinculacion['firma_propietario'] ?? null,
             'nombre' => $propietario['nombre'] ?? '',

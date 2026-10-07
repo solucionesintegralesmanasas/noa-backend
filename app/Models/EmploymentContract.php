@@ -33,6 +33,7 @@ class EmploymentContract extends Model
         'company_uuid',
         'third_party_uuid',
         'contract_type',
+        'position',
         'start_date',
         'end_date',
         'base_salary',

@@ -103,6 +103,9 @@ class MaintenanceService extends BaseService
         // Optimización de payload in-place
         $paginator->getCollection()->transform(fn ($m) => [
             'uuid' => $m->uuid,
+            'maintenance_type' => $m->maintenance_type,
+            'mileage' => $m->mileage,
+            'mechanic_name' => $m->mechanic_name,
             'maintenance_date' => $m->maintenance_date,
             'workshop_name' => $m->workshop_name,
             'service_description' => $m->service_description,
@@ -110,6 +113,7 @@ class MaintenanceService extends BaseService
             'parts_cost' => (float) $m->parts_cost,
             'status' => $m->status,
             'vehicle' => $m->vehicle ? [
+                'uuid' => $m->vehicle->uuid,
                 'vehicle_license_plate' => $m->vehicle->vehicle_license_plate,
                 'internal_number' => $m->vehicle->internal_number,
             ] : null,

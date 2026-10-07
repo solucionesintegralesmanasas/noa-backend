@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <title>Inclusión de pólizas</title>
-    @include('pdf.radicacion._estilos')
+    @include('pdf.radicacion.partials.styles')
 </head>
 
 <body>
-    @include('pdf.radicacion._encabezado')
+    @include('pdf.radicacion.partials.header')
 
     <div class="titulo">Inclusión de pólizas</div>
 
@@ -79,7 +79,7 @@
         de cobertura a nombre de la empresa.
     </p>
 
-    @include('pdf.radicacion._firmas', [
+    @include('pdf.radicacion.partials.signatures', [
         'izquierda' => [
             'firma' => $empresa['firma_representante'] ?? null,
             'nombre' => $empresa['representante'] ?? '',

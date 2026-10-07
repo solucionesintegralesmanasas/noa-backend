@@ -365,17 +365,27 @@ class VehicleInspectionController extends Controller
                     ->first();
             }
 
+            // El fondo va al 70% del ancho de página: se pide en alta (1200px)
+            // para que no se pixele; el encabezado sigue con la versión liviana.
             $base64Images = $pdfService->getBase64Parallel([
                 'logo' => $logoModel,
+                'logo_fondo' => $logoModel,
                 'firma' => $inspectorSignature,      // null si aún no firmó el inspector
                 'firma_coordinador' => $coordinatorSignature,
-            ]);
+            ], ['logo_fondo' => 1200]);
 
             $data = [
                 'logo' => $base64Images['logo'],
+                'logo_fondo' => $base64Images['logo_fondo'] ?? $base64Images['logo'],
                 'firma' => $base64Images['firma'],
                 'firma_coordinador' => $base64Images['firma_coordinador'],
             ];
+
+            // Presentación configurable por empresa (membrete / fondo / limpio).
+            $marcaInspeccion = $pdfService->marcaPdfPara($company, 'inspeccion_preoperacional', $logoModel);
+            if ($marcaInspeccion['modo'] !== PdfService::PDF_MODO_FONDO) {
+                $data['logo_fondo'] = $marcaInspeccion['logo_fondo'];
+            }
 
             // Agrupar los resultados por categoría
             $groupedResults = [];
@@ -387,32 +397,33 @@ class VehicleInspectionController extends Controller
                 $groupedResults[$category][] = $result;
             }
 
-            // Distribuir en 2 columnas balanceando la altura (Masonry layout)
-            $col1 = [];
-            $col2 = [];
-            $count1 = 0;
-            $count2 = 0;
+            // Distribuir en 2 columnas balanceando la altura (Masonry layout).
+            // La inspección sale en vertical: 2 columnas anchas y legibles.
+            $columnas = [[], []];
+            $conteos = [0, 0];
             foreach ($groupedResults as $cat => $results) {
                 // Sumamos los items + 2 para estimar la altura del título de la categoría
                 $itemsCount = count($results) + 2;
-                if ($count1 <= $count2) {
-                    $col1[] = $cat;
-                    $count1 += $itemsCount;
-                } else {
-                    $col2[] = $cat;
-                    $count2 += $itemsCount;
-                }
+                $indice = array_search(min($conteos), $conteos, true);
+                $columnas[$indice][] = $cat;
+                $conteos[$indice] += $itemsCount;
             }
-            $chunks = [$col1, $col2];
+            $chunks = array_values(array_filter($columnas, fn ($columna) => $columna !== []));
 
-            $pdf = Pdf::loadView('pdf.vehicle-inspection', [
+            $pdf = Pdf::loadView('pdf.fleet.vehicle-inspection', [
+                'title' => 'Inspección Preoperacional',
                 'record' => $record,
                 'groupedResults' => $groupedResults,
                 'chunks' => $chunks,
                 'data' => $data,
-            ])->setPaper('a4', 'portrait');
+                'letterhead' => $marcaInspeccion['letterhead'],
+                'ocultar_marca' => $marcaInspeccion['modo'] === PdfService::PDF_MODO_LIMPIO,
+            ])->setPaper('letter', 'portrait');
 
-            return $pdf->download('inspeccion-preoperacional-'.$record->uuid.'.pdf');
+            $placa = preg_replace('/[^A-Za-z0-9]/', '', (string) ($record->vehicle->vehicle_license_plate ?? 'sin-placa'));
+            $fecha = \Carbon\Carbon::parse($record->inspection_date)->format('d-m-Y');
+
+            return $pdfService->sellarPaginado($pdf)->download(\App\Services\Pdf\PdfService::nombreArchivo('Inspección Preoperacional', $placa, $fecha));
 
         } catch (\Throwable $e) {
             return $this->handleException($e);

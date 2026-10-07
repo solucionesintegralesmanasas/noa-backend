@@ -43,15 +43,8 @@
             opacity: 0.15;
         }
 
-        .vertical-legend {
-            position: absolute;
-            top: 50%;
-            right: -180px;
-            width: 400px;
-            transform: rotate(-90deg);
-            font-size: 8px;
-            color: #777;
-            text-align: center;
+        .page {
+            /* La leyenda la estampa el canvas de DomPDF (sellarPaginado). */
         }
 
         .page {
@@ -316,15 +309,19 @@
             ($businessAgreements->isNotEmpty() ? 1 : 0);
     @endphp
 
-    @if (!empty($images['logo']))
-        <div id="watermark">
-            <img src="data:image/png;base64,{{ $images['logo'] }}" />
+    @if (!empty($letterhead ?? null))
+        <div style="text-align:center;margin-bottom:6px;">
+            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
         </div>
     @endif
-
-    <div class="vertical-legend">
-        Generado por NOA Transportes | Fecha: {{ $generationDate }}
-    </div>
+    @php
+        $fondo_hv = (!empty($ocultar_marca ?? false) || !empty($letterhead ?? null)) ? null : ($logo_fondo ?? $images['logo'] ?? null);
+    @endphp
+    @if (!empty($fondo_hv))
+        <div id="watermark">
+            <img src="data:image/png;base64,{{ $fondo_hv }}" />
+        </div>
+    @endif
 
     <!-- MEMBRETE -->
     <table class="header-table">

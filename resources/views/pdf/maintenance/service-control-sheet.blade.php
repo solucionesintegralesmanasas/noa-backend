@@ -12,7 +12,7 @@
            ============================================================ */
 
         @page {
-            size: letter landscape;
+            size: letter portrait;
             margin: 8mm 8mm;
         }
 
@@ -482,9 +482,14 @@
 
 <body>
 
-    @if (!empty($logo))
+    @if (!empty($letterhead ?? null))
+        <div style="text-align:center;margin-bottom:6px;">
+            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+        </div>
+    @endif
+    @if (empty($ocultar_marca ?? false) && empty($letterhead ?? null) && !empty($logo_fondo ?? $logo ?? null))
         <div class="watermark">
-            <img src="data:{{ $logo_mime ?? 'image/png' }};base64,{{ $logo }}" alt="">
+            <img src="data:{{ $logo_mime ?? 'image/png' }};base64,{{ $logo_fondo ?? $logo }}" alt="">
         </div>
     @endif
 

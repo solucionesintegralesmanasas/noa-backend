@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <title>Contrato de prestación de servicios de transporte especial</title>
-    @include('pdf.radicacion._estilos')
+    @include('pdf.radicacion.partials.styles')
 </head>
 
 <body>
-    @include('pdf.radicacion._encabezado')
+    @include('pdf.radicacion.partials.header')
 
     <div class="titulo">Contrato de prestación de servicios de transporte especial</div>
 
@@ -110,7 +110,7 @@
         obligación o prohibición descrita en este contrato da derecho a las partes a declararlo
         rescindido.</p>
 
-    @include('pdf.radicacion._firmas', [
+    @include('pdf.radicacion.partials.signatures', [
         'izquierda' => [
             'firma' => $prestacion['firma_propietario'] ?? null,
             'nombre' => $propietario['nombre'] ?? '',
