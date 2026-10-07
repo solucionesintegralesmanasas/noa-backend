@@ -6,6 +6,7 @@ namespace App\Services\Pdf;
 
 use App\Models\ServiceDeliveryControlSheet;
 use App\Models\Signature;
+use App\Models\SystemConfiguration;
 use App\Models\Vehicle;
 use App\Services\Administrations\CompanyService;
 use App\Services\ContractExtraction\FuecService;
@@ -66,14 +67,31 @@ class PdfService
      */
     public function generateFromView(string $view, array $data = [], array $options = []): \Barryvdh\DomPDF\PDF
     {
+        // Hoja membretada opcional: data URL completa lista para el <img> del layout.
+        // Se activa con ['letterhead' => 'data:...;base64,...'] en $data o $options. Null = sin membretado.
+        if (! array_key_exists('letterhead', $data)) {
+            $data['letterhead'] = $options['letterhead'] ?? null;
+        }
+
         $pdf = Pdf::loadView($view, $data);
 
         $paper = $options['paper'] ?? 'letter';
         $orientation = $options['orientation'] ?? 'portrait';
         $pdf->setPaper($paper, $orientation);
+        $pdf->setOption([
+            'dpi' => $options['dpi'] ?? 120,
+            'isFontSubsettingEnabled' => $options['font_subsetting'] ?? true,
+        ]);
 
         if (! empty($options['warnings'])) {
             $pdf->setWarnings($options['warnings']);
+        } else {
+            $pdf->setWarnings((bool) config('app.debug', false));
+        }
+
+        // Leyenda de generación vertical a la derecha (incluye número de página).
+        if ($options['sello'] ?? true) {
+            $this->sellarPaginado($pdf);
         }
 
         return $pdf;
@@ -101,6 +119,27 @@ class PdfService
     public function outputFromView(string $view, array $data = [], array $options = []): string
     {
         return $this->generateFromView($view, $data, $options)->output();
+    }
+
+    /**
+     * Construye un nombre de archivo legible y consistente para todos los PDF:
+     * "Documento - Identificador - Fecha.pdf".
+     *
+     * Acepta cualquier cantidad de partes (documento, placa, número, fecha, etc.)
+     * y las une separadas por " - ". No elimina acentos ni espacios (el wrapper
+     * de DomPDF envía un nombre ASCII de respaldo). Solo limpia los caracteres
+     * inválidos en sistemas de archivos.
+     */
+    public static function nombreArchivo(string ...$partes): string
+    {
+        $partes = array_map('trim', $partes);
+        $partes = array_values(array_filter($partes, fn ($p) => $p !== ''));
+
+        $nombre = implode(' - ', $partes);
+        $nombre = preg_replace('/[\/\\\\:*?"<>|]+/u', '-', $nombre);
+        $nombre = preg_replace('/\s+/u', ' ', $nombre);
+
+        return trim($nombre, " -.").'.pdf';
     }
 
     /**
@@ -135,10 +174,11 @@ class PdfService
             ],
             'generation_date' => now()->format('Y-m-d H:i:s'),
         ];
+        $data = $this->conMarca($data, $company, 'ficha_tecnica_tercero', $logoModel);
 
         // Definimos la vista que contendrá el diseño del PDF
         $view = 'pdf.third-parties.technical-sheet';
-        $filename = 'Ficha_Tecnica_'.($driverData->document_number ?? $thirdPartyUuid).'.pdf';
+        $filename = self::nombreArchivo('Ficha Técnica Tercero', $driverData->document_number ?? $thirdPartyUuid);
 
         // Generamos y mostramos el PDF en el navegador (stream)
         return $this->streamFromView($view, $data, $filename, [
@@ -211,9 +251,15 @@ class PdfService
             ],
         ];
 
-        $view = 'pdf.business-agreement';
-        $placa = $agreement->vehicle ? $agreement->vehicle->vehicle_license_plate : 'Sin_Placa';
-        $filename = 'Convenio de Colaboración Empresarial - '.($agreement->agreement_internal_id ?? $uuid).' - '.$placa.'.pdf';
+        $view = 'pdf.contracts.business-agreement';
+        $placa = $agreement->vehicle ? $agreement->vehicle->vehicle_license_plate : 'Sin Placa';
+        $filename = self::nombreArchivo('Convenio de Colaboración Empresarial', $agreement->agreement_internal_id ?? $uuid, $placa);
+
+        $data['data'] = $this->conMarca($data['data'], $agreement->company, 'convenio_colaboracion', $logoModel);
+        // La plantilla lee $data['...'] (nivel anidado): se exponen también arriba para el membrete.
+        $data['letterhead'] = $data['data']['letterhead'];
+        $data['logo_fondo'] = $data['data']['logo_fondo'];
+        $data['ocultar_marca'] = $data['data']['ocultar_marca'];
 
         return $this->streamFromView($view, $data, $filename, [
             'paper' => 'letter',
@@ -322,41 +368,225 @@ class PdfService
                 'cancelado' => $canceladoBase64,
             ];
 
-            $pdf = Pdf::loadView('pdf.fuec', [
+            $pdf = Pdf::loadView('pdf.fuec', $this->conMarca([
                 'fuec' => $fuec,
                 'data' => $data,
-            ])
+            ], $fuec->company ?? null, 'fuec', $fuec->company->logo ?? null))
                 ->setPaper($paperSize, $orientation)
                 ->setOption('defaultFont', 'Arial')
                 ->setOption('isRemoteEnabled', false)        // ✅ ya usamos base64
                 ->setOption('isHtml5ParserEnabled', true)    // ✅ parser más rápido
                 ->setOption('isFontSubsettingEnabled', true); // ✅ fuentes más livianas
 
-            // Nombre del archivo: placa + recorrido (origen - destino)
+            // Nombre del archivo: FUEC - placa - recorrido (origen - destino)
             $placa = trim((string) ($fuec->vehicle->vehicle_license_plate ?? 'SINPLACA'));
             $origen = trim((string) ($fuec->origin_route ?? ''));
             $destino = trim((string) ($fuec->destination_route ?? ''));
             $recorrido = trim($origen.($origen !== '' && $destino !== '' ? ' - ' : '').$destino, ' -');
-            $baseName = trim($placa.($recorrido !== '' ? ' '.$recorrido : ''));
-            // Sanea caracteres no válidos en nombres de archivo
-            $baseName = preg_replace('/[\/\\\\:*?"<>|]/u', '-', $baseName);
-            $baseName = preg_replace('/\s+/u', ' ', $baseName);
-            $baseName = trim($baseName) !== '' ? trim($baseName) : 'FUEC-'.$fuec->number_fuec;
+            $nombre = self::nombreArchivo('FUEC', $placa, $recorrido);
 
             return [
                 'pdf' => $pdf,
-                'file_name' => $baseName.'.pdf',
+                'file_name' => $nombre,
             ];
         } catch (\Throwable $e) {
             throw $e;
         }
     }
 
+    /**
+     * Membrete de la empresa listo para el layout (`data:<mime>;base64,...`).
+     *
+     * Primero la hoja cargada en la configuración (colección LETTERHEAD) y, si no
+     * hay, el logo de la empresa. Null cuando no hay ninguno.
+     */
+    public function letterheadDataUrl(?object $company = null): ?string
+    {
+        try {
+            $media = null;
+
+            $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
+            if ($companyUuid) {
+                $config = SystemConfiguration::where('company_uuid', $companyUuid)->first();
+                $media = $config?->getFirstMedia('LETTERHEAD');
+            }
+
+            if (! $media && is_object($company) && method_exists($company, 'getFirstMedia')) {
+                $media = $company->getFirstMedia('logos');
+            }
+
+            if (! is_object($media) || ! method_exists($media, 'getPath')) {
+                return null;
+            }
+
+            $path = $media->getPath();
+            if (! $path || ! file_exists($path)) {
+                return null;
+            }
+
+            $mime = $media->mime_type ?? mime_content_type($path) ?: 'image/png';
+
+            // Solo imágenes: un PDF u otro archivo en el <img> rompe el render y el paginado.
+            if (! str_starts_with((string) $mime, 'image/')) {
+                return null;
+            }
+
+            return 'data:'.$mime.';base64,'.base64_encode((string) file_get_contents($path));
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudo resolver el membrete: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    // ========================================================================
+    // PRESENTACIÓN POR DOCUMENTO PDF (membrete / logo de fondo / limpio)
+    // Configurable por empresa en `system_configuration.pdf_branding`
+    // ({ "<clave>": "membrete"|"fondo"|"limpio" }). Sin configurar = fondo.
+    // ========================================================================
+
+    public const PDF_MODO_MEMBRETE = 'membrete';
+
+    public const PDF_MODO_FONDO = 'fondo';
+
+    public const PDF_MODO_LIMPIO = 'limpio';
+
+    public const PDF_MODO_DEFECTO = self::PDF_MODO_FONDO;
+
+    public const PDF_CLAVES = [
+        'fuec',
+        'hoja_vida_vehicular',
+        'ficha_tecnica_vehiculo',
+        'acta_entrega',
+        'mantenimiento',
+        'planilla_diaria',
+        'planilla_mensual',
+        'planilla_filtrada',
+        'convenio_colaboracion',
+        'recibo_administracion',
+        'reporte_vehiculos',
+        'ficha_tecnica_tercero',
+        'inspeccion_preoperacional',
+    ];
+
+    /**
+     * Modo de presentación de un documento PDF para una empresa.
+     */
+    public function modoPdfPara(?string $companyUuid, string $clave): string
+    {
+        try {
+            if ($companyUuid) {
+                $config = SystemConfiguration::where('company_uuid', $companyUuid)->first();
+                $modo = is_array($config?->pdf_branding ?? null)
+                    ? ($config->pdf_branding[$clave] ?? null)
+                    : null;
+                if (in_array($modo, [self::PDF_MODO_MEMBRETE, self::PDF_MODO_FONDO, self::PDF_MODO_LIMPIO], true)) {
+                    return $modo;
+                }
+            }
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudo leer pdf_branding: '.$e->getMessage());
+        }
+
+        return self::PDF_MODO_DEFECTO;
+    }
+
+    /**
+     * Resuelve membrete y logo de fondo según el modo configurado.
+     *
+     * @param  mixed  $logoModel  Modelo de MediaLibrary, ruta o nulo.
+     * @return array{modo: string, letterhead: string|null, logo_fondo: string|null}
+     */
+    public function marcaPdfPara(?object $company, string $clave, mixed $logoModel): array
+    {
+        $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
+        $modo = $this->modoPdfPara($companyUuid, $clave);
+
+        if ($modo === self::PDF_MODO_MEMBRETE) {
+            return [
+                'modo' => $modo,
+                'letterhead' => $this->letterheadDataUrl($company),
+                'logo_fondo' => null,
+            ];
+        }
+
+        if ($modo === self::PDF_MODO_LIMPIO) {
+            return ['modo' => $modo, 'letterhead' => null, 'logo_fondo' => null];
+        }
+
+        $fondo = null;
+        if ($logoModel) {
+            try {
+                $base64 = $this->getBase64Parallel(['logo_fondo' => $logoModel], ['logo_fondo' => 1200]);
+                $fondo = $base64['logo_fondo'] ?? null;
+            } catch (\Throwable $e) {
+                Logger::warning('No se pudo cargar el logo de fondo: '.$e->getMessage());
+            }
+        }
+
+        return ['modo' => $modo, 'letterhead' => null, 'logo_fondo' => $fondo];
+    }
+
+    /**
+     * Inyecta las claves de presentación (`letterhead`, `logo_fondo`,
+     * `ocultar_marca`) en los datos de cualquier vista PDF.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  mixed  $logoModel  Modelo de MediaLibrary, ruta o nulo.
+     * @return array<string, mixed>
+     */
+    public function conMarca(array $data, ?object $company, string $clave, mixed $logoModel): array
+    {
+        $marca = $this->marcaPdfPara($company, $clave, $logoModel);
+        $data['letterhead'] = $marca['letterhead'];
+        $data['logo_fondo'] = $marca['logo_fondo'];
+        $data['ocultar_marca'] = $marca['modo'] === self::PDF_MODO_LIMPIO;
+
+        return $data;
+    }
+
+    /**
+     * Estampa la leyenda de generación vertical, centrada en el borde derecho,
+     * con la fecha y el número real de página en toda la hoja.
+     *
+     * DomPDF no soporta counter(page)/counter(pages) en CSS, así que se dibuja en
+     * el canvas tras el render (que además soporta rotación). Como el wrapper no
+     * re-renderiza, el sello sobrevive al download()/stream()/output() posterior.
+     * Coordenadas del canvas: se adaptan solas a vertical u horizontal.
+     */
+    public function sellarPaginado(\Barryvdh\DomPDF\PDF $pdf): \Barryvdh\DomPDF\PDF
+    {
+        try {
+            $pdf->render();
+            $dompdf = $pdf->getDomPDF();
+            $canvas = $dompdf->getCanvas();
+            $metricas = $dompdf->getFontMetrics();
+            $fuente = $metricas->getFont('Arial', 'normal');
+            $tamano = 7.5;
+            $texto = 'Generado por NOA Transportes | Fecha: '.date('d/m/Y H:i').' | Página {PAGE_NUM} de {PAGE_COUNT}';
+            $anchoTexto = $metricas->getTextWidth($texto, $fuente, $tamano);
+
+            // Vertical: el texto arranca abajo del centro y sube por el borde derecho.
+            $x = $canvas->get_width() - 14;
+            $y = ($canvas->get_height() + $anchoTexto) / 2;
+
+            $canvas->page_text($x, $y, $texto, $fuente, $tamano, [0.47, 0.47, 0.47], 0.0, 0.0, -90);
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudo sellar el paginado: '.$e->getMessage());
+        }
+
+        return $pdf;
+    }
+
     // ✅ Nuevo método paralelo
     /**
      * Método getBase64Parallel.
+     *
+     * @param array<string, int> $maxSizes Tamaño máximo por clave (default 400).
+     *                                     Usar un valor mayor (p. ej. 1200) para imágenes
+     *                                     que se muestran grandes, como marcas de agua.
      */
-    public function getBase64Parallel(array $fileModels): array
+    public function getBase64Parallel(array $fileModels, array $maxSizes = []): array
     {
         $results = [];
         $pendingHttp = [];
@@ -368,9 +598,11 @@ class PdfService
                 continue;
             }
 
+            $maxSize = $maxSizes[$key] ?? 400;
+
             if (is_string($fileModel)) {
                 if (file_exists($fileModel)) {
-                    $results[$key] = $this->optimizeAndEncodeImage($fileModel);
+                    $results[$key] = $this->optimizeAndEncodeImage($fileModel, $maxSize);
                 } else {
                     $pendingHttp[$key] = $fileModel;
                 }
@@ -383,7 +615,7 @@ class PdfService
                 try {
                     $path = $fileModel->getPath();
                     if ($path && file_exists($path)) {
-                        $results[$key] = $this->optimizeAndEncodeImage($path);
+                        $results[$key] = $this->optimizeAndEncodeImage($path, $maxSize);
 
                         continue;
                     }
@@ -396,7 +628,7 @@ class PdfService
                 if (isset($fileModel->disk) && isset($fileModel->path)) {
                     if (Storage::disk($fileModel->disk)->exists($fileModel->path)) {
                         $path = Storage::disk($fileModel->disk)->path($fileModel->path);
-                        $results[$key] = $this->optimizeAndEncodeImage($path);
+                        $results[$key] = $this->optimizeAndEncodeImage($path, $maxSize);
 
                         continue;
                     }
@@ -489,12 +721,14 @@ class PdfService
 
             $vehicle = $history['vehicle'] ?? [];
 
-            $pdf = Pdf::loadView('pdf.vehicle-history', [
+            $pdf = Pdf::loadView('pdf.fleet.vehicle-history', $this->conMarca([
                 'data' => $history,
                 'images' => $images,
-            ]);
+            ], $fullCompany, 'hoja_vida_vehicular', $logoModel));
+            $pdf->setPaper('letter', 'portrait');
+            $this->sellarPaginado($pdf);
 
-            $fileName = 'Hoja_Vida_Vehicular_'.($vehicle['vehicle_license_plate'] ?? $vehicleUuid).'.pdf';
+            $fileName = self::nombreArchivo('Hoja de Vida Vehicular', $vehicle['vehicle_license_plate'] ?? $vehicleUuid);
 
             return [
                 'pdf' => $pdf,
@@ -559,12 +793,15 @@ class PdfService
                 'qrcode' => $qrCodeBase64,
             ];
 
-            $pdf = Pdf::loadView('pdf.technical-sheet-vehicles', [
+            $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $this->conMarca([
+                'title' => 'Ficha Técnica Vehículo',
                 'vehicle' => $vehicle,
                 'data' => $data,
-            ]);
+            ], $company ?? null, 'ficha_tecnica_vehiculo', $logoModel));
+            $pdf->setPaper('letter', 'portrait');
+            $this->sellarPaginado($pdf);
 
-            $fileName = 'Ficha_Tecnica_'.($vehicle->vehicle_license_plate ?? $vehicleUuid).'.pdf';
+            $fileName = self::nombreArchivo('Ficha Técnica Vehículo', $vehicle->vehicle_license_plate ?? $vehicleUuid);
 
             return [
                 'pdf' => $pdf,
@@ -620,10 +857,11 @@ class PdfService
                 'generation_date' => now()->format('d/m/Y'),
             ];
 
-            $pdf = Pdf::loadView('pdf.handover-record', $data);
+            $pdf = Pdf::loadView('pdf.fleet.handover-record', $this->conMarca($data, $companyModel, 'acta_entrega', $logoModel));
             $pdf->setPaper('letter', 'portrait');
+            $this->sellarPaginado($pdf);
 
-            $fileName = 'Acta_Entrega_'.($dataVehicle['vehiculo']['placa'] ?: $vehicleUuid).'.pdf';
+            $fileName = self::nombreArchivo('Acta de Entrega', $dataVehicle['vehiculo']['placa'] ?: $vehicleUuid);
 
             return [
                 'pdf' => $pdf,
@@ -696,8 +934,14 @@ class PdfService
             ],
         ];
 
-        $view = 'pdf.admin-charge';
-        $filename = 'Constancia_de_Administracion_'.($charge->charge_internal_id ?? $uuid).'.pdf';
+        $view = 'pdf.contracts.admin-charge';
+        $filename = self::nombreArchivo('Constancia de Administración', $charge->charge_internal_id ?? $uuid);
+
+        $data['data'] = $this->conMarca($data['data'], $charge->company, 'recibo_administracion', $logoModel);
+        // La plantilla lee $data['...'] (nivel anidado): se exponen también arriba para el membrete.
+        $data['letterhead'] = $data['data']['letterhead'];
+        $data['logo_fondo'] = $data['data']['logo_fondo'];
+        $data['ocultar_marca'] = $data['data']['ocultar_marca'];
 
         return $this->streamFromView($view, $data, $filename, [
             'paper' => 'letter',
@@ -731,17 +975,23 @@ class PdfService
                 'logo' => $logoModel,
             ]);
 
+            $marca = $this->marcaPdfPara($vehicle->company, 'mantenimiento', $logoModel);
+
             $data = [
+                'title' => 'Hoja de Vida – Mantenimiento',
+                'letterhead' => $marca['letterhead'],
                 'vehicle' => $vehicle,
                 'company' => $vehicle->company,
                 'maintenances' => $vehicle->maintenance ?? collect(),
                 'company_logo_base64' => $base64Images['logo'],
+                'company_logo_fondo_base64' => $marca['logo_fondo'] ?? $base64Images['logo'],
             ];
 
-            $pdf = Pdf::loadView('pdf.maintenance', $data);
+            $pdf = Pdf::loadView('pdf.maintenance.maintenance', $data);
             $pdf->setPaper('letter', 'portrait');
+            $this->sellarPaginado($pdf);
 
-            $fileName = 'Hoja_Vida_Mantenimiento_'.($vehicle->vehicle_license_plate ?? $vehicleUuid).'.pdf';
+            $fileName = self::nombreArchivo('Hoja de Vida Mantenimiento', $vehicle->vehicle_license_plate ?? $vehicleUuid);
 
             return [
                 'pdf' => $pdf,
@@ -1019,10 +1269,13 @@ class PdfService
                 'dias_con_excepcion' => $diasConExcepcion,
             ];
 
-            $pdf = Pdf::loadView('pdf.service-control-sheet', $data);
-            $pdf->setPaper('letter', 'landscape');
+            $data = $this->conMarca($data, $company, 'planilla_diaria', $logoModel);
 
-            $fileName = 'Planilla_Control_Diaria_'.($placa ?? 'Vehiculo').'_'.$date->format('Ymd').'.pdf';
+            $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
+            $pdf->setPaper('letter', 'portrait');
+            $this->sellarPaginado($pdf);
+
+            $fileName = self::nombreArchivo('Planilla de Control Diaria', $placa ?? 'Vehículo', $date->format('d-m-Y'));
 
             return [
                 'pdf' => $pdf,
@@ -1335,11 +1588,17 @@ class PdfService
                 'proyecto_vigencia' => $vigenciaMensual,
             ];
 
-            $pdf = Pdf::loadView('pdf.service-control-sheet', $data);
-            $pdf->setPaper('letter', 'landscape');
+            $data = $this->conMarca($data, $company, 'planilla_mensual', $logoModel);
 
-            $fileName = ($esHistorial ? 'Historial_Planilla_Control_Mensual_' : 'Planilla_Control_Mensual_').
-                ($placa ?? 'Vehiculo').'_'.$startDate->format('Y_m').'.pdf';
+            $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
+            $pdf->setPaper('letter', 'portrait');
+            $this->sellarPaginado($pdf);
+
+            $fileName = self::nombreArchivo(
+                ($esHistorial ? 'Historial de Planilla de Control Mensual' : 'Planilla de Control Mensual'),
+                $placa ?? 'Vehículo',
+                $startDate->format('d-m-Y'),
+            );
 
             return [
                 'pdf' => $pdf,
@@ -1516,12 +1775,15 @@ class PdfService
                 'proyecto_vigencia' => null,
             ];
 
-            $pdf = Pdf::loadView('pdf.service-control-sheet', $data);
-            $pdf->setPaper('letter', 'landscape');
+            $data = $this->conMarca($data, $company, 'planilla_filtrada', $logoModel);
+
+            $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
+            $pdf->setPaper('letter', 'portrait');
+            $this->sellarPaginado($pdf);
 
             return [
                 'pdf' => $pdf,
-                'file_name' => 'Reporte_Control_'.ucfirst($tipo).'_'.now()->format('Ymd_His').'.pdf',
+                'file_name' => self::nombreArchivo('Reporte de Control '.ucfirst($tipo), now()->format('d-m-Y H:i')),
                 'total_dias' => $sheets->count(),
                 'total_planillas' => $totalPlanillas,
                 'truncado' => $truncado,
@@ -1549,16 +1811,22 @@ class PdfService
         ];
         $tipo = $filtros['filter_type'] ?? '-';
 
-        $pdf = Pdf::loadView('pdf.vehicle-report', [
+        // El render tiene presupuesto de 0 consultas (ReporteVehiculosConsultasTest):
+        // solo se usa la empresa si ya viene cargada en los filtros, nunca se consulta aquí.
+        $reportCompany = ($filtros['company'] ?? null) instanceof object ? $filtros['company'] : null;
+        $reportLogoModel = $reportCompany ? ($reportCompany->getFirstMedia('logos') ?? $reportCompany->logo ?? null) : null;
+
+        $pdf = Pdf::loadView('pdf.fleet.vehicle-report', $this->conMarca([
             'filas' => $filas,
             'filtros' => $filtros,
             'filtroDescripcion' => $etiquetas[$tipo] ?? strtoupper((string) $tipo),
-        ]);
-        $pdf->setPaper('letter', 'landscape');
+        ], $reportCompany, 'reporte_vehiculos', $reportLogoModel));
+        $pdf->setPaper('letter', 'portrait');
+        $this->sellarPaginado($pdf);
 
         return [
             'pdf' => $pdf,
-            'file_name' => 'Reporte_Vehiculos_'.now()->format('Ymd_His').'.pdf',
+            'file_name' => self::nombreArchivo('Reporte de Vehículos', now()->format('d-m-Y H:i')),
         ];
     }
 
@@ -1738,5 +2006,67 @@ class PdfService
         $optimized = $this->optimizeBinaryImage($content, $maxSize);
 
         return base64_encode($optimized);
+    }
+    /**
+     * Genera el contrato laboral en PDF.
+     */
+    public function generateEmploymentContractPdf(string $uuid): \Illuminate\Http\Response
+    {
+        $contract = \App\Models\EmploymentContract::with(['company.municipality', 'thirdParty'])->where('uuid', $uuid)->firstOrFail();
+
+        $company = $contract->company;
+        $thirdParty = $contract->thirdParty;
+
+        // Normalizar los datos
+        $data = [
+            'worker_name' => $thirdParty->first_name . ' ' . $thirdParty->last_name,
+            'worker_doc' => $thirdParty->document_number,
+            'worker_address' => $thirdParty->address ?? 'N/A',
+            'worker_city' => $thirdParty->expedition_place ?? 'Colombia',
+            'employer_name' => $company->business_name,
+            'employer_nit' => $company->document_number,
+            'employer_rep' => $company->legal_representative_name . ' ' . $company->legal_representative_last_name,
+            'employer_address' => $company->address ?? 'N/A',
+            'employer_city' => $company->municipality ? $company->municipality->name : 'N/A',
+            'position' => $contract->position ?? 'Empleado',
+            'salary' => $contract->base_salary ?? 0,
+            'salary_type' => $contract->salary_type ?? 'ORDINARIO',
+            'start_date' => $contract->start_date ? $contract->start_date->format('Y-m-d') : now()->format('Y-m-d'),
+            'end_date' => $contract->end_date ? $contract->end_date->format('Y-m-d') : null,
+            'signing_city' => $company->municipality ? $company->municipality->name : 'N/A',
+            'signing_date' => $contract->start_date ? $contract->start_date->format('Y-m-d') : now()->format('Y-m-d'),
+            'place' => $company->municipality ? $company->municipality->name : 'N/A',
+            'work_description' => 'Actividades inherentes al cargo de ' . ($contract->position ?? 'Empleado'),
+            'institution' => 'N/A',
+            'specialty' => 'N/A',
+            'hours' => $contract->working_hours_per_week ?? 48,
+            'schedule' => 'Lunes a Sábado',
+            'payment_method' => 'transferencia bancaria',
+            'pay_period' => 'mensuales',
+            'transport' => $contract->transport_subsidy_applies ?? false,
+            'probation_days' => 60,
+            'duration' => $contract->start_date && $contract->end_date ? $contract->start_date->diffInMonths($contract->end_date) . ' meses' : 'N/A',
+        ];
+
+        // Usar la clase de plantillas que creamos
+        $contractType = is_string($contract->contract_type) ? $contract->contract_type : $contract->contract_type->value;
+        $doc = \App\Support\HumanResources\EmploymentContractTemplates::build($contractType, $data);
+
+        // Obtenemos los logos de la empresa
+        $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+
+        $viewData = [
+            'doc' => $doc,
+        ];
+        
+        $viewData = $this->conMarca($viewData, $company, 'contrato_laboral', $logoModel);
+
+        $view = 'pdf.hr.employment-contract';
+        $filename = self::nombreArchivo('Contrato Laboral', $thirdParty->document_number ?? $uuid);
+
+        return $this->streamFromView($view, $viewData, $filename, [
+            'paper' => 'letter',
+            'orientation' => 'portrait',
+        ]);
     }
 }

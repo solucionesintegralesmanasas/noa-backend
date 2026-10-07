@@ -1,273 +1,209 @@
-<!DOCTYPE html>
-<html lang="es">
+@extends('pdf.layouts.base')
 
-<head>
-    <meta charset="UTF-8">
-    <title>Ficha Técnica - {{ $vehicle->vehicle_license_plate }}</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{{-- Estilos propios de la ficha técnica del vehículo. Van en crudo porque la base los inyecta dentro de su <style>. --}}
+@push('styles')
+    body {
+        margin-top: 1cm;
+        margin-bottom: 1cm;
+        margin-left: 1cm;
+        margin-right: 1cm;
+        font-size: 9px;
+    }
 
-        @page {
-            size: letter;
-            margin: 0cm 0cm;
-        }
+    table {
+        table-layout: auto;
+    }
 
-        body {
-            margin-top: 1.5cm;
-            margin-bottom: 1.0cm;
-            margin-left: 1.5cm;
-            margin-right: 1.5cm;
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 9px;
-            color: #000;
-            background: #fff;
-        }
+    /* La base fija .header-table td en 33.33%: se revierte a auto. */
+    .header-table th,
+    .header-table td {
+        width: auto;
+    }
 
-        #watermark {
-            position: fixed;
-            top: 25%;
-            left: 15%;
-            width: 70%;
-            height: auto;
-            z-index: -1000;
-        }
+    .main-container {
+        width: 100%;
+        border: 1.2px solid #000;
+        border-radius: 12px;
+        overflow: hidden;
+        border-collapse: separate;
+        margin-top: 8px;
+    }
 
-        #watermark img {
-            width: 100%;
-            height: auto;
-            opacity: 0.15;
-        }
+    .qr-section-container {
+        display: table;
+        width: 100%;
+    }
 
-        .membrete-table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
-            margin-bottom: 10px;
-        }
+    .qr-box {
+        display: table-cell;
+        width: 20%;
+        padding: 6px;
+        text-align: center;
+        vertical-align: middle;
+        border-right: 0.5px solid #000;
+    }
 
-        .membrete-table td {
-            width: 33.33%;
-            vertical-align: middle;
-            text-align: center;
-            border: none;
-            padding: 2px;
-        }
+    .instruction-box {
+        display: table-cell;
+        width: 80%;
+        padding: 8px 12px;
+        vertical-align: middle;
+        text-align: left;
+        font-size: 11px;
+        line-height: 1.4;
+    }
 
-        .logo-header {
-            max-width: 100%;
-            height: auto;
-            max-height: 45px;
-            display: inline-block;
-        }
+    img.qr {
+        width: 60px;
+        height: 60px;
+        display: block;
+        margin: 0 auto;
+    }
 
-        .main-container {
-            width: 100%;
-            border: 1.2px solid #000;
-            border-radius: 12px;
-            overflow: hidden;
-            border-collapse: separate;
-            margin-top: 10px;
-        }
+    .page {
+        width: 100%;
+    }
 
-        .qr-section-container {
-            display: table;
-            width: 100%;
-        }
+    /* HEADER */
+    .header-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 4px;
+    }
 
-        .qr-box {
-            display: table-cell;
-            width: 20%;
-            padding: 6px;
-            text-align: center;
-            vertical-align: middle;
-            border-right: 0.5px solid #000;
-        }
+    .header-table td {
+        border: 0.5px solid #000;
+        padding: 3px 5px;
+        vertical-align: middle;
+    }
 
-        .instruction-box {
-            display: table-cell;
-            width: 80%;
-            padding: 8px 12px;
-            vertical-align: middle;
-            text-align: left;
-            font-size: 11px;
-            line-height: 1.4;
-        }
+    .title-cell {
+        text-align: center;
+    }
 
-        img.qr {
-            width: 60px;
-            height: 60px;
-            display: block;
-            margin: 0 auto;
-        }
+    .title-cell .doc-title {
+        font-size: 13px;
+        font-weight: bold;
+        color: var(--pdf-banda-texto);
+    }
 
-        .vertical-legend {
-            position: absolute;
-            top: 50%;
-            right: -180px;
-            width: 400px;
-            transform: rotate(-90deg);
-            font-size: 8px;
-            color: #777;
-            text-align: center;
-        }
+    .title-cell .responsible {
+        font-size: 8px;
+        margin-top: 2px;
+        color: var(--pdf-banda-texto);
+    }
 
-        .page {
-            width: 100%;
-        }
+    /* SECTION HEADER: banda del estándar (slate claro) con texto navy. */
+    .section-header {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 0;
+    }
 
-        /* HEADER */
-        .header-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 4px;
-        }
+    .section-header td {
+        border: 0.5px solid var(--pdf-banda-texto);
+        font-weight: bold;
+        font-size: 9px;
+        text-align: center;
+        padding: 3px;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        background-color: var(--pdf-banda);
+        color: var(--pdf-banda-texto);
+    }
 
-        .header-table td {
-            border: 0.5px solid #000;
-            padding: 3px 5px;
-            vertical-align: middle;
-        }
+    /* DATA TABLE */
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 4px;
+    }
 
-        .title-cell {
-            text-align: center;
-        }
+    .data-table td {
+        border: 0.5px solid #000;
+        padding: 3px 5px;
+        vertical-align: middle;
+        font-size: 9px;
+    }
 
-        .title-cell .doc-title {
-            font-size: 11px;
-            font-weight: bold;
-        }
+    .data-table .label {
+        font-weight: bold;
+        width: 120px;
+        white-space: nowrap;
+        background-color: var(--pdf-encabezado);
+        color: var(--pdf-banda-texto);
+        text-transform: uppercase;
+    }
 
-        .title-cell .responsible {
-            font-size: 8px;
-            margin-top: 2px;
-        }
+    .data-table .value {
+        width: auto;
+    }
 
-        .meta-cell {
-            width: 120px;
-            font-size: 8px;
-        }
+    /* POLIZAS / DOCS TABLE */
+    .docs-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 4px;
+    }
 
-        .meta-cell div {
-            margin-bottom: 2px;
-        }
+    .docs-table th {
+        border: 0.5px solid #000;
+        padding: 3px 5px;
+        font-size: 9px;
+        font-weight: bold;
+        text-align: center;
+        text-transform: uppercase;
+        background-color: var(--pdf-encabezado);
+        color: var(--pdf-banda-texto);
+    }
 
-        /* SECTION LABEL */
-        .section-header {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 0;
-        }
+    .docs-table td {
+        border: 0.5px solid #000;
+        padding: 3px 5px;
+        font-size: 9px;
+        text-align: center;
+        vertical-align: middle;
+    }
 
-        .section-header td {
-            border: 0.5px solid #000;
-            font-weight: bold;
-            font-size: 10px;
-            text-align: center;
-            padding: 3px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            background-color: #f5f5f5;
-        }
+    .docs-table .doc-label {
+        font-weight: bold;
+        text-align: left;
+        padding-left: 5px;
+    }
 
-        /* DATA TABLE */
-        .data-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 4px;
-        }
+    .vigente {
+        font-weight: bold;
+        color: #14532D;
+    }
 
-        .data-table td {
-            border: 0.5px solid #000;
-            padding: 3px 5px;
-            vertical-align: middle;
-            font-size: 9px;
-        }
+    .vencido {
+        font-weight: bold;
+        color: #991B1B;
+    }
+@endpush
 
-        .data-table .label {
-            font-weight: bold;
-            width: 120px;
-            white-space: nowrap;
-        }
+{{-- Sin sección 'watermarks' propia: usa la default de la base (logo_fondo,
+     suprime con membrete/modo limpio y nunca deja un img roto). --}}
 
-        .data-table .value {
-            width: auto;
-        }
+{{-- Encabezado propio: logo y título de la ficha. --}}
+@section('header')
+    <table class="header-table" style="margin-bottom: 4px;">
+        <tr>
+            <td style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; border-right: none;">
+                @if (!empty($data['logo']))
+                    <img class="logo-header" src="data:image/png;base64,{{ $data['logo'] }}" alt="Logo">
+                @endif
+            </td>
+            <td class="title-cell" style="border-left: none;">
+                <div class="doc-title">FICHA TÉCNICA DEL VEHÍCULO</div>
+                <div class="responsible">Placa: {{ $vehicle->vehicle_license_plate ?? '' }} · Responsable: JEFE OPERATIVO</div>
+            </td>
+        </tr>
+    </table>
+@endsection
 
-        /* POLIZAS / DOCS TABLE */
-        .docs-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 4px;
-        }
-
-        .docs-table th {
-            border: 0.5px solid #000;
-            padding: 3px 5px;
-            font-size: 9px;
-            font-weight: bold;
-            text-align: center;
-            text-transform: uppercase;
-            background-color: #f9f9f9;
-        }
-
-        .docs-table td {
-            border: 0.5px solid #000;
-            padding: 3px 5px;
-            font-size: 9px;
-            text-align: center;
-            vertical-align: middle;
-        }
-
-        .docs-table .doc-label {
-            font-weight: bold;
-            text-align: left;
-            padding-left: 5px;
-        }
-
-        .vigente {
-            font-weight: bold;
-            color: #155724;
-        }
-
-        .vencido {
-            font-weight: bold;
-            color: #721c24;
-        }
-    </style>
-</head>
-
-<body>
-    @if (!empty($data['logo']))
-        <div id="watermark">
-            <img src="data:image/png;base64,{{ $data['logo'] }}" />
-        </div>
-    @endif
-
+@section('content')
     <div class="page">
-
-        <div class="vertical-legend">
-            Generado por NOA Transportes | Fecha: {{ date('d/m/Y H:i') }} | Página 1 de 1
-        </div>
-
-        <!-- MEMBRETE -->
-        <table class="header-table">
-            <tr>
-                <td style="width: 140px; text-align: center; vertical-align: middle; padding: 5px; border-right: none;">
-                    @if (!empty($data['logo']))
-                        <img class="logo-header" src="data:image/png;base64,{{ $data['logo'] }}" alt="Logo">
-                    @endif
-                </td>
-                <td class="title-cell" style="border-left: none;">
-                    <div class="doc-title" style="font-size: 13px;">FICHA TÉCNICA DEL VEHÍCULO</div>
-                    <div class="responsible">Responsable: JEFE OPERATIVO</div>
-                </td>
-            </tr>
-        </table>
-
         <!-- DATOS DEL VEHÍCULO -->
         <table class="section-header">
             <tr>
@@ -328,7 +264,7 @@
             <tr>
                 <td class="label">FECHA DE MATRÍCULA</td>
                 <td class="value">
-                    {{ $vehicle->registration_date ? \Carbon\Carbon::parse($vehicle->registration_date)->format('d/m/Y') : '' }}
+                    {{ ($vehicle->registration_date ?? null) ? \Carbon\Carbon::parse($vehicle->registration_date)->format('d/m/Y') : '' }}
                 </td>
                 <td class="label">ORGANISMO DE TRÁNSITO</td>
                 <td class="value">{{ $vehicle->transit_authority ?? '' }}</td>
@@ -396,8 +332,7 @@
                     <td class="doc-label">{{ $to->operating_card_number }}</td>
                     <td>{{ \Carbon\Carbon::parse($to->issue_date)->format('d/m/Y') }}</td>
                     <td>{{ \Carbon\Carbon::parse($to->expiration_date)->format('d/m/Y') }}</td>
-                    <td class="{{ $daysTo >= 0 ? 'vigente' : 'vencido' }}">{{ $daysTo >= 0 ? 'VIGENTE' : 'VENCIDO' }}
-                    </td>
+                    <td class="{{ $daysTo >= 0 ? 'vigente' : 'vencido' }}">{{ $daysTo >= 0 ? 'VIGENTE' : 'VENCIDO' }}</td>
                     <td>{{ $daysTo }}</td>
                 </tr>
             @else
@@ -429,7 +364,6 @@
                         stripos($d->document_type, 'EXTRACONTRACTUAL') !== false,
                 )
                 ->first();
-            $todoRiesgo = $docs->filter(fn($d) => stripos($d->document_type, 'TODO RIESGO') !== false)->first();
         @endphp
 
         <!-- SOAT -->
@@ -598,15 +532,6 @@
             <tr>
                 <td class="label">TIPO DE VEHÍCULO</td>
                 <td class="value">{{ $vehicle->vehicle_class->description ?? '' }}</td>
-                <td class="label"></td>
-                <td class="value"></td>
-            </tr>
-            <tr>
-                <td class="label">NOMBRES Y/O RAZÓN SOCIAL</td>
-                <td class="value">
-                    {{ $vehicle->third_party->first_name ?? '' }} {{ $vehicle->third_party->last_name ?? '' }}
-                    {{ $vehicle->third_party->company_name ?? '' }}
-                </td>
                 <td class="label">IDENTIFICACIÓN</td>
                 <td class="value">
                     {{ $vehicle->third_party->type_of_document->prefix ?? '' }}
@@ -614,73 +539,27 @@
                 </td>
             </tr>
             <tr>
+                <td class="label">NOMBRES Y/O RAZÓN SOCIAL</td>
+                <td class="value">
+                    {{ $vehicle->third_party->first_name ?? '' }} {{ $vehicle->third_party->last_name ?? '' }}
+                    {{ $vehicle->third_party->company_name ?? '' }}
+                </td>
+                <td class="label">TELÉFONO</td>
+                <td class="value">{{ $vehicle->third_party->phone ?? 'N/A' }}</td>
+            </tr>
+            <tr>
                 <td class="label">DIRECCIÓN</td>
                 <td class="value">{{ $vehicle->third_party->address ?? 'N/A' }}</td>
                 <td class="label">CIUDAD</td>
                 <td class="value">{{ $vehicle->third_party->municipality->name ?? 'N/A' }}</td>
             </tr>
-            <tr>
-                <td class="label">TELÉFONO</td>
-                <td class="value">{{ $vehicle->third_party->phone ?? 'N/A' }}</td>
-                <td class="label"></td>
-                <td class="value"></td>
-            </tr>
         </table>
 
         <div class="main-container">
-            <div class="qr-section-container">
-                <div class="qr-box">
-                    @if (isset($data['qrcode']) && $data['qrcode'])
-                        <img class="qr" src="data:image/svg+xml;base64,{{ $data['qrcode'] }}" alt="QR">
-                    @endif
-                </div>
-                <div class="instruction-box">
-                    Para verificar este documento, por favor leer el código QR por medio de la cámara de su
-                    dispositivo y/o la aplicación correspondiente.
-                </div>
-            </div>
+            @include('pdf.layouts.partials.qr-block', [
+                'qr' => !empty($data['qrcode'] ?? null) ? 'data:image/svg+xml;base64,'.$data['qrcode'] : null,
+                'instruction' => 'Para verificar este documento, por favor leer el código QR por medio de la cámara de su dispositivo y/o la aplicación correspondiente.',
+            ])
         </div>
-
-        {{--   <!-- DATOS DEL CONDUCTOR -->
-        <table class="section-header">
-            <tr>
-                <td>Datos del Conductor</td>
-            </tr>
-        </table>
-        <table class="docs-table" style="margin-bottom:4px;">
-            <tr>
-                <th style="text-align:left; padding-left:5px;">Nombres y Apellidos</th>
-                <th>Nro. Licencia</th>
-                <th>Fecha Vencimiento</th>
-                <th>Categoría</th>
-            </tr>
-            <tr>
-                <td class="doc-label" style="text-align:left;"></td>
-                <td></td>
-                <td></td>
-                <td></td>
-            </tr>
-        </table>
-
-        <!-- ESTADO -->
-        <table class="estado-table">
-            <tr>
-                <td style="width:100px;" class="label"><strong>ESTADO</strong></td>
-                <td style="width:60px;">BUENO &nbsp;{!! $vehicle->is_active ? '<span class="check-mark">X</span>' : '' !!}</td>
-                <td style="width:60px;">REGULAR</td>
-                <td style="width:60px;">MALO &nbsp;{!! !$vehicle->is_active ? '<span class="check-mark">X</span>' : '' !!}</td>
-            </tr>
-        </table>
-
-        <!-- OBSERVACIONES -->
-        <table class="obs-table">
-            <tr>
-                <td class="label"><strong>OBSERVACIONES</strong></td>
-                <td></td>
-            </tr>
-        </table> --}}
-
     </div>
-</body>
-
-</html>
+@endsection

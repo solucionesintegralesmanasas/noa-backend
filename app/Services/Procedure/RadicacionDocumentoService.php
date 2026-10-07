@@ -63,14 +63,14 @@ class RadicacionDocumentoService
         'CONTRATO_PRESTACION' => 'TARJETA_DE_OPERACION',
     ];
 
-    /** Clave del documento -> vista Blade que lo compone. */
+    /** Clave del documento -> vista Blade que lo compone (nombres en inglés). */
     private const VISTA_POR_CLAVE = [
-        'CARTA_CAPACIDAD' => 'pdf.radicacion.carta-capacidad',
-        'CARTA_ACEPTACION' => 'pdf.radicacion.carta-aceptacion',
-        'CARTA_INCLUSION_POLIZAS' => 'pdf.radicacion.carta-polizas',
-        'CONTRATO_VINCULACION' => 'pdf.radicacion.contrato-vinculacion',
-        'PAGARE' => 'pdf.radicacion.pagare',
-        'CONTRATO_PRESTACION' => 'pdf.radicacion.contrato-prestacion',
+        'CARTA_CAPACIDAD' => 'pdf.radicacion.capacity-letter',
+        'CARTA_ACEPTACION' => 'pdf.radicacion.acceptance-letter',
+        'CARTA_INCLUSION_POLIZAS' => 'pdf.radicacion.policy-inclusion-letter',
+        'CONTRATO_VINCULACION' => 'pdf.radicacion.affiliation-contract',
+        'PAGARE' => 'pdf.radicacion.promissory-note',
+        'CONTRATO_PRESTACION' => 'pdf.radicacion.service-provision-contract',
     ];
 
     /**
@@ -138,8 +138,17 @@ class RadicacionDocumentoService
 
         $datos = $this->datos($uuidExpediente, $paso, $clave);
 
+        // Hoja membretada opcional: solo si la vista la soporta vía $letterhead.
+        if (! array_key_exists('letterhead', $datos)) {
+            $datos['letterhead'] = null;
+        }
+
         $pdf = Pdf::loadView($vista, $datos);
         $pdf->setPaper('letter', 'portrait');
+        $pdf->setOption(['dpi' => 120, 'isFontSubsettingEnabled' => true]);
+        $pdf->setWarnings((bool) config('app.debug', false));
+        // Leyenda de generación vertical a la derecha (incluye número de página).
+        app(\App\Services\Pdf\PdfService::class)->sellarPaginado($pdf);
         $nombre = $this->nombreArchivo($datos, $clave);
 
         return $descargar
@@ -670,6 +679,8 @@ class RadicacionDocumentoService
         ];
         $sufijo = $sufijos[$clave] ?? null;
 
-        return $base.($sufijo ? '_'.$sufijo : '').'.pdf';
+        $etiquetaLegible = Str::slug($etiquetas['etiqueta'] ?? $clave, ' ');
+
+        return trim($etiquetaLegible.($sufijo ? ' - '.$sufijo : '')).'.pdf';
     }
 }

@@ -52,6 +52,8 @@ class StoreSystemConfigurationRequest extends FormRequest
             'fuec_pdf_show_signatures' => 'nullable|boolean',
             'fuec_pdf_show_contractor_details' => 'nullable|boolean',
             'fuec_pdf_show_route_details' => 'nullable|boolean',
+            'pdf_branding' => 'nullable|array',
+            'pdf_branding.*' => 'nullable|string|in:membrete,fondo,limpio',
             'vehicle_internal_number_counter' => 'nullable|integer|min:1',
             'fuec_enable_auto_internal_number' => 'nullable|boolean',
             'fuec_use_corporate_policies' => 'nullable|boolean',

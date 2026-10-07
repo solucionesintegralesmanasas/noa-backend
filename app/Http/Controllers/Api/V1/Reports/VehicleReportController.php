@@ -160,6 +160,11 @@ class VehicleReportController extends Controller
         try {
             $filtros = $request->reportFilters($request->attributes->get('current_company_uuid'));
             $filas = $this->reportService->allForExport($filtros);
+            // Empresa precargada para la presentación del PDF (membrete/fondo/limpio):
+            // el render tiene presupuesto de 0 consultas y no consulta por su cuenta.
+            if (! empty($filtros['company_uuid'])) {
+                $filtros['company'] = \App\Models\Company::where('uuid', $filtros['company_uuid'])->first();
+            }
             $result = $pdfService->generateVehicleReportPdf($filas, $filtros);
 
             return $result['pdf']->download($result['file_name']);

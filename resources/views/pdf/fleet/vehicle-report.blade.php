@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Reporte de Vehículos</title>
     <style>
-        @page { size: letter landscape; margin: 8mm; }
+        @page { size: letter portrait; margin: 8mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: Arial, Helvetica, sans-serif; font-size: 7.5pt; color: #000; background: #fff; }
         h1 { font-size: 13pt; margin-bottom: 2mm; }
@@ -17,6 +17,16 @@
     </style>
 </head>
 <body>
+    @if (!empty($letterhead ?? null))
+        <div style="text-align:center;margin-bottom:6px;">
+            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+        </div>
+    @endif
+    @if (empty($ocultar_marca ?? false) && !empty($logo_fondo ?? null))
+        <div style="position:fixed;top:25%;left:15%;width:70%;z-index:-1000;">
+            <img src="data:image/png;base64,{{ $logo_fondo }}" style="width:100%;height:auto;opacity:0.15;" alt="" />
+        </div>
+    @endif
     <h1>Reporte de Vehículos</h1>
     <div class="meta">
         Filtro: {{ $filtroDescripcion ?? ($filtros['filter_type'] ?? '-') }} |

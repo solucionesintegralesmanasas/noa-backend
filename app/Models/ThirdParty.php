@@ -220,6 +220,25 @@ class ThirdParty extends Model implements HasMedia
     }
 
     /**
+     * Obtiene el contrato laboral vigente o el más reciente del tercero (conductor).
+     */
+    public function currentEmploymentContract(): ?EmploymentContract
+    {
+        return $this->employmentContracts()
+            ->orderByRaw('CASE WHEN status = ? THEN 0 ELSE 1 END', ['ACTIVO'])
+            ->orderByDesc('start_date')
+            ->first();
+    }
+
+    /**
+     * Contratos laborales del tercero.
+     */
+    public function employmentContracts(): HasMany
+    {
+        return $this->hasMany(EmploymentContract::class, 'third_party_uuid', 'uuid');
+    }
+
+    /**
      * Obtiene el tipo de documento del tercero (alias snake_case).
      */
     public function type_of_document()

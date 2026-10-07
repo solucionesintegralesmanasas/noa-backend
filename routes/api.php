@@ -590,6 +590,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/{uuid}', [EmploymentContractController::class, 'show'])->name('api.v1.third-parties.employment-contracts.show');
             Route::put('/{uuid}', [EmploymentContractController::class, 'update'])->name('api.v1.third-parties.employment-contracts.update');
             Route::delete('/{uuid}', [EmploymentContractController::class, 'destroy'])->name('api.v1.third-parties.employment-contracts.destroy');
+            Route::get('/{uuid}/pdf', [EmploymentContractController::class, 'contractPdf'])->name('api.v1.third-parties.employment-contracts.pdf');
         });
 
         // ─── RUTAS PARA EL MODULO DE FLOTA ───
@@ -1030,6 +1031,93 @@ Route::prefix('v1')->group(function () {
         });
     });
 
+    // ─── RUTAS DE LICENCIA HÍBRIDA ───
+    // Estas rutas verifican la licencia antes de permitir acceso a la API.
+    // Funcionan tanto en modo online (verificación BD) como offline (datos locales).
+    Route::middleware(['throttle:60,1'])->group(function () {
+        Route::get('/license/verify/{key}', function (\Illuminate\Http\Request $request, $key) {
+            $service = new \App\Services\LicenseService();
+            $result = $service->verifyKey($key);
+
+            if ($result && $result['status'] === 'valid') {
+                // Registrar verificación online y actualizar contadores
+                $service->recordOnlineVerification($key, $result['company_uuid']);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'status' => 'valid',
+                        'company_uuid' => $result['company_uuid'],
+                        'expires_at' => $result['expires_at'],
+                        'mode' => 'online_verified'
+                    ],
+                    'message' => 'Licencia verificada exitosamente'
+                ]);
+            }
+
+            // Si falla online, intentar verificación offline
+            if ($result && $result['status'] === 'expired') {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'expired',
+                    'message' => 'Licencia vencida. Contacte a su administrador.'
+                ], 403);
+            }
+
+            // Verificar modo offline usando BD
+            $offlineResult = $service->verifyOffline($key);
+            if ($offlineResult && $offlineResult['status'] === 'valid') {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'status' => 'valid',
+                        'company_uuid' => $offlineResult['company_uuid'],
+                        'expires_at' => $offlineResult['expires_at'],
+                        'mode' => 'offline',
+                        'offline_uses' => $offlineResult['offline_uses']
+                    ],
+                    'message' => 'Licencia verificada en modo offline'
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'error' => 'invalid',
+                'message' => 'Código de licencia inválido o no encontrado'
+            ], 403);
+        })->withoutMiddleware('auth'); // Licencia check va antes de auth
+
+        // Ruta para revocar licencia (desde panel admin)
+        Route::post('/revoke', function ($request) {
+            $key = $request->input('license_key');
+            $service = new \App\Services\LicenseService();
+            if ($service->revokeKey($key)) {
+                return response()->json(['success' => true, 'message' => 'Licencia revocada']);
+            }
+            return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
+        });
+
+        // Ruta para renovar licencia (desde panel admin)
+        Route::post('/renew', function ($request) {
+            $key = $request->input('license_key');
+            $newExpiry = $request->input('new_expiry_date');
+            $service = new \App\Services\LicenseService();
+            if ($service->renewKey($key, $newExpiry)) {
+                return response()->json(['success' => true, 'new_expiry' => $newExpiry]);
+            }
+            return response()->json(['success' => false, 'message' => 'No se puede renovar'], 400);
+        });
+
+        // Ficha completa de la licencia (la vista /licencia del admin empresa).
+        Route::get('/license/detail/{key}', function ($key) {
+            $license = \App\Models\License::where('license_key', trim($key))->first();
+            if (! $license) {
+                return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
+            }
+            return response()->json(['success' => true, 'data' => $license]);
+        })->middleware('auth:sanctum');
+    });
+
     Route::get('/health', function () {
         return response()->json([
             'status' => 'ok',
@@ -1037,4 +1125,9 @@ Route::prefix('v1')->group(function () {
             'time' => now()->toDateTimeString(),
         ]);
     });
+});
+
+// Compatibilidad: el formulario antiguo llamaba a /api/license/verify/{key} sin el v1.
+Route::get('/license/verify/{key}', function ($key) {
+    return redirect("/api/v1/license/verify/{$key}", 307);
 });

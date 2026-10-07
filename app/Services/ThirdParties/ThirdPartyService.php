@@ -180,12 +180,23 @@ class ThirdPartyService extends BaseService
             'company_uuid',
         ];
 
-        if ($type && in_array($type, ['is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others'])) {
-            $query->where($type, true);
-            $columns[] = $type; // Agrega dinámicamente solo la columna que se solicitó (la que será true)
+        $allowedTypes = ['is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others'];
+        $types = array_values(array_intersect(
+            array_map('trim', explode(',', (string) $type)),
+            $allowedTypes
+        ));
+
+        if (!empty($types)) {
+            // Un solo query con OR: un tercero con varios roles aparece una única vez.
+            $query->where(function ($q) use ($types) {
+                foreach ($types as $t) {
+                    $q->orWhere($t, true);
+                }
+            });
+            array_push($columns, ...$types);
         } else {
             // Si no se filtra por tipo, traemos todas para saber qué roles tiene
-            array_push($columns, 'is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others');
+            array_push($columns, ...$allowedTypes);
         }
 
         return $query->get($columns);
@@ -621,6 +632,9 @@ class ThirdPartyService extends BaseService
                     $q->orderBy('created_at', 'desc');
                 },
                 'socialSecurityContributions',
+                'employmentContracts' => function ($q) {
+                    $q->orderByDesc('start_date');
+                },
             ]);
 
         $record = $query->where('uuid', $thirdPartyUuid)->firstOrFail();

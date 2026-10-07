@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <title>Carta de aceptación</title>
-    @include('pdf.radicacion._estilos')
+    @include('pdf.radicacion.partials.styles')
 </head>
 
 <body>
-    @include('pdf.radicacion._encabezado')
+    @include('pdf.radicacion.partials.header')
 
     <div class="titulo">Carta de aceptación</div>
 
@@ -94,7 +94,7 @@
         responsabilidad técnica y administrativa.
     </p>
 
-    @include('pdf.radicacion._firmas', [
+    @include('pdf.radicacion.partials.signatures', [
         'izquierda' => [
             'firma' => $empresa['firma_representante'] ?? null,
             'nombre' => $empresa['representante'] ?? '',

@@ -112,9 +112,14 @@
 </head>
 
 <body>
-    @if (!empty($data['logo']))
+    @if (!empty($letterhead ?? null))
+        <div style="text-align:center;margin-bottom:6px;">
+            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+        </div>
+    @endif
+    @if (empty($ocultar_marca ?? false) && empty($letterhead ?? null) && !empty($logo_fondo ?? $data['logo'] ?? null))
         <div id="watermark">
-            <img src="data:image/png;base64,{{ $data['logo'] }}" />
+            <img src="data:image/png;base64,{{ $logo_fondo ?? $data['logo'] }}" />
         </div>
     @endif
 

@@ -65,7 +65,7 @@ class EmploymentContractService extends BaseService
     {
         // Verify third party is an employee
         $thirdParty = ThirdParty::where('uuid', $data['third_party_uuid'])->firstOrFail();
-        if (!$thirdParty->is_employee) {
+        if (!$thirdParty->is_employee && !$thirdParty->is_driver) {
             throw new Exception('El tercero especificado no está marcado como empleado.');
         }
 

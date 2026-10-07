@@ -85,6 +85,12 @@ class EmploymentContractController extends Controller
                 'data' => $contract
             ], 201);
         } catch (Exception $e) {
+            if ($e->getMessage() === 'El tercero especificado no está marcado como empleado.') {
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'errors' => ['third_party_uuid' => [$e->getMessage()]],
+                ], 422);
+            }
             return response()->json(['message' => 'Error al crear el contrato: ' . $e->getMessage()], 500);
         }
     }
@@ -111,7 +117,7 @@ class EmploymentContractController extends Controller
             if (!$contract) {
                 return response()->json(['message' => 'Contrato no encontrado'], 404);
             }
-            return response()->json(['data' => $contract]);
+            return response()->json(['data' => $contract->load('thirdParty')]);
         } catch (Exception $e) {
             return response()->json(['message' => 'Error al obtener el contrato: ' . $e->getMessage()], 500);
         }
@@ -168,6 +174,30 @@ class EmploymentContractController extends Controller
             return response()->json(['message' => 'Contrato eliminado exitosamente']);
         } catch (Exception $e) {
             return response()->json(['message' => 'Error al eliminar el contrato: ' . $e->getMessage()], 500);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/human-resources/employment-contracts/{uuid}/pdf',
+        summary: 'Generar PDF de un Contrato Laboral',
+        operationId: 'pdfEmploymentContract',
+        tags: ['Contratos Laborales'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'uuid', description: 'UUID del contrato', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid'))
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'PDF generado exitosamente.'),
+            new OA\Response(response: 404, description: 'Recurso no encontrado.'),
+            new OA\Response(response: 500, description: 'Error interno del servidor.')
+        ]
+    )]
+    public function contractPdf(string $uuid, \App\Services\Pdf\PdfService $pdfService): \Illuminate\Http\Response|JsonResponse
+    {
+        try {
+            return $pdfService->generateEmploymentContractPdf($uuid);
+        } catch (Exception $e) {
+            return response()->json(['message' => 'Error al generar el PDF del contrato: ' . $e->getMessage()], 500);
         }
     }
 }

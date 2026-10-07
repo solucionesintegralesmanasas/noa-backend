@@ -42,32 +42,25 @@
             opacity: 0.15;
         }
 
-        .vertical-legend {
-            position: absolute;
-            top: 50%;
-            right: -180px;
-            width: 400px;
-            transform: rotate(-90deg);
-            font-size: 8px;
-            color: #777;
-            text-align: center;
-        }
-
         @page {
-            margin: 1cm;
+            margin: 0.6cm;
             size: letter portrait;
         }
 
-        .table-dashed {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 8px;
+        body {
+            font-size: 9px;
         }
 
-        .table-dashed td,
-        .table-dashed th {
-            border: 1px dashed #000;
-            padding: 4px;
+        .table-solid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 5px;
+        }
+
+        .table-solid td,
+        .table-solid th {
+            border: 1px solid #000;
+            padding: 2px 3px;
         }
 
         .text-center {
@@ -90,22 +83,27 @@
         $hasLogo = isset($images) && isset($images['logo']) && !empty($images['logo']);
     @endphp
 
-    @if (!empty($hasLogo))
+    @if (!empty($letterhead ?? null))
+        <div style="text-align:center;margin-bottom:6px;">
+            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+        </div>
+    @endif
+    @php
+        $fondo_tp = (!empty($ocultar_marca ?? false) || !empty($letterhead ?? null)) ? null : ($logo_fondo ?? ($hasLogo ? $images['logo'] : null));
+    @endphp
+    @if (!empty($fondo_tp))
         <div id="watermark">
-            <img src="data:image/png;base64,{{ $images['logo'] }}" />
+            <img src="data:image/png;base64,{{ $fondo_tp }}" />
         </div>
     @endif
 
-    <div class="vertical-legend">
-        Generado por NOA Transportes | Fecha: {{ date('d/m/Y H:i') }} | Página 1 de 1
-    </div>
     <!-- HEADER BLOCK -->
-    <table style="width: 100%; margin-bottom: 15px; border-collapse: collapse;">
+    <table style="width: 100%; margin-bottom: 6px; border-collapse: collapse;">
         <tr>
             <td style="width: 25%; text-align: center; vertical-align: middle;">
                 @if ($hasLogo)
                     <img src="data:image/png;base64, {{ $images['logo'] }}"
-                        style="max-height: 60px; max-width: 100%; object-fit: contain;">
+                        style="max-height: 60px; max-width: 100%;">
                 @else
                     <div style="font-weight: bold; font-size: 14px;">
                         {{ $company ? substr($company->trade_name ?? $company->business_name, 0, 2) : 'JG' }}</div>
@@ -115,13 +113,13 @@
                 @endif
             </td>
             <td style="width: 75%; padding-left: 10px; vertical-align: top;">
-                <div style="border: 1px dashed #000; text-align: center; font-weight: bold; padding: 4px; margin-bottom: 4px;"
+                <div style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 4px; margin-bottom: 4px;"
                     class="uppercase">
                     {{ $company->business_name ?? 'TRANSPORTES ESPECIALES' }}
                 </div>
                 <table style="width: 100%; border-collapse: collapse;">
                     <tr>
-                        <td style="border: 1px dashed #000; text-align: center; width: 65%; padding: 4px;">
+                        <td style="border: 1px solid #000; text-align: center; width: 65%; padding: 4px;">
                             <div style="font-weight: bold; font-size: 10px;">FICHA TECNICA DEL CONDUCTOR</div>
                             <div style="font-weight: bold; font-size: 9px; margin-top: 4px;">RESPONSABLE JEFE
                                 OPERATIVO
@@ -129,7 +127,7 @@
                         </td>
                         <td style="width: 2%;"></td>
                         <td style="width: 33%; vertical-align: top;">
-                            <table class="table-dashed" style="margin-bottom: 0;">
+                            <table class="table-solid" style="margin-bottom: 0;">
                                 <tr>
                                     <td class="font-bold">Código</td>
                                     <td></td>
@@ -147,33 +145,33 @@
     </table>
 
     <!-- PERSONAL DATA -->
-    <table style="width: 100%; border-collapse: collapse; margin-bottom: 15px;">
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 6px;">
         <tr>
             <td style="width: 75%; vertical-align: top; padding-right: 10px;">
                 <table style="width: 100%; border-collapse: collapse;">
                     <tr>
-                        <td class="font-bold" style="padding: 4px 0; border-bottom: 1px dashed #000; width: 35%;">
+                        <td class="font-bold" style="padding: 2px 0; border-bottom: 1px solid #000; width: 35%;">
                             CEDULA
                             DE CIUDADANIA:</td>
-                        <td style="padding: 4px 0; border-bottom: 1px dashed #000;" class="uppercase">
+                        <td style="padding: 2px 0; border-bottom: 1px solid #000;" class="uppercase">
                             {{ $driver->document_number }}</td>
                     </tr>
                     <tr>
-                        <td class="font-bold" style="padding: 4px 0; border-bottom: 1px dashed #000;">NOMBRES Y
+                        <td class="font-bold" style="padding: 2px 0; border-bottom: 1px solid #000;">NOMBRES Y
                             APELLIDOS:</td>
-                        <td style="padding: 4px 0; border-bottom: 1px dashed #000;" class="uppercase">
+                        <td style="padding: 2px 0; border-bottom: 1px solid #000;" class="uppercase">
                             {{ $driver->first_name }} {{ $driver->last_name }}</td>
                     </tr>
                     <tr>
-                        <td class="font-bold" style="padding: 4px 0; border-bottom: 1px dashed #000;">FECHA Y LUGAR
+                        <td class="font-bold" style="padding: 2px 0; border-bottom: 1px solid #000;">FECHA Y LUGAR
                             DE
                             NACIMIENTO:</td>
-                        <td style="padding: 4px 0; border-bottom: 1px dashed #000;" class="uppercase">
+                        <td style="padding: 2px 0; border-bottom: 1px solid #000;" class="uppercase">
                             {{ optional(optional($driver->municipality)->department)->name ? optional($driver->municipality)->name . ', ' . $driver->municipality->department->name : 'N/A' }}
                         </td>
                     </tr>
                     <tr>
-                        <td colspan="2" style="padding: 4px 0; border-bottom: 1px dashed #000;">
+                        <td colspan="2" style="padding: 2px 0; border-bottom: 1px solid #000;">
                             <table style="width: 100%; border-collapse: collapse;">
                                 <tr>
                                     <td class="font-bold" style="width: 15%;">SEXO:</td>
@@ -185,7 +183,7 @@
                         </td>
                     </tr>
                     <tr>
-                        <td colspan="2" style="padding: 4px 0; border-bottom: 1px dashed #000;">
+                        <td colspan="2" style="padding: 2px 0; border-bottom: 1px solid #000;">
                             <table style="width: 100%; border-collapse: collapse;">
                                 <tr>
                                     <td class="font-bold" style="width: 15%;">TELÉFONOS:</td>
@@ -197,9 +195,9 @@
                         </td>
                     </tr>
                     <tr>
-                        <td class="font-bold" style="padding: 4px 0; border-bottom: 1px dashed #000;">CORREO
+                        <td class="font-bold" style="padding: 2px 0; border-bottom: 1px solid #000;">CORREO
                             ELECTRONICO:</td>
-                        <td style="padding: 4px 0; border-bottom: 1px dashed #000;" class="uppercase">
+                        <td style="padding: 2px 0; border-bottom: 1px solid #000;" class="uppercase">
                             @if ($driver->email)
                                 {{ $driver->email }}
                             @else
@@ -210,10 +208,10 @@
                 </table>
             </td>
             <td style="width: 25%; text-align: center; vertical-align: top;">
-                <div style="border: 1px dashed #000; height: 135px; width: 100%; display: table;">
+                <div style="border: 1px solid #000; height: 110px; width: 100%; display: table;">
                     <div style="display: table-cell; vertical-align: middle; color: #000;">
                         @if (isset($images) && isset($images['photo']) && !empty($images['photo']))
-                            <img src="data:image/png;base64,{{ $images['photo'] }}" style="max-height: 130px; max-width: 100%; object-fit: cover;" />
+                            <img src="data:image/png;base64,{{ $images['photo'] }}" style="max-height: 105px; max-width: 100%;" />
                         @else
                             FOTO
                         @endif
@@ -225,7 +223,7 @@
 
     <!-- COMPANY AFFILIATION -->
     <div class="text-center font-bold" style="margin-bottom: 4px;">DATOS DE LA EMPRESA AFILIADA</div>
-    <table class="table-dashed text-center">
+    <table class="table-solid text-center">
         <tr>
             <td class="font-bold">VINCULADO A</td>
             <td class="font-bold">NIT</td>
@@ -240,11 +238,11 @@
     </table>
 
     <!-- DRIVER LICENSE -->
-    <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 10px;">LICENCIA(S) DE CONDUCCIÓN</div>
+    <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 6px;">LICENCIA(S) DE CONDUCCIÓN</div>
     @php
         $license = $driver->licenciaActual();
     @endphp
-    <table class="table-dashed text-center">
+    <table class="table-solid text-center">
         <tr>
             <td class="font-bold" style="width: 20%;">NRO. LICENCIA</td>
             <td style="width: 15%;">{{ $license ? $license->number : 'N/A' }}</td>
@@ -264,19 +262,34 @@
     </table>
 
     <!-- CONTRACT -->
-    <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 10px;">INFORMACIÓN DEL CONTRATO</div>
-    <table class="table-dashed text-center">
+    <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 6px;">INFORMACIÓN DEL CONTRATO</div>
+    @php
+        $contract = $driver->currentEmploymentContract();
+        $contractTypeName = $contract ? str_replace('_', ' ', strtolower($contract->contract_type)) : 'N/A';
+    @endphp
+    <table class="table-solid text-center">
         <tr>
-            <td class="font-bold" style="width: 20%;">TIPO DE CONTRATO</td>
-            <td style="width: 20%;">OBRA LABOR</td>
-            <td class="font-bold" style="width: 20%;">FECHA INICIO</td>
-            <td style="width: 20%;">N/A</td>
-            <td class="font-bold" style="width: 20%;">No. CONTRATO</td>
+            <td class="font-bold" style="width: 17%;">TIPO DE CONTRATO</td>
+            <td style="width: 33%;" class="uppercase">{{ $contractTypeName }}</td>
+            <td class="font-bold" style="width: 17%;">CARGO</td>
+            <td colspan="3" class="uppercase">{{ $contract ? ($contract->position ?: 'Conductor') : 'Conductor' }}</td>
+        </tr>
+        <tr>
+            <td class="font-bold" style="width: 17%;">FECHA INICIO</td>
+            <td style="width: 33%;">
+                {{ $contract && $contract->start_date ? \Carbon\Carbon::parse($contract->start_date)->format('d/m/Y') : 'N/A' }}
+            </td>
+            <td class="font-bold" style="width: 17%;">FECHA FIN</td>
+            <td style="width: 33%;">
+                {{ $contract && $contract->end_date ? \Carbon\Carbon::parse($contract->end_date)->format('d/m/Y') : ($contract ? 'Indefinido' : 'N/A') }}
+            </td>
+            <td class="font-bold" style="width: 17%;">ESTADO</td>
+            <td style="width: 33%;" class="uppercase">{{ $contract ? $contract->status : 'N/A' }}</td>
         </tr>
     </table>
 
     <!-- SOCIAL SECURITY -->
-    <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 10px;">INFORMACION DE AFILIACIONES A
+    <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 6px;">INFORMACION DE AFILIACIONES A
         SEGURIDAD SOCIAL</div>
     @php
         $latestContribution = $driver->socialSecurityContributions->sortByDesc('created_at')->first();
@@ -287,7 +300,7 @@
         $compensationName = $latestContribution && $latestContribution->compensation_fund_name ? $latestContribution->compensation_fund_name : ($latestContribution && $latestContribution->compensation_fund_paid ? 'ACTIVA' : 'N/A');
     @endphp
 
-    <table class="table-dashed text-center" style="margin-bottom: 6px;">
+    <table class="table-solid text-center" style="margin-bottom: 6px;">
         <tr>
             <td colspan="6" class="font-bold">AFILIACIÓN A SALUD (EPS)</td>
         </tr>
@@ -301,7 +314,7 @@
         </tr>
     </table>
 
-    <table class="table-dashed text-center" style="margin-bottom: 6px;">
+    <table class="table-solid text-center" style="margin-bottom: 6px;">
         <tr>
             <td colspan="4" class="font-bold">AFILIACIÓN A RIESGOS LABORALES (ARL)</td>
         </tr>
@@ -313,7 +326,7 @@
         </tr>
     </table>
 
-    <table class="table-dashed text-center" style="margin-bottom: 6px;">
+    <table class="table-solid text-center" style="margin-bottom: 6px;">
         <tr>
             <td colspan="4" class="font-bold">AFILIACIÓN A PENSIONES</td>
         </tr>
@@ -325,7 +338,7 @@
         </tr>
     </table>
 
-    <table class="table-dashed text-center">
+    <table class="table-solid text-center">
         <tr>
             <td colspan="4" class="font-bold">CAJA DE COMPENSACIÓN FAMILIAR</td>
         </tr>
@@ -338,7 +351,7 @@
     </table>
 
     <!-- VEHICLES -->
-    {{-- <table class="table-dashed text-center" style="margin-top: 10px;">
+    {{-- <table class="table-solid text-center" style="margin-top: 6px;">
         <tr>
             <td colspan="6" class="font-bold">VEHÍCULOS ASIGNADOS</td>
         </tr>

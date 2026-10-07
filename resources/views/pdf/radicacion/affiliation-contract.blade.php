@@ -4,11 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <title>Contrato de vinculación por administración de flota</title>
-    @include('pdf.radicacion._estilos')
+    @include('pdf.radicacion.partials.styles')
 </head>
 
 <body>
-    @include('pdf.radicacion._encabezado')
+    @include('pdf.radicacion.partials.header')
 
     <div class="titulo">Contrato de vinculación por administración de flota</div>
 
@@ -244,7 +244,7 @@
         reemplaza todos los contratos anteriores entre las mismas partes. Las diferencias que se
         susciten se dirimirán en la jurisdicción ordinaria de {{ $expediente['ciudad'] ?? 'Sincelejo' }}.</p>
 
-    @include('pdf.radicacion._firmas', [
+    @include('pdf.radicacion.partials.signatures', [
         'izquierda' => [
             'firma' => $empresa['firma_representante'] ?? null,
             'nombre' => $empresa['representante'] ?? '',
