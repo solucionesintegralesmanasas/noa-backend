@@ -528,6 +528,16 @@ class PdfService
     }
 
     /**
+     * Logo de la empresa para los PDF: adjunto `logos` de MediaLibrary o, en su
+     * defecto, la columna `logo`. Un solo punto de resolución (antes la misma
+     * expresión estaba copiada en cada generador y en controladores).
+     */
+    public static function logoParaMarca(mixed $company): mixed
+    {
+        return $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+    }
+
+    /**
      * Inyecta las claves de presentación (`letterhead`, `logo_fondo`,
      * `ocultar_marca`) en los datos de cualquier vista PDF.
      *
@@ -2062,7 +2072,7 @@ class PdfService
         $doc = \App\Support\HumanResources\EmploymentContractTemplates::build($contractType, $data);
 
         // Obtenemos los logos de la empresa
-        $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+        $logoModel = self::logoParaMarca($company);
 
         return ['contract' => $contract, 'doc' => $doc, 'company' => $company, 'thirdParty' => $thirdParty, 'logoModel' => $logoModel];
     }
