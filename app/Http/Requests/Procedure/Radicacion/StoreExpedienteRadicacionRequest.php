@@ -22,6 +22,18 @@ class StoreExpedienteRadicacionRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        // El formulario no envía empresa: se toma la del contexto para no crear
+        // expedientes sin empresa (fuera del alcance multi-tenant y de la unicidad).
+        if (! $this->input('company_uuid')) {
+            $actual = $this->attributes->get('current_company_uuid');
+            if ($actual) {
+                $this->merge(['company_uuid' => $actual]);
+            }
+        }
+    }
+
     public function rules(): array
     {
         return [
@@ -31,6 +43,8 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'vehicle_uuid' => 'required|uuid|exists:vehicles,uuid',
             'procedure_code' => [
                 'required', 'string', 'max:50',
+                // Sin índice único en BD a propósito: hay códigos repetidos históricos
+                // (ver SPEC-007) que hay que depurar antes; la unicidad se exige aquí.
                 Rule::unique('procedures', 'procedure_code')
                     ->where(fn ($q) => $q->where('company_uuid', $this->input('company_uuid') ?? $this->attributes->get('current_company_uuid'))
                         ->where(fn ($w) => $w->whereNull('parent_procedure_uuid')->orWhere('parent_procedure_uuid', ''))),

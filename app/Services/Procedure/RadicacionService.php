@@ -219,9 +219,17 @@ class RadicacionService extends BaseService
             });
         }
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
-        $paginator->getCollection()->transform(function ($exp) {
+        // Los hijos se cargan en una sola consulta para toda la página (N+1 si se
+        // pidieran expediente por expediente, ver SPEC-004 y SPEC-007).
+        $uuids = $paginator->getCollection()->pluck('uuid')->all();
+        $hijosPorPadre = $uuids === []
+            ? collect()
+            : Procedure::whereIn('parent_procedure_uuid', $uuids)
+                ->get(['parent_procedure_uuid', 'procedure_type', 'status'])
+                ->groupBy('parent_procedure_uuid');
+        $paginator->getCollection()->transform(function ($exp) use ($hijosPorPadre) {
             $ruta = $this->rutaPara($exp->link_type ?? 'CAMBIO_DE_EMPRESA');
-            $hijos = Procedure::where('parent_procedure_uuid', $exp->uuid)->get(['procedure_type', 'status']);
+            $hijos = $hijosPorPadre->get($exp->uuid, collect());
             $linea = [];
             foreach ($ruta as $paso) {
                 $h = $hijos->firstWhere('procedure_type', $paso);

@@ -163,4 +163,26 @@ class RadicacionHttpTest extends TestCase
 
         $this->assertSame(0, DB::table('contract_signatures')->where('contract_uuid', $contratoAjeno)->count());
     }
+
+    public function test_el_expediente_sin_empresa_usa_la_del_contexto(): void
+    {
+        $vehiculo = $this->insertar('vehicles', ['company_uuid' => $this->empresa]);
+        $ciudad = $this->insertar('cities', []);
+        $director = $this->insertar('territorial_directors', []);
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/radicacion/expediente', [
+                'link_type' => 'CAMBIO_DE_EMPRESA',
+                'vehicle_uuid' => $vehiculo,
+                'procedure_code' => 'EXP-SIN-EMPRESA',
+                'date_of_creation' => '2026-10-07',
+                'city_uuid' => $ciudad,
+                'territorial_director_uuid' => $director,
+            ])
+            ->assertCreated();
+
+        $uuid = $respuesta->json('data.expediente.uuid');
+        $this->assertSame($this->empresa, DB::table('procedures')->where('uuid', $uuid)->value('company_uuid'));
+    }
 }
