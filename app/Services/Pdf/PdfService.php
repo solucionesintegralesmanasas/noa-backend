@@ -2008,9 +2008,13 @@ class PdfService
         return base64_encode($optimized);
     }
     /**
-     * Genera el contrato laboral en PDF.
+     * Carga el contrato laboral con sus relaciones (consultas) para el PDF.
+     * Separado del render para que un futuro lote pueda medir y presupuestar
+     * las consultas aparte del renderizado (patrón SPEC-004: `allForExport`).
+     *
+     * @return array{contract: \App\Models\EmploymentContract, doc: array, company: mixed, thirdParty: mixed, logoModel: mixed}
      */
-    public function generateEmploymentContractPdf(string $uuid): \Illuminate\Http\Response
+    public function cargarContratoLaboral(string $uuid): array
     {
         $contract = \App\Models\EmploymentContract::with(['company.municipality', 'thirdParty'])->where('uuid', $uuid)->firstOrFail();
 
@@ -2054,6 +2058,21 @@ class PdfService
 
         // Obtenemos los logos de la empresa
         $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+
+        return ['contract' => $contract, 'doc' => $doc, 'company' => $company, 'thirdParty' => $thirdParty, 'logoModel' => $logoModel];
+    }
+
+    /**
+     * Genera el contrato laboral en PDF.
+     */
+    public function generateEmploymentContractPdf(string $uuid): \Illuminate\Http\Response
+    {
+        $datos = $this->cargarContratoLaboral($uuid);
+        $contract = $datos['contract'];
+        $doc = $datos['doc'];
+        $company = $datos['company'];
+        $thirdParty = $datos['thirdParty'];
+        $logoModel = $datos['logoModel'];
 
         $viewData = [
             'doc' => $doc,
