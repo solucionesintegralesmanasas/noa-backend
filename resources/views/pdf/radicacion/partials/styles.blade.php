@@ -116,14 +116,20 @@
 
     .espacio-firma {
         height: 56px;
-        display: flex;
-        align-items: flex-end;
-        justify-content: center;
+        line-height: 56px;
+        text-align: center;
     }
 
     .espacio-firma img {
         max-height: 48px;
         max-width: 160px;
+        vertical-align: bottom;
+    }
+
+    .espacio-firma .firma-escrita {
+        display: inline-block;
+        line-height: 56px;
+        vertical-align: bottom;
     }
 
     /* Firma tomada por enlace: el firmante escribe su nombre en vez de trazar. */
@@ -134,7 +140,6 @@
         line-height: 48px;
         max-width: 190px;
         overflow: hidden;
-        text-overflow: ellipsis;
         white-space: nowrap;
     }
 

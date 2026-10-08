@@ -556,6 +556,11 @@ class PdfService
      */
     public function sellarPaginado(\Barryvdh\DomPDF\PDF $pdf): \Barryvdh\DomPDF\PDF
     {
+        // Parte de cero: los avisos que haya dejado otro PDF del proceso no
+        // deben tumbar este sellado (el global de DomPDF es acumulativo).
+        global $_dompdf_warnings;
+        $_dompdf_warnings = [];
+
         try {
             $pdf->render();
             $dompdf = $pdf->getDomPDF();

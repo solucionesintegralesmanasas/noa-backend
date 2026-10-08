@@ -143,6 +143,12 @@ class RadicacionDocumentoService
             $datos['letterhead'] = null;
         }
 
+        // DomPDF acumula los avisos de TODOS los renderizados del proceso en un
+        // global; sin limpiarlo, los avisos que dejó otro PDF tumban este aunque
+        // su CSS esté limpio (ver Style::__set y PDF::render).
+        global $_dompdf_warnings;
+        $_dompdf_warnings = [];
+
         $pdf = Pdf::loadView($vista, $datos);
         $pdf->setPaper('letter', 'portrait');
         $pdf->setOption(['dpi' => 120, 'isFontSubsettingEnabled' => true]);
