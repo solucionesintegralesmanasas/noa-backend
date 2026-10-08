@@ -185,4 +185,28 @@ class RadicacionHttpTest extends TestCase
         $uuid = $respuesta->json('data.expediente.uuid');
         $this->assertSame($this->empresa, DB::table('procedures')->where('uuid', $uuid)->value('company_uuid'));
     }
+
+    public function test_el_documento_devuelve_pdf(): void
+    {
+        $vehiculo = $this->insertar('vehicles', ['company_uuid' => $this->empresa]);
+        DB::table('procedures')->where('uuid', $this->padre)->update(['vehicle_uuid' => $vehiculo]);
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson("/api/v1/procedure/radicacion/{$this->padre}/documento/CARTA_ACEPTACION");
+
+        $respuesta->assertOk();
+        $this->assertStringContainsString('application/pdf', $respuesta->headers->get('Content-Type') ?? '');
+    }
+
+    public function test_el_documento_con_clave_invalida_devuelve_404_json(): void
+    {
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson("/api/v1/procedure/radicacion/{$this->padre}/documento/CLAVE_QUE_NO_EXISTE");
+
+        $respuesta->assertNotFound();
+        $respuesta->assertJson(['success' => false]);
+    }
 }

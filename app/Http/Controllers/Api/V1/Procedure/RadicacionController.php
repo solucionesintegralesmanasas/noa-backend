@@ -141,7 +141,7 @@ class RadicacionController extends Controller
         }
     }
 
-    public function documento(Request $request, string $uuid, string $documento): Response
+    public function documento(Request $request, string $uuid, string $documento): Response|JsonResponse
     {
         try {
             $descargar = $request->boolean('descargar');
@@ -214,7 +214,7 @@ private function urlPublicaDocumento(string $ruta, string $token, \Illuminate\Su
      * PDF del contrato para el firmante: puede verlo antes de firmar y descargarlo
      * firmado después. El acceso se valida con la misma firma temporal del enlace.
      */
-    public function documentoPublico(Request $request, string $token): Response
+    public function documentoPublico(Request $request, string $token): Response|JsonResponse
     {
         try {
             $firma = $this->firmas->findByToken($token);
