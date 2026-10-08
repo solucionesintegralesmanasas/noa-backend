@@ -15,11 +15,19 @@ trait ValidaEmpresaDelContexto
     protected function reglaEmpresaDelContexto(): Closure
     {
         return function (string $attribute, mixed $value, Closure $fail): void {
-            $actual = $this->attributes->get('current_company_uuid');
-            if ($value === null || $actual === null || $value === $actual) {
+            // SUPERADMIN opera en cualquiera, incluso sin empresa activa.
+            if ($this->user()?->hasRole('SUPERADMIN')) {
                 return;
             }
-            if ($this->user()?->hasRole('SUPERADMIN')) {
+            $actual = $this->attributes->get('current_company_uuid');
+            // Sin empresa activa no se puede validar pertenencia: falla cerrado.
+            if ($actual === null) {
+                $fail('No hay empresa activa en la petición.');
+
+                return;
+            }
+            // Valor nulo significa "usar la empresa del contexto", ya validada arriba.
+            if ($value === null || $value === $actual) {
                 return;
             }
             $fail('La empresa no corresponde a la empresa activa.');

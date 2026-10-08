@@ -76,6 +76,12 @@ class RadicacionController extends Controller
     {
         try {
             $data = $request->validated();
+            // Cinturón y tirantes: si la validación dejó pasar un nulo (SUPERADMIN sin
+            // contexto), se toma la empresa activa; sin empresa no se crea el trámite.
+            $data['company_uuid'] ??= $request->attributes->get('current_company_uuid');
+            if (! $data['company_uuid']) {
+                return $this->errorResponse('La empresa es obligatoria.', 422);
+            }
             $res = $this->radicacion->crearExpediente($data);
 
             return $this->successResponse($res, 'Expediente de radicación creado.', 201);

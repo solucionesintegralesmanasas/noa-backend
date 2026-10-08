@@ -678,9 +678,9 @@ class RadicacionDocumentoService
             'CONTRATO_PRESTACION' => $datos['prestacion']['numero'] ?? null,
         ];
         $sufijo = $sufijos[$clave] ?? null;
+        $sufijoLimpio = $sufijo ? '-'.Str::slug((string) $sufijo, '_') : '';
 
-        $etiquetaLegible = Str::slug($etiquetas['etiqueta'] ?? $clave, ' ');
-
-        return trim($etiquetaLegible.($sufijo ? ' - '.$sufijo : '')).'.pdf';
+        // Sin espacios: con espacios el `Content-Disposition` se rompe en algunos navegadores.
+        return trim($base.$sufijoLimpio, '_-').'.pdf';
     }
 }
