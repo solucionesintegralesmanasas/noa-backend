@@ -153,23 +153,30 @@ class VehicleDocumentService extends BaseService
 
         $grouped = $vehicles->map(function ($vehicle) use ($documents, $types) {
             $policies = $documents->get($vehicle->uuid, collect())->values();
-            $first = $policies->first();
 
-            $validExpiries = $policies->pluck('expiry_date')->filter()
-                ->map(fn ($date) => $date instanceof \Carbon\Carbon ? $date->toDateString() : (string) $date);
-            $expiry = $validExpiries->isEmpty() ? null : $validExpiries->sort()->first();
+            // Las reemplazadas (INACTIVA) son historial: la fila consolidada refleja un registro vivo.
+            $vivas = $policies->reject(fn ($doc) => strtoupper((string) ($doc->status ?? '')) === 'INACTIVA')->values();
+            $base = $vivas->isNotEmpty() ? $vivas : $policies;
 
             // Acepta SI por compatibilidad con registros anteriores a la normalización.
-            $hasVigente = $policies->contains(fn ($doc) => in_array($doc->status, ['VIGENTE', 'SI'], true));
+            $vigentes = $base->filter(fn ($doc) => in_array($doc->status, ['VIGENTE', 'SI'], true));
+            $candidatas = $vigentes->isNotEmpty() ? $vigentes : $base;
+            $actual = $candidatas->sortByDesc(fn ($doc) => $this->marcaOrdenPoliza($doc))->first() ?? $policies->first();
+
+            $fecha = $actual?->expiry_date;
+            $expiry = $fecha instanceof \Carbon\Carbon ? $fecha->toDateString() : (($fecha !== null && $fecha !== '') ? (string) $fecha : null);
+
+            // Acepta SI por compatibilidad con registros anteriores a la normalización.
+            $hasVigente = $base->contains(fn ($doc) => in_array($doc->status, ['VIGENTE', 'SI'], true));
 
             return [
                 'uuid' => $vehicle->uuid,
                 'vehicle_uuid' => $vehicle->uuid,
-                'policy_number' => $first?->policy_number,
+                'policy_number' => $actual?->policy_number,
                 'document_type' => implode(',', collect($types)->unique()->values()->all()),
                 'issuing_entity' => $policies->pluck('issuing_entity')->filter()->unique()->implode(' / '),
                 'expiry_date' => $expiry,
-                'status' => $hasVigente ? 'VIGENTE' : ($first?->status ?? 'INACTIVA'),
+                'status' => $hasVigente ? 'VIGENTE' : ($actual?->status ?? 'INACTIVA'),
                 'vehicle' => [
                     'uuid' => $vehicle->uuid,
                     'vehicle_license_plate' => $vehicle->vehicle_license_plate,
@@ -193,6 +200,21 @@ class VehicleDocumentService extends BaseService
         });
 
         return $vehicles->setCollection($grouped);
+    }
+
+    /**
+     * Marca de orden para elegir la póliza viva representativa: mayor fecha de
+     * vencimiento y, a igual fecha, la última registrada. Orden lexicográfico
+     * válido porque ambas marcas usan formato cronológico fijo.
+     */
+    private function marcaOrdenPoliza(Model $doc): string
+    {
+        $vence = $doc->expiry_date;
+        $vence = $vence instanceof \Carbon\Carbon ? $vence->toDateString() : (string) ($vence ?? '');
+        $creada = $doc->created_at;
+        $creada = $creada instanceof \Carbon\Carbon ? $creada->toDateTimeString() : (string) ($creada ?? '');
+
+        return $vence.'|'.$creada;
     }
 
     /**
