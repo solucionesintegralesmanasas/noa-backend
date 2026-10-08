@@ -8,6 +8,14 @@ use App\Services\LicenseService;
 
 class HybridLicenseMiddleware
 {
+    /**
+     * LEGADO: este middleware no se aplica globalmente (en Laravel 12 el Kernel
+     * clásico no se carga; ver bootstrap/app.php). La verificación de licencia
+     * vive en la ruta explícita `GET /api/v1/license/verify/{key}` con
+     * `LicenseService`. No reactivarlo en global sin alinear ambas ramas
+     * (online/offline) con el servicio: hoy la lógica está duplicada entre este
+     * archivo y el closure de la ruta.
+     */
     public function handle(Request $request, Closure $next)
     {
         // 1. Obtener código de licencia de múltiples fuentes

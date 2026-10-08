@@ -1086,27 +1086,36 @@ Route::prefix('v1')->group(function () {
                 'message' => 'Código de licencia inválido o no encontrado'
             ], 403);
         })->withoutMiddleware('auth'); // Licencia check va antes de auth
+    });
 
+    // ─── ADMIN DE LICENCIAS (mutan estado: solo SUPERADMIN autenticado) ───
+    Route::middleware(['auth:sanctum', 'role:SUPERADMIN', 'throttle:60,1'])->group(function () {
         // Ruta para revocar licencia (desde panel admin)
-        Route::post('/revoke', function ($request) {
-            $key = $request->input('license_key');
+        Route::post('/revoke', function (\Illuminate\Http\Request $request) {
+            $key = trim((string) $request->input('license_key', ''));
+            if ($key === '') {
+                return response()->json(['success' => false, 'message' => 'La licencia es obligatoria.'], 422);
+            }
             $service = new \App\Services\LicenseService();
             if ($service->revokeKey($key)) {
                 return response()->json(['success' => true, 'message' => 'Licencia revocada']);
             }
             return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
-        });
+        })->name('api.v1.license.revoke');
 
         // Ruta para renovar licencia (desde panel admin)
-        Route::post('/renew', function ($request) {
-            $key = $request->input('license_key');
+        Route::post('/renew', function (\Illuminate\Http\Request $request) {
+            $key = trim((string) $request->input('license_key', ''));
             $newExpiry = $request->input('new_expiry_date');
+            if ($key === '' || ! is_string($newExpiry) || strtotime($newExpiry) === false) {
+                return response()->json(['success' => false, 'message' => 'La licencia y la nueva fecha de vencimiento son obligatorias.'], 422);
+            }
             $service = new \App\Services\LicenseService();
             if ($service->renewKey($key, $newExpiry)) {
                 return response()->json(['success' => true, 'new_expiry' => $newExpiry]);
             }
             return response()->json(['success' => false, 'message' => 'No se puede renovar'], 400);
-        });
+        })->name('api.v1.license.renew');
 
         // Ficha completa de la licencia (la vista /licencia del admin empresa).
         Route::get('/license/detail/{key}', function ($key) {
@@ -1115,7 +1124,7 @@ Route::prefix('v1')->group(function () {
                 return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
             }
             return response()->json(['success' => true, 'data' => $license]);
-        })->middleware('auth:sanctum');
+        })->name('api.v1.license.detail');
     });
 
     Route::get('/health', function () {

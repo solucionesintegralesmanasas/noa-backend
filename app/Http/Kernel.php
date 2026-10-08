@@ -4,7 +4,6 @@ namespace App\Http;
 
 use Illuminate\Foundation\Http\Kernel as HttpKernel;
 use Illuminate\Routing\Middleware\SubstituteBindings;
-use App\Http\Middleware\HybridLicenseMiddleware;
 
 class Kernel extends HttpKernel
 {
@@ -43,7 +42,9 @@ class Kernel extends HttpKernel
         'api' => [
             'sanctum',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
-            HybridLicenseMiddleware::class, // Agregado: verificación híbrida de licencia
+            // Nota: en Laravel 12 este Kernel clásico no se carga (la API se configura en
+            // bootstrap/app.php). No registrar aquí middleware globales: daría una falsa
+            // sensación de seguridad. La verificación de licencia vive en su ruta explícita.
         ],
     ];
 

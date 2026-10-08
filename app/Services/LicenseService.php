@@ -10,8 +10,14 @@ use Illuminate\Support\Facades\Cache;
 
 class LicenseService
 {
-    protected $secretKey = 'LS2026-HYBRID-SUPER-SECRET-KEY-Alpha-Numeric-2026';
+    protected $secretKey;
+
     protected $cacheTtl = 3600; // 1 hora en caché
+
+    public function __construct()
+    {
+        $this->secretKey = config('app.license_hmac_secret') ?: env('LICENSE_HMAC_SECRET', '');
+    }
 
     /**
      * Generar un nuevo código de licencia híbrido.
@@ -19,6 +25,9 @@ class LicenseService
      */
     public function generateKey(array $companyData): array
     {
+        if (empty($this->secretKey)) {
+            throw new \RuntimeException('Falta configurar LICENSE_HMAC_SECRET en el .env.');
+        }
         // 1. Construir payload (datos codificados en la licencia)
         $expiry = $companyData['expiry_date'] instanceof Carbon ? $companyData['expiry_date'] : Carbon::createFromFormat('Y-m-d', $companyData['expiry_date']);
         $payload = [
@@ -95,6 +104,10 @@ class LicenseService
         }
 
         try {
+            // Sin secreto no se puede validar la firma: falla cerrado.
+            if (empty($this->secretKey)) {
+                return null;
+            }
             // 1. Decodificar base64 (añadir padding si es necesario)
             $decoded = json_decode(base64_decode($licenseKey . '=='), true);
             if (json_last_error() !== JSON_ERROR_NONE || !$decoded) return null;
