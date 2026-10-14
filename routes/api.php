@@ -23,6 +23,11 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
+use App\Http\Controllers\Api\V1\Billing\BillingProviderController;
+use App\Http\Controllers\Api\V1\Billing\BillingResolutionController;
+use App\Http\Controllers\Api\V1\Billing\CommercialInvoiceController;
+use App\Http\Controllers\Api\V1\Billing\CreditNoteController;
+use App\Http\Controllers\Api\V1\Billing\DebitNoteController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -591,6 +596,56 @@ Route::prefix('v1')->group(function () {
             Route::put('/{uuid}', [EmploymentContractController::class, 'update'])->name('api.v1.third-parties.employment-contracts.update');
             Route::delete('/{uuid}', [EmploymentContractController::class, 'destroy'])->name('api.v1.third-parties.employment-contracts.destroy');
             Route::get('/{uuid}/pdf', [EmploymentContractController::class, 'contractPdf'])->name('api.v1.third-parties.employment-contracts.pdf');
+        });
+
+        // ─── MÓDULO FACTURACIÓN (cotización fase 1, factura interna fase 2, sin FE) ───
+        Route::prefix('billing')->group(function () {
+            Route::prefix('billing-providers')->group(function () {
+                Route::get('/', [BillingProviderController::class, 'index'])->name('api.v1.billing.billing-providers.index');
+                Route::post('/', [BillingProviderController::class, 'store'])->name('api.v1.billing.billing-providers.store');
+                Route::get('/{uuid}', [BillingProviderController::class, 'show'])->name('api.v1.billing.billing-providers.show');
+                Route::put('/{uuid}', [BillingProviderController::class, 'update'])->name('api.v1.billing.billing-providers.update');
+                Route::delete('/{uuid}', [BillingProviderController::class, 'destroy'])->name('api.v1.billing.billing-providers.destroy');
+            });
+
+            Route::prefix('billing-resolutions')->group(function () {
+                Route::get('/', [BillingResolutionController::class, 'index'])->name('api.v1.billing.billing-resolutions.index');
+                Route::get('/list', [BillingResolutionController::class, 'list'])->name('api.v1.billing.billing-resolutions.list');
+                Route::post('/', [BillingResolutionController::class, 'store'])->name('api.v1.billing.billing-resolutions.store');
+                Route::get('/{uuid}', [BillingResolutionController::class, 'show'])->name('api.v1.billing.billing-resolutions.show');
+                Route::put('/{uuid}', [BillingResolutionController::class, 'update'])->name('api.v1.billing.billing-resolutions.update');
+                Route::delete('/{uuid}', [BillingResolutionController::class, 'destroy'])->name('api.v1.billing.billing-resolutions.destroy');
+            });
+
+            Route::prefix('commercial-invoices')->group(function () {
+                Route::get('/', [CommercialInvoiceController::class, 'index'])->name('api.v1.billing.commercial-invoices.index');
+                Route::post('/quotations', [CommercialInvoiceController::class, 'storeQuotation'])->name('api.v1.billing.commercial-invoices.store-quotation');
+                Route::post('/invoices', [CommercialInvoiceController::class, 'storeInvoice'])->name('api.v1.billing.commercial-invoices.store-invoice');
+                Route::get('/{uuid}', [CommercialInvoiceController::class, 'show'])->name('api.v1.billing.commercial-invoices.show');
+                Route::put('/{uuid}', [CommercialInvoiceController::class, 'update'])->name('api.v1.billing.commercial-invoices.update');
+                Route::patch('/{uuid}/estado', [CommercialInvoiceController::class, 'cambiarEstado'])->name('api.v1.billing.commercial-invoices.estado');
+                Route::post('/{uuid}/convertir', [CommercialInvoiceController::class, 'convertir'])->name('api.v1.billing.commercial-invoices.convertir');
+                Route::post('/{uuid}/pagos', [CommercialInvoiceController::class, 'pago'])->name('api.v1.billing.commercial-invoices.pago');
+                Route::post('/{uuid}/anular', [CommercialInvoiceController::class, 'anular'])->name('api.v1.billing.commercial-invoices.anular');
+                Route::get('/{uuid}/pdf', [CommercialInvoiceController::class, 'pdf'])->name('api.v1.billing.commercial-invoices.pdf');
+                Route::delete('/{uuid}', [CommercialInvoiceController::class, 'destroy'])->name('api.v1.billing.commercial-invoices.destroy');
+            });
+
+            Route::prefix('credit-notes')->group(function () {
+                Route::get('/', [CreditNoteController::class, 'index'])->name('api.v1.billing.credit-notes.index');
+                Route::post('/', [CreditNoteController::class, 'store'])->name('api.v1.billing.credit-notes.store');
+                Route::get('/{uuid}', [CreditNoteController::class, 'show'])->name('api.v1.billing.credit-notes.show');
+                Route::post('/{uuid}/emitir', [CreditNoteController::class, 'emitir'])->name('api.v1.billing.credit-notes.emitir');
+                Route::post('/{uuid}/anular', [CreditNoteController::class, 'anular'])->name('api.v1.billing.credit-notes.anular');
+            });
+
+            Route::prefix('debit-notes')->group(function () {
+                Route::get('/', [DebitNoteController::class, 'index'])->name('api.v1.billing.debit-notes.index');
+                Route::post('/', [DebitNoteController::class, 'store'])->name('api.v1.billing.debit-notes.store');
+                Route::get('/{uuid}', [DebitNoteController::class, 'show'])->name('api.v1.billing.debit-notes.show');
+                Route::post('/{uuid}/emitir', [DebitNoteController::class, 'emitir'])->name('api.v1.billing.debit-notes.emitir');
+                Route::post('/{uuid}/anular', [DebitNoteController::class, 'anular'])->name('api.v1.billing.debit-notes.anular');
+            });
         });
 
         // ─── RUTAS PARA EL MODULO DE FLOTA ───
