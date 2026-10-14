@@ -21,6 +21,8 @@ class RoleSeeder extends Seeder
         $conductor = Role::firstOrCreate(['name' => 'CONDUCTOR', 'guard_name' => 'api']);
 
         $adminEmpresaPerms = Permission::query()->whereIn('name', [
+            'users.index',
+
             'companies.update',
             'companies.profile',
 
@@ -39,11 +41,13 @@ class RoleSeeder extends Seeder
             'economic_activities.create',
             'economic_activities.update',
             'economic_activities.delete',
+            'economic_activities.profile',
 
             'bank_details.index',
             'bank_details.create',
             'bank_details.update',
             'bank_details.delete',
+            'bank_details.profile',
 
             'tax_information.index',
             'tax_information.create',
@@ -69,6 +73,7 @@ class RoleSeeder extends Seeder
             'rup_records.create',
             'rup_records.update',
             'rup_records.delete',
+            'rup_records.profile',
 
             'financial_statements.index',
             'financial_statements.create',
@@ -131,126 +136,16 @@ class RoleSeeder extends Seeder
             'third_parties.delete',
             'third_parties.profile',
 
-            'categories.index',
-            'categories.create',
-            'categories.update',
-            'categories.delete',
-
-            'warehouses.index',
-            'warehouses.create',
-            'warehouses.update',
-            'warehouses.delete',
-
-            'products.index',
-            'products.create',
-            'products.update',
-            'products.delete',
-
-            'product_variants.index',
-            'product_variants.create',
-            'product_variants.update',
-            'product_variants.delete',
-
-            'chart_of_accounts.index',
-            'chart_of_accounts.create',
-            'chart_of_accounts.update',
-            'chart_of_accounts.delete',
-
             'cost_centers.index',
             'cost_centers.create',
             'cost_centers.update',
             'cost_centers.delete',
-
-            'voucher_types.index',
-            'voucher_types.create',
-            'voucher_types.update',
-            'voucher_types.delete',
-
-            'bank_accounts.index',
-            'bank_accounts.create',
-            'bank_accounts.update',
-            'bank_accounts.delete',
-
-            'budgets.index',
-            'budgets.create',
-            'budgets.update',
-            'budgets.delete',
-
-            'billing_providers.index',
-            'billing_providers.create',
-            'billing_providers.update',
-            'billing_providers.delete',
-
-            'billing_resolutions.index',
-            'billing_resolutions.create',
-            'billing_resolutions.update',
-            'billing_resolutions.delete',
-
-            'fiscal_documents.index',
-            'fiscal_documents.create',
-            'fiscal_documents.update',
-            'fiscal_documents.delete',
-
-            'commercial_invoices.index',
-            'commercial_invoices.create',
-            'commercial_invoices.update',
-            'commercial_invoices.delete',
-
-            'electronic_invoices.index',
-            'electronic_invoices.create',
-            'electronic_invoices.update',
-            'electronic_invoices.delete',
-
-            'credit_notes.index',
-            'credit_notes.create',
-            'credit_notes.update',
-            'credit_notes.delete',
-
-            'debit_notes.index',
-            'debit_notes.create',
-            'debit_notes.update',
-            'debit_notes.delete',
-
-            'purchase_orders.index',
-            'purchase_orders.create',
-            'purchase_orders.update',
-            'purchase_orders.delete',
-
-            'purchases.index',
-            'purchases.create',
-            'purchases.update',
-            'purchases.delete',
-
-            'support_documents.index',
-            'support_documents.create',
-            'support_documents.update',
-            'support_documents.delete',
-
-            'adjustment_notes.index',
-            'adjustment_notes.create',
-            'adjustment_notes.update',
-            'adjustment_notes.delete',
-
-            'tax_periods.index',
-            'tax_periods.create',
-            'tax_periods.update',
-            'tax_periods.delete',
-
-            'electronic_documents.index',
-            'electronic_documents.create',
-            'electronic_documents.update',
-            'electronic_documents.delete',
 
             'affiliate_admin_charges.index',
             'affiliate_admin_charges.create',
             'affiliate_admin_charges.update',
             'affiliate_admin_charges.delete',
             'affiliate_admin_charges.profile',
-
-            'extract_of_contract.index',
-            'extract_of_contract.create',
-            'extract_of_contract.update',
-            'extract_of_contract.delete',
 
             'vehicles.index',
             'vehicles.create',
@@ -269,6 +164,7 @@ class RoleSeeder extends Seeder
             'vehicle_documents.create',
             'vehicle_documents.update',
             'vehicle_documents.delete',
+            'vehicle_documents.profile',
 
             'operation_cards.index',
             'operation_cards.create',
@@ -391,7 +287,6 @@ class RoleSeeder extends Seeder
             'service_delivery_control_sheets.view',
             'service_delivery_control_sheets.create',
             'service_delivery_control_sheets.update',
-            'service_delivery_control_sheets.edit',
             'service_delivery_control_sheets.delete',
             'service_delivery_control_sheets.history_pdf',
             'service_delivery_control_sheets.technical_sheet_pdf',
@@ -405,6 +300,34 @@ class RoleSeeder extends Seeder
             'projects.update',
             'projects.delete',
             'projects.profile',
+
+            'billing_providers.index',
+            'billing_providers.create',
+            'billing_providers.update',
+            'billing_providers.delete',
+
+            'billing_resolutions.index',
+            'billing_resolutions.create',
+            'billing_resolutions.update',
+            'billing_resolutions.delete',
+
+            'commercial_invoices.index',
+            'commercial_invoices.create',
+            'commercial_invoices.update',
+            'commercial_invoices.delete',
+            'commercial_invoices.profile',
+
+            'electronic_invoices.index',
+
+            'credit_notes.index',
+            'credit_notes.create',
+            'credit_notes.update',
+            'credit_notes.delete',
+
+            'debit_notes.index',
+            'debit_notes.create',
+            'debit_notes.update',
+            'debit_notes.delete',
 
             'locations.view',
             'locations.track',
@@ -427,6 +350,7 @@ class RoleSeeder extends Seeder
             'vehicles.technical_sheet_pdf',
 
             'vehicle_documents.index',
+            'vehicle_documents.profile',
 
             'operation_cards.index',
 
