@@ -455,6 +455,8 @@ class PdfService
 
     public const PDF_CLAVES = [
         'fuec',
+        'cotizacion',
+        'factura_comercial',
         'hoja_vida_vehicular',
         'ficha_tecnica_vehiculo',
         'acta_entrega',

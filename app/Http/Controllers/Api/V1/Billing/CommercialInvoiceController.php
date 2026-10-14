@@ -10,8 +10,8 @@ use App\Http\Requests\Billing\StorePaymentRequest;
 use App\Http\Requests\Billing\StoreQuotationRequest;
 use App\Http\Requests\Billing\UpdateCommercialInvoiceRequest;
 use App\Services\Billing\CommercialInvoiceService;
+use App\Services\Pdf\PdfService;
 use App\Models\Company;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -173,10 +173,31 @@ class CommercialInvoiceController extends Controller
                 return $this->errorResponse('El documento solicitado no existe.', 404);
             }
 
+            $pdfService = app(PdfService::class);
             $empresa = Company::where('uuid', $registro->company_uuid)->first();
-            $pdf = Pdf::loadView('pdf.commercial-invoice', ['documento' => $registro, 'empresa' => $empresa]);
+            $logoModel = PdfService::logoParaMarca($empresa);
+            $imagenes = $pdfService->getBase64Parallel(['logo' => $logoModel]);
 
-            return $pdf->download("documento-{$registro->invoice_number}.pdf");
+            $data = [
+                'documento' => $registro,
+                'empresa' => $empresa,
+                'data' => ['logo' => $imagenes['logo'] ?? null],
+            ];
+            $data = $pdfService->conMarca(
+                $data,
+                $empresa,
+                $registro->esCotizacion() ? 'cotizacion' : 'factura_comercial',
+                $logoModel
+            );
+
+            $titulo = $registro->esCotizacion() ? 'Cotización' : 'Factura de Venta';
+            $nombre = PdfService::nombreArchivo(
+                $titulo,
+                $registro->invoice_number,
+                $registro->issue_date?->format('Y-m-d') ?? ''
+            );
+
+            return $pdfService->downloadFromView('pdf.commercial-invoice', $data, $nombre);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

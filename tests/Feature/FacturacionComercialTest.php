@@ -102,9 +102,23 @@ class FacturacionComercialTest extends TestCase
         ];
     }
 
-    private function superadmin(): User
+    /**
+     * Adjunta un logo PNG mínimo a la empresa para probar el encabezado con imagen.
+     */
+    private function adjuntarLogoEmpresa(): void
     {
-        Schema::disableForeignKeyConstraints();
+        $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+        $ruta = tempnam(sys_get_temp_dir(), 'logo').'.png';
+        file_put_contents($ruta, $png);
+
+        $empresa = \App\Models\Company::where('uuid', $this->empresa)->firstOrFail();
+        $empresa->addMedia($ruta)->toMediaCollection('logos');
+
+        @unlink($ruta);
+    }
+
+    private function superadmin(): User
+    {        Schema::disableForeignKeyConstraints();
         $user = User::create([
             'uuid' => (string) Str::uuid(), 'name' => 'Admin', 'email' => Str::random(8).'@test.local',
             'password' => Hash::make('secreto123'), 'is_active' => true,
@@ -327,7 +341,10 @@ class FacturacionComercialTest extends TestCase
         $this->assertSame('PENDIENTE_DIAN', $conversion->json('data.electronic_status'));
 
         $facturaUuid = $conversion->json('data.uuid');
-        $this->getJson("/api/v1/billing/commercial-invoices/{$facturaUuid}/pdf", ['X-Company-UUID' => $this->empresa])->assertOk();
+        $this->adjuntarLogoEmpresa();
+        $pdf = $this->getJson("/api/v1/billing/commercial-invoices/{$facturaUuid}/pdf", ['X-Company-UUID' => $this->empresa]);
+        $pdf->assertOk();
+        $this->assertStringContainsString($conversion->json('data.invoice_number'), $pdf->headers->get('Content-Disposition'));
     }
 
     #[Group('perf')]
