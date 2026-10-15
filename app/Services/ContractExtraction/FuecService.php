@@ -47,6 +47,14 @@ class FuecService extends BaseService
         'destination_route',
     ];
 
+    /**
+     * Estados de un documento reemplazado o no vigente. Al registrar una póliza
+     * nueva, la anterior queda INACTIVA: no debe invalidar el FUEC.
+     *
+     * @var array<string>
+     */
+    private const ESTADOS_POLIZA_NO_VIGENTE = ['INACTIVA', 'NO VIGENTE', 'NO'];
+
     public function __construct(
         private readonly ContractorService $contractorService,
         private readonly FuecPassengerService $fuecPassengerService,
@@ -278,27 +286,7 @@ class FuecService extends BaseService
                 throw new \InvalidArgumentException("No se puede crear el FUEC: Las pólizas corporativas RCC/RCE están vencidas (Vencimiento: {$corporateExpiry->format('d/m/Y')}).");
             }
         } else {
-            $policies = DB::table('vehicle_documents')
-                ->where('vehicle_uuid', $data['vehicle_uuid'])
-                ->whereIn('document_type', ['RCC', 'RCE'])
-                ->get();
-
-            $policiesFound = $policies->pluck('document_type')->map(fn ($t) => strtoupper((string) $t))->toArray();
-
-            if (! in_array('RCC', $policiesFound)) {
-                throw new \InvalidArgumentException('No se puede crear el FUEC: El vehículo no cuenta con una póliza de Responsabilidad Civil Contractual (RCC) registrada.');
-            }
-            if (! in_array('RCE', $policiesFound)) {
-                throw new \InvalidArgumentException('No se puede crear el FUEC: El vehículo no cuenta con una póliza de Responsabilidad Civil Extracontractual (RCE) registrada.');
-            }
-
-            foreach ($policies as $policy) {
-                $policyExpiry = $policy->expiry_date ? Carbon::parse($policy->expiry_date) : null;
-                if (! $policyExpiry || $policyExpiry->lt($issueDate)) {
-                    $formattedExpiry = $policyExpiry ? $policyExpiry->format('d/m/Y') : 'no definida';
-                    throw new \InvalidArgumentException("No se puede crear el FUEC: La póliza individual '{$policy->document_type}' está vencida (Fecha de vencimiento: {$formattedExpiry}).");
-                }
-            }
+            $this->validarPolizasIndividualesDelVehiculo($data['vehicle_uuid'], $issueDate);
         }
 
         return $this->transaction(function () use ($data) {
@@ -367,6 +355,46 @@ class FuecService extends BaseService
 
             return $record->fresh();
         });
+    }
+
+    /**
+     * Valida que el vehículo tenga vigentes sus pólizas individuales RCC y RCE
+     * a la fecha de emisión del FUEC.
+     *
+     * Solo se evalúa la póliza vigente de cada tipo: los documentos reemplazados
+     * quedan INACTIVA al registrar uno nuevo y no deben invalidar el FUEC.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function validarPolizasIndividualesDelVehiculo(string $vehicleUuid, Carbon $issueDate): void
+    {
+        /** @var \Illuminate\Support\Collection<string, object> $policies Póliza vigente por tipo (la de mayor vencimiento). */
+        $policies = DB::table('vehicle_documents')
+            ->where('vehicle_uuid', $vehicleUuid)
+            ->whereIn('document_type', ['RCC', 'RCE'])
+            ->whereNotIn('status', self::ESTADOS_POLIZA_NO_VIGENTE)
+            ->orderByDesc('expiry_date')
+            ->get()
+            ->unique('document_type')
+            ->keyBy('document_type');
+
+        $tiposRequeridos = [
+            'RCC' => 'No se puede crear el FUEC: El vehículo no cuenta con una póliza de Responsabilidad Civil Contractual (RCC) registrada.',
+            'RCE' => 'No se puede crear el FUEC: El vehículo no cuenta con una póliza de Responsabilidad Civil Extracontractual (RCE) registrada.',
+        ];
+
+        foreach ($tiposRequeridos as $tipo => $mensajeFaltante) {
+            $policy = $policies->get($tipo);
+            if (! $policy) {
+                throw new \InvalidArgumentException($mensajeFaltante);
+            }
+
+            $policyExpiry = $policy->expiry_date ? Carbon::parse($policy->expiry_date) : null;
+            if (! $policyExpiry || $policyExpiry->lt($issueDate)) {
+                $formattedExpiry = $policyExpiry ? $policyExpiry->format('d/m/Y') : 'no definida';
+                throw new \InvalidArgumentException("No se puede crear el FUEC: La póliza individual '{$policy->document_type}' está vencida (Fecha de vencimiento: {$formattedExpiry}).");
+            }
+        }
     }
 
     /**
