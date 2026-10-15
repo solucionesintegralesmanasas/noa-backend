@@ -15,7 +15,7 @@
 
 @if (!empty($data['cancelado'] ?? null))
     <div id="cancelado-watermark">
-        <img src="data:image/png;base64,{{ $data['cancelado'] }}" alt="Anulado" />
+        <span class="cancelado-centro"><img src="data:image/png;base64,{{ $data['cancelado'] }}" alt="Anulado" /></span>
     </div>
 @endif
 

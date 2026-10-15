@@ -6,6 +6,8 @@ namespace App\Providers;
 
 use App\Events\UserAuthenticated;
 use App\Listeners\HandlePostAuthentication;
+use App\Services\Billing\ContratoFacturacionElectronica;
+use App\Services\Billing\FacturacionNula;
 use Illuminate\Filesystem\FilesystemAdapter as IlluminateFilesystemAdapter;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
@@ -23,7 +25,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Driver de facturación electrónica configurable: por ahora el nulo
+        // (genera y guarda el UBL sin transmitir). La fase del proveedor
+        // tecnológico solo cambia esta línea según FACTURACION_DRIVER.
+        $this->app->bind(ContratoFacturacionElectronica::class, function () {
+            return match (config('billing.driver', 'nulo')) {
+                default => new FacturacionNula,
+            };
+        });
     }
 
     /**

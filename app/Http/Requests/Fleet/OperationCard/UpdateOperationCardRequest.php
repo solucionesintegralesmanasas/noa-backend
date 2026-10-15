@@ -32,6 +32,9 @@ class UpdateOperationCardRequest extends FormRequest
             'issue_date' => 'sometimes|required|date',
             'expiration_date' => 'sometimes|required|date',
             'operating_card_number' => 'sometimes|required|string|max:20',
+            'operation_card_type' => 'sometimes|required|in:NUEVA,RENOVACION,CAMBIO_DE_EMPRESA,DUPLICADO,MODIFICACION',
+            'runt_status' => 'sometimes|required|in:ACTIVA,CANCELADA,SUSPENDIDA',
+            'procedure_uuid' => 'sometimes|nullable|uuid|exists:procedures,uuid',
             'internal_number' => 'sometimes|nullable|string|max:50',
             'status' => 'sometimes|required|boolean',
         ];
@@ -65,6 +68,9 @@ class UpdateOperationCardRequest extends FormRequest
             'issue_date' => 'Fecha de emisión',
             'expiration_date' => 'Fecha de expiración',
             'operating_card_number' => 'Número de tarjeta de operación',
+            'operation_card_type' => 'Tipo de tarjeta',
+            'runt_status' => 'Estado RUNT',
+            'procedure_uuid' => 'Expediente de radicación',
             'status' => 'Estado',
         ];
     }
