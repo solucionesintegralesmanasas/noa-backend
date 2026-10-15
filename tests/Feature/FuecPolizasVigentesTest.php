@@ -87,7 +87,7 @@ class FuecPolizasVigentesTest extends TestCase
     private function validar(string $vehiculo, string $fecha = self::FECHA_EMISION): void
     {
         $servicio = app(FuecService::class);
-        $metodo = new ReflectionMethod($servicio, 'validarPolizasIndividualesDelVehiculo');
+        $metodo = new ReflectionMethod($servicio, 'validarPolizasRccRce');
         $metodo->setAccessible(true);
         $metodo->invoke($servicio, $vehiculo, Carbon::parse($fecha));
     }
