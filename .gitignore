@@ -42,3 +42,6 @@ Thumbs.db
 /.opencode/skills/grill-me/
 /.opencode/skills/grilling/
 /skills-lock.json
+
+# Respaldos locales de base de datos (nunca versionar)
+/backups/

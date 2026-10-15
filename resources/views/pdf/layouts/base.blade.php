@@ -68,6 +68,9 @@
             opacity: 0.15;
         }
 
+        /* Centrado sin flexbox: DomPDF no reconoce display:flex/align-items/
+           justify-content/pointer-events y con avisos activos tumba el render.
+           Se centra con tabla (table + table-cell + vertical-align). */
         #cancelado-watermark {
             position: fixed;
             top: 15%;
@@ -75,10 +78,14 @@
             width: 90%;
             height: 70%;
             z-index: -500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none;
+            display: table;
+            text-align: center;
+        }
+
+        #cancelado-watermark .cancelado-centro {
+            display: table-cell;
+            vertical-align: middle;
+            text-align: center;
         }
 
         #cancelado-watermark img {

@@ -257,6 +257,8 @@ class VehicleService extends BaseService
         $vehicle = $this->findByUuid($uuid);
         if ($vehicle) {
             $vehicle->load([
+                'brand:uuid,description',
+                'vehicleClass:uuid,description',
                 'owners',
                 'vehicleDocuments',
                 'operationCards',
