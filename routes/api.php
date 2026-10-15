@@ -1140,13 +1140,13 @@ Route::prefix('v1')->group(function () {
                 'error' => 'invalid',
                 'message' => 'Código de licencia inválido o no encontrado'
             ], 403);
-        })->withoutMiddleware('auth'); // Licencia check va antes de auth
+        })->withoutMiddleware('auth')->where('key', '.*'); // Licencia check va antes de auth
     });
 
     // ─── ADMIN DE LICENCIAS (mutan estado: solo SUPERADMIN autenticado) ───
     Route::middleware(['auth:sanctum', 'role:SUPERADMIN', 'throttle:60,1'])->group(function () {
         // Ruta para revocar licencia (desde panel admin)
-        Route::post('/revoke', function (\Illuminate\Http\Request $request) {
+        Route::post('/license/revoke', function (\Illuminate\Http\Request $request) {
             $key = trim((string) $request->input('license_key', ''));
             if ($key === '') {
                 return response()->json(['success' => false, 'message' => 'La licencia es obligatoria.'], 422);
@@ -1159,7 +1159,7 @@ Route::prefix('v1')->group(function () {
         })->name('api.v1.license.revoke');
 
         // Ruta para renovar licencia (desde panel admin)
-        Route::post('/renew', function (\Illuminate\Http\Request $request) {
+        Route::post('/license/renew', function (\Illuminate\Http\Request $request) {
             $key = trim((string) $request->input('license_key', ''));
             $newExpiry = $request->input('new_expiry_date');
             if ($key === '' || ! is_string($newExpiry) || strtotime($newExpiry) === false) {
@@ -1172,14 +1172,19 @@ Route::prefix('v1')->group(function () {
             return response()->json(['success' => false, 'message' => 'No se puede renovar'], 400);
         })->name('api.v1.license.renew');
 
-        // Ficha completa de la licencia (la vista /licencia del admin empresa).
+    });
+
+    // ─── FICHA DE LICENCIA (lectura autenticada: SUPERADMIN y ADMIN_EMPRESA) ───
+    // Revocar/renovar siguen solo SUPERADMIN (grupo anterior); el detalle lo usa
+    // la vista /licencia del ADMIN_EMPRESA, así que se permite a ambos roles.
+    Route::middleware(['auth:sanctum', 'role:SUPERADMIN|ADMIN_EMPRESA', 'throttle:60,1'])->group(function () {
         Route::get('/license/detail/{key}', function ($key) {
             $license = \App\Models\License::where('license_key', trim($key))->first();
             if (! $license) {
                 return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
             }
             return response()->json(['success' => true, 'data' => $license]);
-        })->name('api.v1.license.detail');
+        })->name('api.v1.license.detail')->where('key', '.*');
     });
 
     Route::get('/health', function () {
