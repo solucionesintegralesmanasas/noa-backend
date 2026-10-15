@@ -33,6 +33,8 @@ class StoreOperationCardRequest extends FormRequest
             'issue_date' => 'required|date',
             'expiration_date' => 'required|date',
             'operating_card_number' => 'required|string|max:20',
+            'operation_card_type' => 'sometimes|required|in:NUEVA,RENOVACION,CAMBIO_DE_EMPRESA,DUPLICADO,MODIFICACION',
+            'procedure_uuid' => 'sometimes|nullable|uuid|exists:procedures,uuid',
             'internal_number' => 'sometimes|nullable|string|max:50',
             'status' => 'sometimes|required|boolean',
         ];
@@ -67,6 +69,8 @@ class StoreOperationCardRequest extends FormRequest
             'issue_date' => 'Fecha de emisión',
             'expiration_date' => 'Fecha de expiración',
             'operating_card_number' => 'Número de tarjeta de operación',
+            'operation_card_type' => 'Tipo de tarjeta',
+            'procedure_uuid' => 'Expediente de radicación',
             'status' => 'Estado',
         ];
     }
