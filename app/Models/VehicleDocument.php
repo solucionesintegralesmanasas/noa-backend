@@ -37,6 +37,16 @@ class VehicleDocument extends Model
     protected $table = 'vehicle_documents';
 
     /**
+     * Estados de un documento reemplazado o no vigente. Al registrar un documento
+     * nuevo, el anterior queda INACTIVA: es historial y no debe invalidar el FUEC
+     * ni contaminar el listado consolidado. Incluye el NO legado (antes de la
+     * normalización a NO VIGENTE) por defensa.
+     *
+     * @var array<string>
+     */
+    public const ESTADOS_HISTORIAL = ['INACTIVA', 'NO VIGENTE', 'NO'];
+
+    /**
      * Los atributos que son asignables masivamente.
      *
      * @var array<int, string>
