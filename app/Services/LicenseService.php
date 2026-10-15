@@ -16,7 +16,7 @@ class LicenseService
 
     public function __construct()
     {
-        $this->secretKey = config('app.license_hmac_secret') ?: env('LICENSE_HMAC_SECRET', '');
+        $this->secretKey = config('app.license_hmac_secret');
     }
 
     /**
@@ -42,9 +42,9 @@ class LicenseService
         $dataWithoutSig = Arr::except($payload, []);
         $signature = hash_hmac('sha256', json_encode($dataWithoutSig), $this->secretKey);
 
-        // 3. Combinar payload + firma y codificar a base64url
+        // 3. Combinar payload + firma y codificar a base64url (sin +/= que rompen la URL)
         $fullPayload = array_merge($payload, ['sig' => $signature]);
-        $licenseKey = rtrim(base64_encode(json_encode($fullPayload)), '=');
+        $licenseKey = rtrim(strtr(base64_encode(json_encode($fullPayload)), '+/', '-_'), '=');
 
         // 4. Guardar en base de datos (si el modelo existe y hay company_uuid válido)
         if (!empty($companyData['company_uuid'])) {
@@ -108,8 +108,9 @@ class LicenseService
             if (empty($this->secretKey)) {
                 return null;
             }
-            // 1. Decodificar base64 (añadir padding si es necesario)
-            $decoded = json_decode(base64_decode($licenseKey . '=='), true);
+            // 1. Decodificar base64url o base64 clásico (compatibilidad con claves viejas)
+            $normalizada = strtr($licenseKey, '-_', '+/');
+            $decoded = json_decode(base64_decode($normalizada . str_repeat('=', (4 - strlen($normalizada) % 4) % 4)), true);
             if (json_last_error() !== JSON_ERROR_NONE || !$decoded) return null;
 
             // 2. Verificar firma digital
