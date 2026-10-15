@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Procedure;
 
+use App\Models\CapacityMovement;
 use App\Models\ContractSignature;
 use App\Models\FleetServiceContract;
 use App\Models\Procedure;
@@ -12,6 +13,8 @@ use App\Models\ServiceProvisionContract;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Services\BaseService;
+use App\Services\Fleet\CapacityMovementService;
+use App\Services\Fleet\OperationCardService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -330,6 +333,13 @@ class RadicacionService extends BaseService
             $padreUuid = $hijo->parent_procedure_uuid ?: $hijo->uuid;
             $padre = Procedure::where('uuid', $padreUuid)->firstOrFail();
             $hijo->update(['status' => 'COMPLETADO']);
+
+            // Efecto administrativo del paso: mueve el cupo de capacidad transportadora
+            // (descuento en capacidad nueva/ingreso; liberación + cancelación de tarjeta
+            // en desvinculación). Va dentro de la misma transacción: si el cupo no alcanza,
+            // el paso no queda como completado.
+            $this->aplicarMovimientosDeCapacidad($padre, $hijo);
+
             $ruta = $this->rutaPara($padre->link_type ?? 'CAMBIO_DE_EMPRESA');
             $idx = array_search($hijo->procedure_type, $ruta, true);
             $siguiente = ($idx !== false && isset($ruta[$idx + 1])) ? $ruta[$idx + 1] : null;
@@ -343,5 +353,86 @@ class RadicacionService extends BaseService
 
             return $this->detalleExpediente($padre->uuid);
         });
+    }
+
+    /**
+     * Aplica el efecto legal de un paso sobre los cupos de capacidad transportadora:
+     *
+     *  - CAPACIDAD_TRANSPORTADORA de un vehículo NUEVO → descuenta 1 cupo.
+     *  - CAPACIDAD_TRANSPORTADORA de un CAMBIO_DE_EMPRESA (ingreso) → descuenta 1 cupo
+     *    en la empresa receptora.
+     *  - DESVINCULACION (mutuo/unilateral) → libera 1 cupo y cancela la tarjeta de operación.
+     *
+     * La renovación no mueve el contador (no pasa por aquí).
+     *
+     * Nota: en el CAMBIO_DE_EMPRESA la liberación del cupo en la empresa de origen no
+     * se puede registrar desde este expediente porque el trámite solo conoce la empresa
+     * receptora; queda como caso aparte pendiente de modelar el origen.
+     */
+    private function aplicarMovimientosDeCapacidad(Procedure $padre, Procedure $hijo): void
+    {
+        $companyUuid = $hijo->company_uuid ?: $padre->company_uuid;
+        if (empty($companyUuid)) {
+            return;
+        }
+
+        $vehicleUuid = $hijo->vehicle_uuid ?: $padre->vehicle_uuid;
+        $vehicle = $vehicleUuid
+            ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first()
+            : null;
+        $vehicleType = $this->tipoVehiculoParaCapacidad($vehicle);
+        $engine = app(CapacityMovementService::class);
+
+        switch ($hijo->procedure_type) {
+            case 'CAPACIDAD_TRANSPORTADORA':
+                $tipo = match ($padre->link_type) {
+                    'NUEVO_VEHICULO' => CapacityMovement::DESCUENTO_NUEVO,
+                    'CAMBIO_DE_EMPRESA' => CapacityMovement::DESCUENTO_INGRESO,
+                    default => null,
+                };
+                if ($tipo === null) {
+                    return;
+                }
+                $engine->registrar([
+                    'company_uuid' => $companyUuid,
+                    'vehicle_uuid' => $vehicleUuid,
+                    'vehicle_type' => $vehicleType,
+                    'procedure_uuid' => $hijo->uuid,
+                    'movement_type' => $tipo,
+                    'notes' => "Descuento de cupo al aprobar la capacidad transportadora ({$padre->link_type}).",
+                ]);
+                break;
+
+            case 'DESVINCULACION_MUTUO':
+            case 'DESVINCULACION_UNILATERAL':
+                $engine->registrar([
+                    'company_uuid' => $companyUuid,
+                    'vehicle_uuid' => $vehicleUuid,
+                    'vehicle_type' => $vehicleType,
+                    'procedure_uuid' => $hijo->uuid,
+                    'movement_type' => CapacityMovement::LIBERACION_DESVINCULACION,
+                    'resolution_number' => $hijo->resolution_number ?: $padre->resolution_number,
+                    'notes' => "Liberación de cupo por {$hijo->procedure_type}.",
+                ]);
+                // Consecuencia directa: la tarjeta de operación se cancela/inhabilita en el RUNT.
+                app(OperationCardService::class)->cancelarPorSalida(
+                    $vehicleUuid,
+                    $companyUuid,
+                    $hijo->procedure_type
+                );
+                break;
+        }
+    }
+
+    /** Tipo de vehículo con el que se resuelve la capacidad transportadora. */
+    private function tipoVehiculoParaCapacidad(?Vehicle $vehicle): ?string
+    {
+        if (! $vehicle) {
+            return null;
+        }
+
+        $vehicle->loadMissing('vehicleClass');
+
+        return $vehicle->vehicleClass?->description ?: $vehicle->body_type;
     }
 }
