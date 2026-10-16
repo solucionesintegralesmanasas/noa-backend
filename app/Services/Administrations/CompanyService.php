@@ -216,6 +216,7 @@ class CompanyService extends BaseService
             $user = User::create([
                 'name' => trim($data['legal_representative_name'].' '.$data['legal_representative_last_name']),
                 'email' => $data['email'],
+                'email_verified_at' => now(),
                 'user_name' => $data['document_number'], // Nombre de usuario por defecto
                 'password' => Hash::make($data['document_number']), // Contraseña por defecto
                 'third_party_uuid' => $thirdParty->uuid,
@@ -296,23 +297,35 @@ class CompanyService extends BaseService
     /**
      * Método uploadCompanyLogo.
      */
-    public function uploadCompanyLogo(string $uuid, UploadedFile $file): string
+    public function uploadCompanyLogo(string $uuid, UploadedFile $file): ?string
     {
         $company = $this->findByUuid($uuid);
-        $company->addFile($file, 'LOGO');
+        $media = $company->addFile($file, 'LOGO');
 
-        return $company->logo_url;
+        try {
+            return $media->getUrl() ?: null;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 
     /**
      * Método uploadLegalRepresentativeSignature.
      */
-    public function uploadLegalRepresentativeSignature(string $uuid, UploadedFile $file): string
+    public function uploadLegalRepresentativeSignature(string $uuid, UploadedFile $file): ?string
     {
         $company = $this->findByUuid($uuid);
-        $company->addFile($file, 'FIRMA');
+        $media = $company->addFile($file, 'FIRMA');
 
-        return $company->signature_url;
+        try {
+            return $media->getUrl() ?: null;
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        }
     }
 
     /**

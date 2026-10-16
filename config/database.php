@@ -17,7 +17,9 @@ return [
     |
     */
 
-    'default' => env('DB_CONNECTION', 'sqlite'),
+    // Respaldo 'mysql' (no 'sqlite'): con Apache multihilo en Windows, el .env puede no verse en una
+    // petición concurrente y Laravel caería a una base sqlite inexistente (503 PDO_ERROR intermitente).
+    'default' => env('DB_CONNECTION', 'mysql'),
 
     /*
     |--------------------------------------------------------------------------

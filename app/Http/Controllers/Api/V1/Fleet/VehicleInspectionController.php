@@ -55,8 +55,9 @@ class VehicleInspectionController extends Controller
             $companyUuid = $request->query('company_uuid') ?? ($filter['company_uuid'] ?? null);
             $thirdPartyUuid = $request->query('third_party_uuid') ?? ($filter['third_party_uuid'] ?? null);
             $vehicleUuid = $request->query('vehicle_uuid') ?? ($filter['vehicle_uuid'] ?? null);
+            $driverUuid = $request->query('driver_uuid') ?? ($filter['driver_uuid'] ?? null);
 
-            $data = $this->inspectionService->getAllVehicleInspectionsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $vehicleUuid);
+            $data = $this->inspectionService->getAllVehicleInspectionsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $vehicleUuid, $driverUuid);
 
             return $this->successResponse($data, 'Listado paginado de InspeccionVehiculo recuperado con éxito.');
         } catch (\Throwable $e) {
@@ -85,6 +86,46 @@ class VehicleInspectionController extends Controller
             $data = $this->inspectionService->getAllVehicleInspections($companyUuid, $thirdPartyUuid, $vehicleUuid);
 
             return $this->successResponse($data, 'Catálogo de InspeccionVehiculo recuperado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/fleet-management/vehicle-inspections/check-today',
+        summary: 'Verificar si existe inspección de un vehículo en una fecha (una al día)',
+        operationId: 'checkTodayVehicleInspection',
+        tags: ['InspeccionVehiculo'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'vehicle_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'date', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'date'), description: 'Fecha a verificar (Y-m-d)'),
+            new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Verificación realizada.'),
+            new OA\Response(response: 422, description: 'Parámetros inválidos.'),
+        ]
+    )]
+    public function checkToday(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'vehicle_uuid' => 'required|string',
+                'date' => 'required|date',
+                'company_uuid' => 'nullable|string',
+            ]);
+
+            $record = $this->inspectionService->existsInspectionForDate(
+                $validated['vehicle_uuid'],
+                $validated['date'],
+                $validated['company_uuid'] ?? null
+            );
+
+            return $this->successResponse([
+                'exists' => $record !== null,
+                'inspection' => $record,
+            ], $record ? 'Inspección del día encontrada.' : 'Sin inspección registrada para esa fecha.');
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
@@ -324,17 +365,27 @@ class VehicleInspectionController extends Controller
                     ->first();
             }
 
+            // El fondo va al 70% del ancho de página: se pide en alta (1200px)
+            // para que no se pixele; el encabezado sigue con la versión liviana.
             $base64Images = $pdfService->getBase64Parallel([
                 'logo' => $logoModel,
+                'logo_fondo' => $logoModel,
                 'firma' => $inspectorSignature,      // null si aún no firmó el inspector
                 'firma_coordinador' => $coordinatorSignature,
-            ]);
+            ], ['logo_fondo' => 1200]);
 
             $data = [
                 'logo' => $base64Images['logo'],
+                'logo_fondo' => $base64Images['logo_fondo'] ?? $base64Images['logo'],
                 'firma' => $base64Images['firma'],
                 'firma_coordinador' => $base64Images['firma_coordinador'],
             ];
+
+            // Presentación configurable por empresa (membrete / fondo / limpio).
+            $marcaInspeccion = $pdfService->marcaPdfPara($company, 'inspeccion_preoperacional', $logoModel);
+            if ($marcaInspeccion['modo'] !== PdfService::PDF_MODO_FONDO) {
+                $data['logo_fondo'] = $marcaInspeccion['logo_fondo'];
+            }
 
             // Agrupar los resultados por categoría
             $groupedResults = [];
@@ -346,32 +397,33 @@ class VehicleInspectionController extends Controller
                 $groupedResults[$category][] = $result;
             }
 
-            // Distribuir en 2 columnas balanceando la altura (Masonry layout)
-            $col1 = [];
-            $col2 = [];
-            $count1 = 0;
-            $count2 = 0;
+            // Distribuir en 2 columnas balanceando la altura (Masonry layout).
+            // La inspección sale en vertical: 2 columnas anchas y legibles.
+            $columnas = [[], []];
+            $conteos = [0, 0];
             foreach ($groupedResults as $cat => $results) {
                 // Sumamos los items + 2 para estimar la altura del título de la categoría
                 $itemsCount = count($results) + 2;
-                if ($count1 <= $count2) {
-                    $col1[] = $cat;
-                    $count1 += $itemsCount;
-                } else {
-                    $col2[] = $cat;
-                    $count2 += $itemsCount;
-                }
+                $indice = array_search(min($conteos), $conteos, true);
+                $columnas[$indice][] = $cat;
+                $conteos[$indice] += $itemsCount;
             }
-            $chunks = [$col1, $col2];
+            $chunks = array_values(array_filter($columnas, fn ($columna) => $columna !== []));
 
-            $pdf = Pdf::loadView('pdf.vehicle-inspection', [
+            $pdf = Pdf::loadView('pdf.fleet.vehicle-inspection', [
+                'title' => 'Inspección Preoperacional',
                 'record' => $record,
                 'groupedResults' => $groupedResults,
                 'chunks' => $chunks,
                 'data' => $data,
-            ])->setPaper('a4', 'portrait');
+                'letterhead' => $marcaInspeccion['letterhead'],
+                'ocultar_marca' => $marcaInspeccion['modo'] === PdfService::PDF_MODO_LIMPIO,
+            ])->setPaper('letter', 'portrait');
 
-            return $pdf->download('inspeccion-preoperacional-'.$record->uuid.'.pdf');
+            $placa = preg_replace('/[^A-Za-z0-9]/', '', (string) ($record->vehicle->vehicle_license_plate ?? 'sin-placa'));
+            $fecha = \Carbon\Carbon::parse($record->inspection_date)->format('d-m-Y');
+
+            return $pdfService->sellarPaginado($pdf)->download(\App\Services\Pdf\PdfService::nombreArchivo('Inspección Preoperacional', $placa, $fecha));
 
         } catch (\Throwable $e) {
             return $this->handleException($e);
@@ -392,9 +444,16 @@ class VehicleInspectionController extends Controller
             new OA\Response(response: 404, description: 'Inspección no encontrada.'),
         ]
     )]
-    public function generateSignUrl(string $uuid): JsonResponse
+    public function generateSignUrl(Request $request, string $uuid): JsonResponse
     {
         try {
+            $user = $request->user();
+            $isAdmin = $user && method_exists($user, 'hasAnyRole')
+                && $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA'], 'api');
+            if (! $isAdmin) {
+                return $this->errorResponse('No tiene permiso para compartir el enlace de firma. Solo un administrador puede realizar esta acción.', 403);
+            }
+
             $record = $this->inspectionService->getVehicleInspectionByUuid($uuid);
             if (! $record) {
                 return $this->errorResponse('Inspección no encontrada.', 404);

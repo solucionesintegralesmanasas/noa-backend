@@ -11,9 +11,16 @@ class EmailNotificationLog extends Model
 
     protected $fillable = [
         'uuid',
-        'document_uuid',
+        'company_uuid',
+        'entity_type',
+        'entity_uuid',
         'recipient_email',
         'milestone',
+        'sent_date',
         'status',
+    ];
+
+    protected $casts = [
+        'sent_date' => 'date',
     ];
 }

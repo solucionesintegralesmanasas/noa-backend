@@ -38,12 +38,14 @@ class PermissionSeeder extends Seeder
             'economic_activities.create'  => ['module' => 'Actividades Económicas', 'description' => 'Registrar una nueva actividad económica'],
             'economic_activities.update'  => ['module' => 'Actividades Económicas', 'description' => 'Editar una actividad económica'],
             'economic_activities.delete'  => ['module' => 'Actividades Económicas', 'description' => 'Eliminar una actividad económica'],
+            'economic_activities.profile' => ['module' => 'Actividades Económicas', 'description' => 'Ver el perfil detallado de una actividad económica'],
 
             // --- Datos Bancarios ---
             'bank_details.index'    => ['module' => 'Datos Bancarios', 'description' => 'Listar todos los datos bancarios'],
             'bank_details.create'   => ['module' => 'Datos Bancarios', 'description' => 'Registrar nuevos datos bancarios'],
             'bank_details.update'   => ['module' => 'Datos Bancarios', 'description' => 'Actualizar datos bancarios'],
             'bank_details.delete'   => ['module' => 'Datos Bancarios', 'description' => 'Eliminar datos bancarios'],
+            'bank_details.profile'  => ['module' => 'Datos Bancarios', 'description' => 'Ver el perfil detallado de unos datos bancarios'],
 
             // --- Información Tributaria ---
             'tax_information.index'     => ['module' => 'Información Tributaria', 'description' => 'Listar toda la información tributaria'],
@@ -74,6 +76,7 @@ class PermissionSeeder extends Seeder
             'rup_records.create'    => ['module' => 'Registros RUP', 'description' => 'Crear un nuevo registro RUP'],
             'rup_records.update'    => ['module' => 'Registros RUP', 'description' => 'Actualizar un registro RUP'],
             'rup_records.delete'    => ['module' => 'Registros RUP', 'description' => 'Eliminar un registro RUP'],
+            'rup_records.profile'   => ['module' => 'Registros RUP', 'description' => 'Ver el perfil detallado de un registro RUP'],
 
             // --- Estados Financieros ---
             'financial_statements.index'   => ['module' => 'Estados Financieros', 'description' => 'Listar todos los estados financieros'],
@@ -145,137 +148,11 @@ class PermissionSeeder extends Seeder
             'third_parties.delete'   => ['module' => 'Terceros', 'description' => 'Eliminar un tercero'],
             'third_parties.profile'  => ['module' => 'Terceros', 'description' => 'Ver el perfil detallado de un tercero'],
 
-            // --- Categorías ---
-            'categories.index'     => ['module' => 'Categorías', 'description' => 'Listar todas las categorías'],
-            'categories.create'    => ['module' => 'Categorías', 'description' => 'Crear una nueva categoría'],
-            'categories.update'    => ['module' => 'Categorías', 'description' => 'Actualizar una categoría'],
-            'categories.delete'    => ['module' => 'Categorías', 'description' => 'Eliminar una categoría'],
-
-            // --- Almacenes ---
-            'warehouses.index'     => ['module' => 'Almacenes', 'description' => 'Listar todos los almacenes'],
-            'warehouses.create'    => ['module' => 'Almacenes', 'description' => 'Crear un nuevo almacén'],
-            'warehouses.update'    => ['module' => 'Almacenes', 'description' => 'Actualizar un almacén'],
-            'warehouses.delete'    => ['module' => 'Almacenes', 'description' => 'Eliminar un almacén'],
-
-            // --- Productos ---
-            'products.index'       => ['module' => 'Productos', 'description' => 'Listar todos los productos'],
-            'products.create'      => ['module' => 'Productos', 'description' => 'Crear un nuevo producto'],
-            'products.update'      => ['module' => 'Productos', 'description' => 'Actualizar un producto'],
-            'products.delete'      => ['module' => 'Productos', 'description' => 'Eliminar un producto'],
-
-            // --- Variantes de Productos ---
-            'product_variants.index'   => ['module' => 'Variantes de Productos', 'description' => 'Listar todas las variantes de productos'],
-            'product_variants.create'  => ['module' => 'Variantes de Productos', 'description' => 'Crear una nueva variante de producto'],
-            'product_variants.update'  => ['module' => 'Variantes de Productos', 'description' => 'Actualizar una variante de producto'],
-            'product_variants.delete'  => ['module' => 'Variantes de Productos', 'description' => 'Eliminar una variante de producto'],
-
-            // --- Plan de Cuentas ---
-            'chart_of_accounts.index'  => ['module' => 'Plan de Cuentas', 'description' => 'Listar todas las cuentas del plan contable'],
-            'chart_of_accounts.create' => ['module' => 'Plan de Cuentas', 'description' => 'Crear una nueva cuenta contable'],
-            'chart_of_accounts.update' => ['module' => 'Plan de Cuentas', 'description' => 'Actualizar una cuenta contable'],
-            'chart_of_accounts.delete' => ['module' => 'Plan de Cuentas', 'description' => 'Eliminar una cuenta contable'],
-
             // --- Centros de Costos ---
             'cost_centers.index'   => ['module' => 'Centros de Costos', 'description' => 'Listar todos los centros de costos'],
             'cost_centers.create'  => ['module' => 'Centros de Costos', 'description' => 'Crear un nuevo centro de costos'],
             'cost_centers.update'  => ['module' => 'Centros de Costos', 'description' => 'Actualizar un centro de costos'],
             'cost_centers.delete'  => ['module' => 'Centros de Costos', 'description' => 'Eliminar un centro de costos'],
-
-            // --- Tipos de Comprobantes ---
-            'voucher_types.index'  => ['module' => 'Tipos de Comprobantes', 'description' => 'Listar todos los tipos de comprobantes'],
-            'voucher_types.create' => ['module' => 'Tipos de Comprobantes', 'description' => 'Crear un nuevo tipo de comprobante'],
-            'voucher_types.update' => ['module' => 'Tipos de Comprobantes', 'description' => 'Actualizar un tipo de comprobante'],
-            'voucher_types.delete' => ['module' => 'Tipos de Comprobantes', 'description' => 'Eliminar un tipo de comprobante'],
-
-            // --- Cuentas Bancarias ---
-            'bank_accounts.index'   => ['module' => 'Cuentas Bancarias', 'description' => 'Listar todas las cuentas bancarias'],
-            'bank_accounts.create'  => ['module' => 'Cuentas Bancarias', 'description' => 'Crear una nueva cuenta bancaria'],
-            'bank_accounts.update'  => ['module' => 'Cuentas Bancarias', 'description' => 'Actualizar una cuenta bancaria'],
-            'bank_accounts.delete'  => ['module' => 'Cuentas Bancarias', 'description' => 'Eliminar una cuenta bancaria'],
-
-            // --- Presupuestos ---
-            'budgets.index'     => ['module' => 'Presupuestos', 'description' => 'Listar todos los presupuestos'],
-            'budgets.create'    => ['module' => 'Presupuestos', 'description' => 'Crear un nuevo presupuesto'],
-            'budgets.update'    => ['module' => 'Presupuestos', 'description' => 'Actualizar un presupuesto'],
-            'budgets.delete'    => ['module' => 'Presupuestos', 'description' => 'Eliminar un presupuesto'],
-
-            // --- Proveedores de Facturación ---
-            'billing_providers.index'  => ['module' => 'Proveedores de Facturación', 'description' => 'Listar todos los proveedores de facturación'],
-            'billing_providers.create' => ['module' => 'Proveedores de Facturación', 'description' => 'Registrar un nuevo proveedor de facturación'],
-            'billing_providers.update' => ['module' => 'Proveedores de Facturación', 'description' => 'Actualizar un proveedor de facturación'],
-            'billing_providers.delete' => ['module' => 'Proveedores de Facturación', 'description' => 'Eliminar un proveedor de facturación'],
-
-            // --- Resoluciones de Facturación ---
-            'billing_resolutions.index'   => ['module' => 'Resoluciones de Facturación', 'description' => 'Listar todas las resoluciones de facturación'],
-            'billing_resolutions.create'  => ['module' => 'Resoluciones de Facturación', 'description' => 'Crear una nueva resolución de facturación'],
-            'billing_resolutions.update'  => ['module' => 'Resoluciones de Facturación', 'description' => 'Actualizar una resolución de facturación'],
-            'billing_resolutions.delete'  => ['module' => 'Resoluciones de Facturación', 'description' => 'Eliminar una resolución de facturación'],
-
-            // --- Documentos Fiscales ---
-            'fiscal_documents.index'  => ['module' => 'Documentos Fiscales', 'description' => 'Listar todos los documentos fiscales'],
-            'fiscal_documents.create' => ['module' => 'Documentos Fiscales', 'description' => 'Crear un nuevo documento fiscal'],
-            'fiscal_documents.update' => ['module' => 'Documentos Fiscales', 'description' => 'Actualizar un documento fiscal'],
-            'fiscal_documents.delete' => ['module' => 'Documentos Fiscales', 'description' => 'Eliminar un documento fiscal'],
-
-            // --- Facturas Comerciales ---
-            'commercial_invoices.index'  => ['module' => 'Facturas Comerciales', 'description' => 'Listar todas las facturas comerciales'],
-            'commercial_invoices.create' => ['module' => 'Facturas Comerciales', 'description' => 'Crear una nueva factura comercial'],
-            'commercial_invoices.update' => ['module' => 'Facturas Comerciales', 'description' => 'Actualizar una factura comercial'],
-            'commercial_invoices.delete' => ['module' => 'Facturas Comerciales', 'description' => 'Eliminar una factura comercial'],
-
-            // --- Facturas Electrónicas ---
-            'electronic_invoices.index'  => ['module' => 'Facturas Electrónicas', 'description' => 'Listar todas las facturas electrónicas'],
-            'electronic_invoices.create' => ['module' => 'Facturas Electrónicas', 'description' => 'Generar una nueva factura electrónica'],
-            'electronic_invoices.update' => ['module' => 'Facturas Electrónicas', 'description' => 'Actualizar una factura electrónica'],
-            'electronic_invoices.delete' => ['module' => 'Facturas Electrónicas', 'description' => 'Eliminar una factura electrónica'],
-
-            // --- Notas Crédito ---
-            'credit_notes.index'  => ['module' => 'Notas Crédito', 'description' => 'Listar todas las notas crédito'],
-            'credit_notes.create' => ['module' => 'Notas Crédito', 'description' => 'Crear una nueva nota crédito'],
-            'credit_notes.update' => ['module' => 'Notas Crédito', 'description' => 'Actualizar una nota crédito'],
-            'credit_notes.delete' => ['module' => 'Notas Crédito', 'description' => 'Eliminar una nota crédito'],
-
-            // --- Notas Débito ---
-            'debit_notes.index'   => ['module' => 'Notas Débito', 'description' => 'Listar todas las notas débito'],
-            'debit_notes.create'  => ['module' => 'Notas Débito', 'description' => 'Crear una nueva nota débito'],
-            'debit_notes.update'  => ['module' => 'Notas Débito', 'description' => 'Actualizar una nota débito'],
-            'debit_notes.delete'  => ['module' => 'Notas Débito', 'description' => 'Eliminar una nota débito'],
-
-            // --- Órdenes de Compra ---
-            'purchase_orders.index'  => ['module' => 'Órdenes de Compra', 'description' => 'Listar todas las órdenes de compra'],
-            'purchase_orders.create' => ['module' => 'Órdenes de Compra', 'description' => 'Crear una nueva orden de compra'],
-            'purchase_orders.update' => ['module' => 'Órdenes de Compra', 'description' => 'Actualizar una orden de compra'],
-            'purchase_orders.delete' => ['module' => 'Órdenes de Compra', 'description' => 'Eliminar una orden de compra'],
-
-            // --- Compras ---
-            'purchases.index'  => ['module' => 'Compras', 'description' => 'Listar todas las compras'],
-            'purchases.create' => ['module' => 'Compras', 'description' => 'Registrar una nueva compra'],
-            'purchases.update' => ['module' => 'Compras', 'description' => 'Actualizar una compra'],
-            'purchases.delete' => ['module' => 'Compras', 'description' => 'Eliminar una compra'],
-
-            // --- Documentos de Soporte ---
-            'support_documents.index'  => ['module' => 'Documentos de Soporte', 'description' => 'Listar todos los documentos de soporte'],
-            'support_documents.create' => ['module' => 'Documentos de Soporte', 'description' => 'Subir un nuevo documento de soporte'],
-            'support_documents.update' => ['module' => 'Documentos de Soporte', 'description' => 'Actualizar un documento de soporte'],
-            'support_documents.delete' => ['module' => 'Documentos de Soporte', 'description' => 'Eliminar un documento de soporte'],
-
-            // --- Notas de Ajuste ---
-            'adjustment_notes.index'  => ['module' => 'Notas de Ajuste', 'description' => 'Listar todas las notas de ajuste'],
-            'adjustment_notes.create' => ['module' => 'Notas de Ajuste', 'description' => 'Crear una nueva nota de ajuste'],
-            'adjustment_notes.update' => ['module' => 'Notas de Ajuste', 'description' => 'Actualizar una nota de ajuste'],
-            'adjustment_notes.delete' => ['module' => 'Notas de Ajuste', 'description' => 'Eliminar una nota de ajuste'],
-
-            // --- Periodos Tributarios ---
-            'tax_periods.index'  => ['module' => 'Periodos Tributarios', 'description' => 'Listar todos los periodos tributarios'],
-            'tax_periods.create' => ['module' => 'Periodos Tributarios', 'description' => 'Crear un nuevo periodo tributario'],
-            'tax_periods.update' => ['module' => 'Periodos Tributarios', 'description' => 'Actualizar un periodo tributario'],
-            'tax_periods.delete' => ['module' => 'Periodos Tributarios', 'description' => 'Eliminar un periodo tributario'],
-
-            // --- Documentos Electrónicos ---
-            'electronic_documents.index'  => ['module' => 'Documentos Electrónicos', 'description' => 'Listar todos los documentos electrónicos'],
-            'electronic_documents.create' => ['module' => 'Documentos Electrónicos', 'description' => 'Generar un nuevo documento electrónico'],
-            'electronic_documents.update' => ['module' => 'Documentos Electrónicos', 'description' => 'Actualizar un documento electrónico'],
-            'electronic_documents.delete' => ['module' => 'Documentos Electrónicos', 'description' => 'Eliminar un documento electrónico'],
 
             // --- Cobros de Administración de Afiliados ---
             'affiliate_admin_charges.index'  => ['module' => 'Cobros de Administración', 'description' => 'Listar todos los cobros de administración de afiliados'],
@@ -283,12 +160,6 @@ class PermissionSeeder extends Seeder
             'affiliate_admin_charges.update' => ['module' => 'Cobros de Administración', 'description' => 'Actualizar un cobro de administración'],
             'affiliate_admin_charges.delete' => ['module' => 'Cobros de Administración', 'description' => 'Eliminar un cobro de administración'],
             'affiliate_admin_charges.profile' => ['module' => 'Cobros de Administración', 'description' => 'Ver detalles de un cobro de administración'],
-
-            // --- Extracto de Contrato ---
-            'extract_of_contract.index'  => ['module' => 'Extractos de Contrato', 'description' => 'Listar todos los extractos de contrato'],
-            'extract_of_contract.create' => ['module' => 'Extractos de Contrato', 'description' => 'Crear un nuevo extracto de contrato'],
-            'extract_of_contract.update' => ['module' => 'Extractos de Contrato', 'description' => 'Actualizar un extracto de contrato'],
-            'extract_of_contract.delete' => ['module' => 'Extractos de Contrato', 'description' => 'Eliminar un extracto de contrato'],
 
             // --- Vehículos ---
             'vehicles.index'           => ['module' => 'Vehículos', 'description' => 'Listar todos los vehículos'],
@@ -305,6 +176,7 @@ class PermissionSeeder extends Seeder
             'vehicle_documents.create' => ['module' => 'Documentos de Vehículos', 'description' => 'Subir un nuevo documento de vehículo'],
             'vehicle_documents.update' => ['module' => 'Documentos de Vehículos', 'description' => 'Actualizar un documento de vehículo'],
             'vehicle_documents.delete' => ['module' => 'Documentos de Vehículos', 'description' => 'Eliminar un documento de vehículo'],
+            'vehicle_documents.profile' => ['module' => 'Documentos de Vehículos', 'description' => 'Ver el perfil detallado de un documento de vehículo'],
 
             // --- Tarjetas de Operación ---
             'operation_cards.index'  => ['module' => 'Tarjetas de Operación', 'description' => 'Listar todas las tarjetas de operación'],
@@ -336,6 +208,11 @@ class PermissionSeeder extends Seeder
             'vehicle_inspections.create' => ['module' => 'Inspecciones de Vehículos', 'description' => 'Registrar una nueva inspección'],
             'vehicle_inspections.update' => ['module' => 'Inspecciones de Vehículos', 'description' => 'Actualizar una inspección'],
             'vehicle_inspections.delete' => ['module' => 'Inspecciones de Vehículos', 'description' => 'Eliminar una inspección'],
+
+            // --- Reportes ---
+            'reports.vehicles.index' => ['module' => 'Reportes', 'description' => 'Ver el reporte de vehículos'],
+            'reports.vehicles.export-excel' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de vehículos a Excel'],
+            'reports.vehicles.export-pdf' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de vehículos a PDF'],
 
             // --- Resultados de Inspección ---
             'inspection_results.index'  => ['module' => 'Resultados de Inspección', 'description' => 'Listar todos los resultados de inspección'],
@@ -374,6 +251,17 @@ class PermissionSeeder extends Seeder
             'fleet_service_contracts.update' => ['module' => 'Contratos de Flota', 'description' => 'Actualizar un contrato de servicio'],
             'fleet_service_contracts.delete' => ['module' => 'Contratos de Flota', 'description' => 'Eliminar un contrato de servicio'],
 
+            // --- Radicación TO (expediente + firma por enlace + TXT RUNT) ---
+            'radicacion_to.index'  => ['module' => 'Radicación TO', 'description' => 'Ver expedientes y ruta de radicación TO'],
+            'radicacion_to.create' => ['module' => 'Radicación TO', 'description' => 'Crear expediente y generar enlaces de firma'],
+            'radicacion_to.update' => ['module' => 'Radicación TO', 'description' => 'Avanzar pasos y generar TXT RUNT'],
+
+            // --- Contratos de prestación de servicios (segunda tabla) ---
+            'service_provision_contracts.index'  => ['module' => 'Contratos de Prestación', 'description' => 'Listar contratos de prestación de servicios'],
+            'service_provision_contracts.create' => ['module' => 'Contratos de Prestación', 'description' => 'Crear contrato de prestación de servicios'],
+            'service_provision_contracts.update' => ['module' => 'Contratos de Prestación', 'description' => 'Actualizar contrato de prestación de servicios'],
+            'service_provision_contracts.delete' => ['module' => 'Contratos de Prestación', 'description' => 'Eliminar contrato de prestación de servicios'],
+
             // --- Inventario de Capacidad ---
             'capacity_inventory.index'  => ['module' => 'Inventario de Capacidad', 'description' => 'Listar todo el inventario de capacidad'],
             'capacity_inventory.create' => ['module' => 'Inventario de Capacidad', 'description' => 'Registrar un nuevo ítem en el inventario'],
@@ -385,6 +273,27 @@ class PermissionSeeder extends Seeder
             'objects_contracts.create' => ['module' => 'Contratos de Objetos', 'description' => 'Crear un nuevo contrato de objetos'],
             'objects_contracts.update' => ['module' => 'Contratos de Objetos', 'description' => 'Actualizar un contrato de objetos'],
             'objects_contracts.delete' => ['module' => 'Contratos de Objetos', 'description' => 'Eliminar un contrato de objetos'],
+
+            // --- Catálogos de Configuración ---
+            'brands.index'  => ['module' => 'Marcas', 'description' => 'Listar todas las marcas'],
+            'brands.create' => ['module' => 'Marcas', 'description' => 'Crear una nueva marca'],
+            'brands.update' => ['module' => 'Marcas', 'description' => 'Actualizar una marca'],
+            'brands.delete' => ['module' => 'Marcas', 'description' => 'Eliminar una marca'],
+
+            'vehicle_classes.index'  => ['module' => 'Clases de Vehículos', 'description' => 'Listar todas las clases de vehículos'],
+            'vehicle_classes.create' => ['module' => 'Clases de Vehículos', 'description' => 'Crear una nueva clase de vehículo'],
+            'vehicle_classes.update' => ['module' => 'Clases de Vehículos', 'description' => 'Actualizar una clase de vehículo'],
+            'vehicle_classes.delete' => ['module' => 'Clases de Vehículos', 'description' => 'Eliminar una clase de vehículo'],
+
+            'inspection_items.index'  => ['module' => 'Ítems de Inspección', 'description' => 'Listar todos los ítems de inspección'],
+            'inspection_items.create' => ['module' => 'Ítems de Inspección', 'description' => 'Crear un nuevo ítem de inspección'],
+            'inspection_items.update' => ['module' => 'Ítems de Inspección', 'description' => 'Actualizar un ítem de inspección'],
+            'inspection_items.delete' => ['module' => 'Ítems de Inspección', 'description' => 'Eliminar un ítem de inspección'],
+
+            'withholdings.index'  => ['module' => 'Retenciones', 'description' => 'Listar todas las retenciones'],
+            'withholdings.create' => ['module' => 'Retenciones', 'description' => 'Crear una nueva retención'],
+            'withholdings.update' => ['module' => 'Retenciones', 'description' => 'Actualizar una retención'],
+            'withholdings.delete' => ['module' => 'Retenciones', 'description' => 'Eliminar una retención'],
 
             // --- Contratistas ---
             'contractors.index'  => ['module' => 'Contratistas', 'description' => 'Listar todos los contratistas'],
@@ -416,23 +325,11 @@ class PermissionSeeder extends Seeder
             'service_delivery_control_sheets.view'   => ['module' => 'Hojas de Entrega', 'description' => 'Ver una hoja de control de entrega'],
             'service_delivery_control_sheets.create' => ['module' => 'Hojas de Entrega', 'description' => 'Crear una nueva hoja de control de entrega'],
             'service_delivery_control_sheets.update' => ['module' => 'Hojas de Entrega', 'description' => 'Actualizar una hoja de control de entrega'],
-            'service_delivery_control_sheets.edit'   => ['module' => 'Hojas de Entrega', 'description' => 'Editar una hoja de control de entrega'],
             'service_delivery_control_sheets.delete' => ['module' => 'Hojas de Entrega', 'description' => 'Eliminar una hoja de control de entrega'],
             'service_delivery_control_sheets.history_pdf' => ['module' => 'Hojas de Entrega', 'description' => 'Generar PDF del historial de entrega'],
             'service_delivery_control_sheets.technical_sheet_pdf' => ['module' => 'Hojas de Entrega', 'description' => 'Generar PDF de la ficha técnica de entrega'],
             'service_delivery_control_sheets.cold_chain_pdf' => ['module' => 'Hojas de Entrega', 'description' => 'Generar PDF de cadena de frío de entrega'],
-
-            // --- Configuración del Asistente ---
-            'assistant_configuration.index'  => ['module' => 'Configuración del Asistente', 'description' => 'Listar todas las configuraciones del asistente'],
-            'assistant_configuration.create' => ['module' => 'Configuración del Asistente', 'description' => 'Crear una nueva configuración del asistente'],
-            'assistant_configuration.update' => ['module' => 'Configuración del Asistente', 'description' => 'Actualizar una configuración del asistente'],
-            'assistant_configuration.delete' => ['module' => 'Configuración del Asistente', 'description' => 'Eliminar una configuración del asistente'],
-
-            // --- Asistente ---
-            'assistant.index'  => ['module' => 'Asistente', 'description' => 'Listar todos los asistentes'],
-            'assistant.create' => ['module' => 'Asistente', 'description' => 'Crear un nuevo asistente'],
-            'assistant.update' => ['module' => 'Asistente', 'description' => 'Actualizar un asistente'],
-            'assistant.delete' => ['module' => 'Asistente', 'description' => 'Eliminar un asistente'],
+            'service_delivery_control_sheets.close_exception' => ['module' => 'Hojas de Entrega', 'description' => 'Cerrar una hoja de control con excepción aprobada (evidencia incompleta)'],
 
             // --- Usuarios ---
             'users.index'    => ['module' => 'Usuarios', 'description' => 'Listar todos los usuarios'],
@@ -454,6 +351,43 @@ class PermissionSeeder extends Seeder
             'projects.update'   => ['module' => 'Proyectos', 'description' => 'Actualizar un proyecto'],
             'projects.delete'   => ['module' => 'Proyectos', 'description' => 'Eliminar un proyecto'],
             'projects.profile'  => ['module' => 'Proyectos', 'description' => 'Ver el perfil detallado de un proyecto'],
+
+            // --- Facturación: proveedores y resoluciones ---
+            'billing_providers.index'   => ['module' => 'Proveedores de Facturación', 'description' => 'Listar todos los proveedores de facturación'],
+            'billing_providers.create'  => ['module' => 'Proveedores de Facturación', 'description' => 'Registrar un nuevo proveedor de facturación'],
+            'billing_providers.update'  => ['module' => 'Proveedores de Facturación', 'description' => 'Actualizar un proveedor de facturación'],
+            'billing_providers.delete'  => ['module' => 'Proveedores de Facturación', 'description' => 'Eliminar un proveedor de facturación'],
+            'billing_resolutions.index'   => ['module' => 'Resoluciones de Facturación', 'description' => 'Listar todas las resoluciones de facturación'],
+            'billing_resolutions.create'  => ['module' => 'Resoluciones de Facturación', 'description' => 'Crear una nueva resolución de facturación'],
+            'billing_resolutions.update'  => ['module' => 'Resoluciones de Facturación', 'description' => 'Actualizar una resolución de facturación'],
+            'billing_resolutions.delete'  => ['module' => 'Resoluciones de Facturación', 'description' => 'Eliminar una resolución de facturación'],
+
+            // --- Facturación: documentos comerciales (cotización y factura interna) ---
+            'commercial_invoices.index'   => ['module' => 'Facturas Comerciales', 'description' => 'Listar todos los documentos comerciales'],
+            'commercial_invoices.create'  => ['module' => 'Facturas Comerciales', 'description' => 'Crear una cotización o factura interna'],
+            'commercial_invoices.update'  => ['module' => 'Facturas Comerciales', 'description' => 'Actualizar un documento comercial'],
+            'commercial_invoices.delete'  => ['module' => 'Facturas Comerciales', 'description' => 'Eliminar un documento comercial'],
+            'commercial_invoices.profile' => ['module' => 'Facturas Comerciales', 'description' => 'Ver el perfil detallado de un documento comercial'],
+
+            // --- Facturación electrónica (reservado al proveedor tecnológico) ---
+            'electronic_invoices.index'  => ['module' => 'Facturas Electrónicas', 'description' => 'Listar el estado electrónico de las facturas'],
+
+            // --- Notas crédito y débito internas ---
+            'credit_notes.index'   => ['module' => 'Notas Crédito', 'description' => 'Listar todas las notas crédito'],
+            'credit_notes.create'  => ['module' => 'Notas Crédito', 'description' => 'Crear una nueva nota crédito'],
+            'credit_notes.update'  => ['module' => 'Notas Crédito', 'description' => 'Actualizar una nota crédito'],
+            'credit_notes.delete'  => ['module' => 'Notas Crédito', 'description' => 'Eliminar una nota crédito'],
+            'debit_notes.index'   => ['module' => 'Notas Débito', 'description' => 'Listar todas las notas débito'],
+            'debit_notes.create'  => ['module' => 'Notas Débito', 'description' => 'Crear una nueva nota débito'],
+            'debit_notes.update'  => ['module' => 'Notas Débito', 'description' => 'Actualizar una nota débito'],
+            'debit_notes.delete'  => ['module' => 'Notas Débito', 'description' => 'Eliminar una nota débito'],
+
+            // --- Geolocalización ---
+            'locations.view'        => ['module' => 'Geolocalización', 'description' => 'Ver mapa de conductores en tiempo real'],
+            'locations.track'       => ['module' => 'Geolocalización', 'description' => 'Enviar ubicación GPS (conductor)'],
+            'locations.history'     => ['module' => 'Geolocalización', 'description' => 'Ver historial de rutas de conductores'],
+            'locations.geofences'   => ['module' => 'Geolocalización', 'description' => 'Gestionar geocercas (crear, editar, eliminar)'],
+            'locations.alerts'      => ['module' => 'Geolocalización', 'description' => 'Ver y gestionar alertas de ubicación'],
         ];
 
         foreach ($permissions as $permissionName => $data) {
@@ -467,16 +401,17 @@ class PermissionSeeder extends Seeder
         }
 
         // Limpieza: eliminar permisos obsoletos que ya no están definidos (garantiza "solo permisos" definidos)
+        // Nota: borrado masivo por consulta, sin eventos de modelo. El evento `deleting` de Spatie
+        // resuelve la relación users() contra el guard y falla donde el guard `api` no existe en
+        // config/auth.php; las FK de role_has_permissions y model_has_permissions tienen
+        // onDelete cascade y limpian los pivotes automáticamente.
         $definedNames = array_keys($permissions);
-        $stalePermissions = Permission::where('guard_name', 'api')
+        $staleCount = Permission::where('guard_name', 'api')
             ->whereNotIn('name', $definedNames)
-            ->get();
+            ->delete();
 
-        if ($stalePermissions->isNotEmpty()) {
-            foreach ($stalePermissions as $stale) {
-                $stale->delete();
-            }
-            $this->command->warn('🗑️  ' . $stalePermissions->count() . ' permisos obsoletos eliminados: ' . $stalePermissions->pluck('name')->implode(', '));
+        if ($staleCount > 0) {
+            $this->command->warn('🗑️  ' . $staleCount . ' permisos obsoletos eliminados (purga automática de roles incluida por cascade).');
         }
 
         app()[PermissionRegistrar::class]->forgetCachedPermissions();

@@ -96,6 +96,25 @@ class ThirdParty extends Model implements HasMedia
     ];
 
     /**
+     * Campos de nombre que se guardan siempre en mayúsculas (consistencia de afiliados y conductores).
+     *
+     * @var array<int, string>
+     */
+    public const CAMPOS_EN_MAYUSCULAS = ['first_name', 'last_name', 'company_name', 'trade_name'];
+
+    /**
+     * Normaliza a mayúsculas los nombres, razón social y nombre comercial al asignarlos.
+     */
+    public function setAttribute($key, $value)
+    {
+        if (in_array($key, self::CAMPOS_EN_MAYUSCULAS, true) && is_string($value)) {
+            $value = mb_strtoupper(trim(preg_replace('/\s+/u', ' ', $value) ?? $value), 'UTF-8');
+        }
+
+        return parent::setAttribute($key, $value);
+    }
+
+    /**
      * Obtiene la empresa propietaria del tercero.
      */
     public function company(): BelongsTo
@@ -144,6 +163,30 @@ class ThirdParty extends Model implements HasMedia
     }
 
     /**
+     * Licencia a mostrar (PDF del FUEC, formularios): la ACTIVA más reciente;
+     * si no hay ninguna ACTIVA, la más reciente; si no hay licencias, null.
+     * La relación no viene ordenada (orden de BD: la más vieja primero), así
+     * que tomar `driverLicenses->first()` muestra la vencida/vieja.
+     */
+    public function licenciaActual(): ?DriverLicense
+    {
+        $licencias = $this->driverLicenses;
+        if ($licencias->isEmpty()) {
+            return null;
+        }
+
+        $activas = $licencias->filter(
+            fn (DriverLicense $l) => $l->status === 1 || $l->status === true
+                || mb_strtoupper(trim((string) $l->status)) === 'ACTIVA'
+        );
+        $candidatas = $activas->isNotEmpty() ? $activas : $licencias;
+
+        return $candidatas->sortByDesc(
+            fn (DriverLicense $l) => $l->expiration_date ? strtotime((string) $l->expiration_date) : 0
+        )->first();
+    }
+
+    /**
      * Obtiene los proyectos a los que pertenece el tercero (conductor).
      *
      * El pivote incluye el vehículo asignado a cada conductor en el proyecto.
@@ -177,10 +220,51 @@ class ThirdParty extends Model implements HasMedia
     }
 
     /**
+     * Obtiene el contrato laboral vigente o el más reciente del tercero (conductor).
+     */
+    public function currentEmploymentContract(): ?EmploymentContract
+    {
+        return $this->employmentContracts()
+            ->orderByRaw('CASE WHEN status = ? THEN 0 ELSE 1 END', ['ACTIVO'])
+            ->orderByDesc('start_date')
+            ->first();
+    }
+
+    /**
+     * Contratos laborales del tercero.
+     */
+    public function employmentContracts(): HasMany
+    {
+        return $this->hasMany(EmploymentContract::class, 'third_party_uuid', 'uuid');
+    }
+
+    /**
      * Obtiene el tipo de documento del tercero (alias snake_case).
      */
     public function type_of_document()
     {
         return $this->documentType();
+    }
+
+    /**
+     * Nombre para mostrar del tercero.
+     *
+     * `third_parties` no tiene columna `name`: una persona natural se guarda en
+     * `first_name`/`last_name` y una jurídica en `company_name`. Este accesor
+     * unifica ambos casos con la misma prioridad que usa el listado de terceros.
+     */
+    public function getFullNameAttribute(): ?string
+    {
+        $nombre = trim((string) ($this->company_name
+            ?: trim(($this->first_name ?? '').' '.($this->last_name ?? ''))));
+
+        if ($nombre !== '') {
+            return $nombre;
+        }
+
+        // Último recurso: la razón social comercial.
+        $comercial = trim((string) $this->trade_name);
+
+        return $comercial !== '' ? $comercial : null;
     }
 }

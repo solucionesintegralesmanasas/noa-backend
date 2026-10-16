@@ -59,11 +59,12 @@ class ServiceInternalControlSubcontractedService extends BaseService
     {
         return $this->transaction(fn () => ServiceInternalControlSubcontracted::create([
             'uuid' => $data['uuid'] ?? (string) Str::uuid(),
-            'vehicle_class_uuid' => $data['vehicle_class_uuid'],
+            'vehicle_class_uuid' => $data['vehicle_class_uuid'] ?? null,
             'service_delivery_control_sheet_uuid' => $data['service_delivery_control_sheet_uuid'],
+            'fuec_uuid' => $data['fuec_uuid'] ?? null,
             'vehicle_license_plate' => $data['vehicle_license_plate'],
             'driver_name_and_surname' => $data['driver_name_and_surname'],
-            'driver_license_number' => $data['driver_license_number'],
+            'driver_license_number' => $data['driver_license_number'] ?? 'N/A',
             'is_active' => $data['is_active'] ?? true,
         ]));
     }

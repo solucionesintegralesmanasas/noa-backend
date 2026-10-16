@@ -61,7 +61,7 @@ class UpdateProjectRequest extends FormRequest
             'completion_date' => ['sometimes', 'date', 'after_or_equal:start_date'],
             'project_value' => ['nullable', 'numeric', 'min:0'],
             'purchase_order' => ['nullable', 'string', 'max:255'],
-            'purchase_order_file' => ['nullable', 'file', 'mimes:pdf', 'max:10240'],
+            'purchase_order_file' => ['nullable', 'file', 'extensions:pdf', 'max:10240'],
             'remove_purchase_order' => ['sometimes', 'boolean'],
             'assignments' => ['nullable', 'array'],
             'assignments.*.third_party_uuid' => [

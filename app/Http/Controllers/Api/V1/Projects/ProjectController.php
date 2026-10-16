@@ -70,6 +70,7 @@ class ProjectController extends Controller
         security: [['bearerAuth' => []]],
         parameters: [
             new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'third_party_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid'), description: 'Solo proyectos del conductor'),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
@@ -79,7 +80,8 @@ class ProjectController extends Controller
     {
         try {
             $companyUuid = $request->query('company_uuid');
-            $data = $this->projectService->getAllProjects($companyUuid);
+            $thirdPartyUuid = $request->query('third_party_uuid');
+            $data = $this->projectService->getAllProjects($companyUuid, $thirdPartyUuid);
 
             return $this->successResponse($data, 'Catálogo de proyectos recuperado con éxito.');
         } catch (\Throwable $e) {

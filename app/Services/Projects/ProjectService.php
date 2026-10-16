@@ -43,7 +43,7 @@ class ProjectService extends BaseService
      *
      * @return Collection<int, Project>
      */
-    public function getAllProjects(?string $companyUuid = null): Collection
+    public function getAllProjects(?string $companyUuid = null, ?string $thirdPartyUuid = null): Collection
     {
         $query = $this->query()
             ->withCount(['driverVehicleAssignments as assignments_count' => fn ($q) => $q->active()])
@@ -56,6 +56,10 @@ class ProjectService extends BaseService
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
+        }
+
+        if ($thirdPartyUuid) {
+            $query->forThirdParty($thirdPartyUuid);
         }
 
         return $query->get([
@@ -304,25 +308,32 @@ class ProjectService extends BaseService
             }
         }
 
+        // En lugar de borrar asignaciones que se retiran del formulario,
+        // marcarlas como inactivas (is_active = false) para conservar el historial del conductor y vehículo
         ProjectDriverVehicle::where('project_uuid', $project->uuid)
             ->whereNotIn('third_party_uuid', array_keys($clean))
-            ->delete();
+            ->update(['is_active' => false]);
 
         $existing = ProjectDriverVehicle::where('project_uuid', $project->uuid)
-            ->get()
-            ->keyBy('third_party_uuid');
+            ->get();
 
         foreach ($clean as $driverUuid => $config) {
-            $row = $existing->get($driverUuid);
+            // Verificar si ya existe exactamente esta asignación de conductor y vehículo
+            $exact = $existing->first(fn ($r) => $r->third_party_uuid === $driverUuid && $r->vehicle_uuid === $config['vehicle_uuid']);
 
-            if ($row) {
-                if ($row->vehicle_uuid !== $config['vehicle_uuid'] || (bool) $row->is_active !== $config['is_active']) {
-                    $row->update([
-                        'vehicle_uuid' => $config['vehicle_uuid'],
-                        'is_active' => $config['is_active'],
-                    ]);
+            if ($exact) {
+                if ((bool) $exact->is_active !== $config['is_active']) {
+                    $exact->update(['is_active' => $config['is_active']]);
                 }
             } else {
+                // Si el conductor tenía asignado otro vehículo activo en este proyecto,
+                // marcar la asignación anterior como inactiva para conservar el historial
+                $previousAssignments = $existing->where('third_party_uuid', $driverUuid)->where('is_active', true);
+                foreach ($previousAssignments as $prev) {
+                    $prev->update(['is_active' => false]);
+                }
+
+                // Crear la nueva asignación
                 ProjectDriverVehicle::create([
                     'project_uuid' => $project->uuid,
                     'third_party_uuid' => $driverUuid,

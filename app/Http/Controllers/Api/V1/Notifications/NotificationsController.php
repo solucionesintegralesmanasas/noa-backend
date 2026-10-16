@@ -8,6 +8,8 @@ use App\Http\Controllers\Controller;
 use App\Services\Notifications\NotificationsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Laravel\Sanctum\PersonalAccessToken;
 use OpenApi\Attributes as OA;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -39,6 +41,7 @@ class NotificationsController extends Controller
             new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'status', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['PENDIENTE', 'LEIDA'])),
             new OA\Parameter(name: 'type', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'priority', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['PRIORITARIA', 'NORMAL'])),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
@@ -55,10 +58,38 @@ class NotificationsController extends Controller
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $status = $request->query('status');
             $type = $request->query('type');
+            $priority = $request->query('priority');
 
-            $data = $this->notificationsService->getNotificationsWithPagination($perPage, $page, $search, $companyUuid, $status, $type);
+            $data = $this->notificationsService->getNotificationsWithPagination($perPage, $page, $search, $companyUuid, $status, $type, $priority);
 
             return $this->successResponse($data, 'Listado paginado de notificaciones recuperado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/notifications/counts',
+        summary: 'Contar notificaciones pendientes agrupadas por prioridad',
+        operationId: 'countNotificationsByPriority',
+        tags: ['Notificaciones'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Conteos recuperados con éxito.'),
+            new OA\Response(response: 401, description: 'No autorizado.'),
+            new OA\Response(response: 500, description: 'Error interno del servidor.'),
+        ]
+    )]
+    public function counts(Request $request): JsonResponse
+    {
+        try {
+            $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
+            $data = $this->notificationsService->getUnreadCountsByPriority($companyUuid);
+
+            return $this->successResponse($data, 'Conteos de notificaciones recuperados con éxito.');
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
@@ -227,8 +258,30 @@ class NotificationsController extends Controller
             new OA\Response(response: 500, description: 'Error interno del servidor.'),
         ]
     )]
-    public function stream(Request $request): StreamedResponse
+    public function stream(Request $request): StreamedResponse|JsonResponse
     {
+        // EventSource no puede enviar el header Authorization, por eso se
+        // acepta el token Sanctum vía ?token= como alternativa al Bearer.
+        if (! Auth::guard('sanctum')->check()) {
+            $queryToken = (string) $request->query('token', '');
+            if ($queryToken !== '') {
+                $accessToken = PersonalAccessToken::findToken($queryToken);
+                $expired = $accessToken?->expires_at && $accessToken->expires_at->isPast();
+                $isRefreshOnly = $accessToken && $accessToken->abilities === ['refresh'];
+                if ($accessToken && ! $expired && ! $isRefreshOnly && $accessToken->tokenable) {
+                    Auth::setUser($accessToken->tokenable);
+                    $request->setUserResolver(fn () => $accessToken->tokenable);
+                }
+            }
+        }
+
+        if (! Auth::check()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No autorizado. Token inválido o ausente.',
+            ], 401);
+        }
+
         $response = new StreamedResponse(function () use ($request) {
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $lastId = null;
@@ -236,8 +289,16 @@ class NotificationsController extends Controller
             @set_time_limit(0);
             session_write_close();
 
-            $maxExecution = 1800;
+            $maxExecution = 90;
             $startTime = time();
+
+            // Indica al cliente el tiempo de reconexión y abre el stream.
+            echo "retry: 3000\n\n";
+            echo ": connected\n\n";
+            if (ob_get_level() > 0) {
+                ob_flush();
+            }
+            flush();
 
             while (true) {
                 if (connection_aborted()) {

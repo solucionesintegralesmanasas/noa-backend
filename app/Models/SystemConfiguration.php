@@ -31,6 +31,13 @@ class SystemConfiguration extends Model implements HasMedia
 
     protected $table = 'system_configuration';
 
+    /**
+     * La relación de archivos no se serializa (SPEC-006): cada archivo calcula su URL cargando el modelo dueño,
+     * que vuelve a incluir sus archivos, y con instancias nuevas el guard antirrecursión no la frena.
+     * Lo que consumen el frontend y los PDFs son las tres URLs de `toArray()`.
+     */
+    protected $hidden = ['media'];
+
     protected $fillable = [
         'uuid',
         'company_uuid',
@@ -48,15 +55,23 @@ class SystemConfiguration extends Model implements HasMedia
         'activate_notifications',
         'notify_by_email',
         'notification_email',
+        'own_company_names',
         'fuec_pdf_show_signatures',
         'fuec_pdf_show_contractor_details',
         'fuec_pdf_show_route_details',
+        'pdf_branding',
         'vehicle_internal_number_counter',
         'fuec_enable_auto_internal_number',
         'fuec_use_corporate_policies',
         'corporate_rcc_insurer',
         'corporate_rcc_expiration',
         'corporate_rce_expiration',
+        'default_territorial_director_uuid',
+        'default_territorial_director_name',
+        'rcc_insurer_company',
+        'rce_insurer_company',
+        'rcc_policy_number',
+        'rce_policy_number',
         'platform_fee_type',
         'platform_fee_rates',
     ];
@@ -74,9 +89,11 @@ class SystemConfiguration extends Model implements HasMedia
         'rtm_alert_days' => 'integer',
         'activate_notifications' => 'boolean',
         'notify_by_email' => 'boolean',
+        'own_company_names' => 'array',
         'fuec_pdf_show_signatures' => 'boolean',
         'fuec_pdf_show_contractor_details' => 'boolean',
         'fuec_pdf_show_route_details' => 'boolean',
+        'pdf_branding' => 'array',
         'vehicle_internal_number_counter' => 'integer',
         'fuec_enable_auto_internal_number' => 'boolean',
         'fuec_use_corporate_policies' => 'boolean',
@@ -153,15 +170,25 @@ class SystemConfiguration extends Model implements HasMedia
         $array = parent::toArray();
 
         // Inyectar URLs de media sin recursión
-        $array['ministry_logo_url'] = $this->ministry_logo_url;
-        $array['super_logo_url'] = $this->super_logo_url;
-        $array['letterhead_url'] = $this->letterhead_url;
+        $array['ministry_logo_url'] = $this->urlSegura('ministry_logo_url');
+        $array['super_logo_url'] = $this->urlSegura('super_logo_url');
+        $array['letterhead_url'] = $this->urlSegura('letterhead_url');
 
         return $array;
     }
 
+    /** Un adjunto roto (archivo faltante, colección vacía) degrada a URL vacía y nunca tumba la petición. */
+    private function urlSegura(string $accesor): string
+    {
+        try {
+            return (string) $this->{$accesor};
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
     public function company(): BelongsTo
     {
-        return $this->belongsTo(Company::class);
+        return $this->belongsTo(Company::class, 'company_uuid', 'uuid');
     }
 }

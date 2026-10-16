@@ -38,13 +38,14 @@ class StoreProcedureRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'link_type' => 'nullable|in:CAMBIO_DE_EMPRESA,NUEVO_VEHICULO',
+            'parent_procedure_uuid' => 'nullable|uuid|exists:procedures,uuid',
+            'link_type' => 'nullable|in:CAMBIO_DE_EMPRESA,NUEVO_VEHICULO,RENOVACION,DESVINCULACION_MUTUO,DESVINCULACION_UNILATERAL',
             'company_uuid' => 'nullable|uuid|exists:companies,uuid',
             'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
             'vehicle_uuid' => 'nullable|uuid|exists:vehicles,uuid',
             'procedure_code' => 'required|string|max:50',
             'filed_number' => 'nullable|string|max:50',
-            'procedure_type' => 'required|in:CARTA_DE_ACEPTACION,CAPACIDAD_TRANSPORTADORA,INCLUSION_DE_POLIZAS,TARJETA_DE_OPERACION,DESVINCULACION',
+            'procedure_type' => 'required|in:CARTA_DE_ACEPTACION,CAPACIDAD_TRANSPORTADORA,INCLUSION_DE_POLIZAS,TARJETA_DE_OPERACION,DESVINCULACION,RENOVACION_TARJETA,DESVINCULACION_MUTUO,DESVINCULACION_UNILATERAL',
             'date_of_creation' => 'required|date',
             'city_uuid' => 'required|uuid|exists:cities,uuid',
             'subject' => 'nullable|string|max:255',

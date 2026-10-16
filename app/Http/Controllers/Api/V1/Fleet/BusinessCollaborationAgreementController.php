@@ -48,7 +48,8 @@ class BusinessCollaborationAgreementController extends Controller
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $thirdPartyUuid = $request->query('third_party_uuid') ?? $request->input('filter.third_party_uuid');
-            $data = $this->agreementService->getAllBusinessCollaborationAgreementsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid);
+            $vehicleUuid = $request->query('vehicle_uuid') ?? $request->input('filter.vehicle_uuid');
+            $data = $this->agreementService->getAllBusinessCollaborationAgreementsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $vehicleUuid);
 
             return $this->successResponse($data, 'Listado paginado de ConvenioColaboracionEmpresarial recuperado con éxito.');
         } catch (\Throwable $e) {

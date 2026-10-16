@@ -7,6 +7,7 @@ namespace App\Services\ContractExtraction;
 use App\Models\Contractor;
 use App\Models\Fuec;
 use App\Models\ItWasConsecutive;
+use App\Models\VehicleDocument;
 use App\Services\Administrations\EnablingResolutionService;
 use App\Services\BaseService;
 use App\Services\Fleet\VehicleDocumentService;
@@ -79,7 +80,10 @@ class FuecService extends BaseService
         ?string $companyUuid = null,
         ?string $thirdPartyUuid = null
     ): LengthAwarePaginator {
-        $query = parent::query();
+        $query = parent::query()->with([
+            'vehicle:uuid,vehicle_license_plate',
+            'contractor:uuid,company_name,document_number',
+        ]);
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
@@ -110,6 +114,8 @@ class FuecService extends BaseService
 
         $columns = [
             'uuid',
+            'vehicle_uuid',
+            'contractor_uuid',
             'number_fuec',
             'request_number',
             'contract_number_display',
@@ -131,6 +137,15 @@ class FuecService extends BaseService
             'origin_route' => $fuec->origin_route,
             'destination_route' => $fuec->destination_route,
             'status' => $fuec->status,
+            'vehicle' => $fuec->relationLoaded('vehicle') && $fuec->vehicle ? [
+                'uuid' => $fuec->vehicle->uuid,
+                'vehicle_license_plate' => $fuec->vehicle->vehicle_license_plate,
+            ] : null,
+            'contractor' => $fuec->relationLoaded('contractor') && $fuec->contractor ? [
+                'uuid' => $fuec->contractor->uuid,
+                'company_name' => $fuec->contractor->company_name,
+                'document_number' => $fuec->contractor->document_number,
+            ] : null,
         ]);
 
         return $paginator;
@@ -199,6 +214,95 @@ class FuecService extends BaseService
     }
 
     /**
+     * Documentos vivos (no reemplazados) de un tipo para un vehículo.
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    private function documentosVivos(string $vehicleUuid, callable $esTipo): \Illuminate\Support\Collection
+    {
+        return DB::table('vehicle_documents')
+            ->where('vehicle_uuid', $vehicleUuid)
+            ->get()
+            ->filter(fn ($doc) => $esTipo(strtoupper((string) $doc->document_type)))
+            ->reject(fn ($doc) => in_array(strtoupper((string) ($doc->status ?? '')), VehicleDocument::ESTADOS_HISTORIAL, true))
+            ->values();
+    }
+
+    /**
+     * Exige un documento vivo que cubra la fecha de expedición.
+     */
+    private function exigirCobertura(\Illuminate\Support\Collection $vivos, Carbon $issueDate, string $sinRegistro, string $vencido): void
+    {
+        if ($vivos->isEmpty()) {
+            throw new \InvalidArgumentException($sinRegistro);
+        }
+
+        $cubre = $vivos->first(fn ($doc) => $doc->expiry_date && ! Carbon::parse($doc->expiry_date)->lt($issueDate));
+
+        if (! $cubre) {
+            $mejor = $vivos->sortByDesc(fn ($doc) => (string) ($doc->expiry_date ?? ''))->first();
+            $mejorVence = $mejor->expiry_date ? Carbon::parse($mejor->expiry_date) : null;
+            $formattedExpiry = $mejorVence ? $mejorVence->format('d/m/Y') : 'no definida';
+            throw new \InvalidArgumentException(str_replace('{vencimiento}', $formattedExpiry, $vencido));
+        }
+    }
+
+    /**
+     * Valida el SOAT del vehículo (aplica a todos, incluidos particulares).
+     */
+    private function validarDocumentoCobertura(string $vehicleUuid, string $tipo, Carbon $issueDate): void
+    {
+        $vivos = $this->documentosVivos($vehicleUuid, fn ($t) => $t === $tipo);
+
+        $this->exigirCobertura(
+            $vivos,
+            $issueDate,
+            "No se puede crear el FUEC: El vehículo no tiene un {$tipo} registrado.",
+            "No se puede crear el FUEC: El {$tipo} del vehículo se encuentra vencido (Fecha de vencimiento: {vencimiento})."
+        );
+    }
+
+    /**
+     * Valida la RTM con el periodo de gracia de 2 años desde la matrícula.
+     */
+    private function validarRtmCobertura(string $vehicleUuid, Carbon $issueDate): void
+    {
+        $esRtm = function (string $tipo): bool {
+            if ($tipo === 'RTM') {
+                return true;
+            }
+            $sinAcentos = strtr($tipo, ['Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U']);
+            $alisado = (string) preg_replace('/[^A-Z]/', '', $sinAcentos);
+
+            return str_contains($alisado, 'TECNICO');
+        };
+
+        $vivos = $this->documentosVivos($vehicleUuid, $esRtm);
+
+        if ($vivos->first(fn ($doc) => $doc->expiry_date && ! Carbon::parse($doc->expiry_date)->lt($issueDate))) {
+            return;
+        }
+
+        $matricula = DB::table('vehicles')->where('uuid', $vehicleUuid)->value('registration_date');
+
+        if ($matricula && Carbon::parse($issueDate)->startOfDay()->lt(Carbon::parse($matricula)->startOfDay()->addYears(2))) {
+            return;
+        }
+
+        if ($vivos->isEmpty()) {
+            if (! $matricula) {
+                throw new \InvalidArgumentException('No se puede crear el FUEC: No se encontró fecha de matrícula ni RTM registrada para el vehículo.');
+            }
+            throw new \InvalidArgumentException('No se puede crear el FUEC: El vehículo no tiene una RTM registrada.');
+        }
+
+        $mejor = $vivos->sortByDesc(fn ($doc) => (string) ($doc->expiry_date ?? ''))->first();
+        $mejorVence = $mejor->expiry_date ? Carbon::parse($mejor->expiry_date) : null;
+        $formattedExpiry = $mejorVence ? $mejorVence->format('d/m/Y') : 'no definida';
+        throw new \InvalidArgumentException("No se puede crear el FUEC: La RTM del vehículo se encuentra vencida (Fecha de vencimiento: {$formattedExpiry}).");
+    }
+
+    /**
      * Método createFuec.
      */
     public function createFuec(array $data): Model
@@ -264,28 +368,13 @@ class FuecService extends BaseService
                 throw new \InvalidArgumentException("No se puede crear el FUEC: Las pólizas corporativas RCC/RCE están vencidas (Vencimiento: {$corporateExpiry->format('d/m/Y')}).");
             }
         } else {
-            $policies = DB::table('vehicle_documents')
-                ->where('vehicle_uuid', $data['vehicle_uuid'])
-                ->whereIn('document_type', ['RCC', 'RCE'])
-                ->get();
-
-            $policiesFound = $policies->pluck('document_type')->map(fn ($t) => strtoupper((string) $t))->toArray();
-
-            if (! in_array('RCC', $policiesFound)) {
-                throw new \InvalidArgumentException('No se puede crear el FUEC: El vehículo no cuenta con una póliza de Responsabilidad Civil Contractual (RCC) registrada.');
-            }
-            if (! in_array('RCE', $policiesFound)) {
-                throw new \InvalidArgumentException('No se puede crear el FUEC: El vehículo no cuenta con una póliza de Responsabilidad Civil Extracontractual (RCE) registrada.');
-            }
-
-            foreach ($policies as $policy) {
-                $policyExpiry = $policy->expiry_date ? Carbon::parse($policy->expiry_date) : null;
-                if (! $policyExpiry || $policyExpiry->lt($issueDate)) {
-                    $formattedExpiry = $policyExpiry ? $policyExpiry->format('d/m/Y') : 'no definida';
-                    throw new \InvalidArgumentException("No se puede crear el FUEC: La póliza individual '{$policy->document_type}' está vencida (Fecha de vencimiento: {$formattedExpiry}).");
-                }
-            }
+            $this->validarPolizasRccRce($data['vehicle_uuid'], $issueDate);
         }
+
+        // 4. Validar SOAT y RTM del vehículo (siempre individuales, en ambos modos).
+        // Solo cuenta el documento vivo: las reemplazadas (INACTIVA) son historial.
+        $this->validarDocumentoCobertura($data['vehicle_uuid'], 'SOAT', $issueDate);
+        $this->validarRtmCobertura($data['vehicle_uuid'], $issueDate);
 
         return $this->transaction(function () use ($data) {
             $contractorData = $data['contractor'];
@@ -353,6 +442,43 @@ class FuecService extends BaseService
 
             return $record->fresh();
         });
+    }
+
+    /**
+     * Valida que el vehículo tenga vigentes sus pólizas individuales RCC y RCE
+     * a la fecha de emisión del FUEC.
+     *
+     * Solo cuenta la póliza viva de cada tipo (la de mayor vencimiento): los
+     * documentos reemplazados son historial y no deben invalidar el FUEC.
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function validarPolizasRccRce(string $vehicleUuid, Carbon $issueDate): void
+    {
+        /** @var \Illuminate\Support\Collection<string, object> $policies Póliza viva por tipo (la de mayor vencimiento). */
+        $policies = DB::table('vehicle_documents')
+            ->where('vehicle_uuid', $vehicleUuid)
+            ->whereIn('document_type', ['RCC', 'RCE'])
+            ->whereNotIn('status', VehicleDocument::ESTADOS_HISTORIAL)
+            ->orderByDesc('expiry_date')
+            ->get()
+            ->unique('document_type')
+            ->keyBy('document_type');
+
+        $nombres = ['RCC' => 'Responsabilidad Civil Contractual (RCC)', 'RCE' => 'Responsabilidad Civil Extracontractual (RCE)'];
+
+        foreach (['RCC', 'RCE'] as $tipo) {
+            $policy = $policies->get($tipo);
+            if (! $policy) {
+                throw new \InvalidArgumentException("No se puede crear el FUEC: El vehículo no cuenta con una póliza de {$nombres[$tipo]} registrada.");
+            }
+
+            $policyExpiry = $policy->expiry_date ? Carbon::parse($policy->expiry_date) : null;
+            if (! $policyExpiry || $policyExpiry->lt($issueDate)) {
+                $formattedExpiry = $policyExpiry ? $policyExpiry->format('d/m/Y') : 'no definida';
+                throw new \InvalidArgumentException("No se puede crear el FUEC: La póliza individual '{$tipo}' está vencida (Fecha de vencimiento: {$formattedExpiry}).");
+            }
+        }
     }
 
     /**

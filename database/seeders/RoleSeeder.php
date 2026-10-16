@@ -21,6 +21,8 @@ class RoleSeeder extends Seeder
         $conductor = Role::firstOrCreate(['name' => 'CONDUCTOR', 'guard_name' => 'api']);
 
         $adminEmpresaPerms = Permission::query()->whereIn('name', [
+            'users.index',
+
             'companies.update',
             'companies.profile',
 
@@ -39,11 +41,13 @@ class RoleSeeder extends Seeder
             'economic_activities.create',
             'economic_activities.update',
             'economic_activities.delete',
+            'economic_activities.profile',
 
             'bank_details.index',
             'bank_details.create',
             'bank_details.update',
             'bank_details.delete',
+            'bank_details.profile',
 
             'tax_information.index',
             'tax_information.create',
@@ -69,6 +73,7 @@ class RoleSeeder extends Seeder
             'rup_records.create',
             'rup_records.update',
             'rup_records.delete',
+            'rup_records.profile',
 
             'financial_statements.index',
             'financial_statements.create',
@@ -131,126 +136,16 @@ class RoleSeeder extends Seeder
             'third_parties.delete',
             'third_parties.profile',
 
-            'categories.index',
-            'categories.create',
-            'categories.update',
-            'categories.delete',
-
-            'warehouses.index',
-            'warehouses.create',
-            'warehouses.update',
-            'warehouses.delete',
-
-            'products.index',
-            'products.create',
-            'products.update',
-            'products.delete',
-
-            'product_variants.index',
-            'product_variants.create',
-            'product_variants.update',
-            'product_variants.delete',
-
-            'chart_of_accounts.index',
-            'chart_of_accounts.create',
-            'chart_of_accounts.update',
-            'chart_of_accounts.delete',
-
             'cost_centers.index',
             'cost_centers.create',
             'cost_centers.update',
             'cost_centers.delete',
-
-            'voucher_types.index',
-            'voucher_types.create',
-            'voucher_types.update',
-            'voucher_types.delete',
-
-            'bank_accounts.index',
-            'bank_accounts.create',
-            'bank_accounts.update',
-            'bank_accounts.delete',
-
-            'budgets.index',
-            'budgets.create',
-            'budgets.update',
-            'budgets.delete',
-
-            'billing_providers.index',
-            'billing_providers.create',
-            'billing_providers.update',
-            'billing_providers.delete',
-
-            'billing_resolutions.index',
-            'billing_resolutions.create',
-            'billing_resolutions.update',
-            'billing_resolutions.delete',
-
-            'fiscal_documents.index',
-            'fiscal_documents.create',
-            'fiscal_documents.update',
-            'fiscal_documents.delete',
-
-            'commercial_invoices.index',
-            'commercial_invoices.create',
-            'commercial_invoices.update',
-            'commercial_invoices.delete',
-
-            'electronic_invoices.index',
-            'electronic_invoices.create',
-            'electronic_invoices.update',
-            'electronic_invoices.delete',
-
-            'credit_notes.index',
-            'credit_notes.create',
-            'credit_notes.update',
-            'credit_notes.delete',
-
-            'debit_notes.index',
-            'debit_notes.create',
-            'debit_notes.update',
-            'debit_notes.delete',
-
-            'purchase_orders.index',
-            'purchase_orders.create',
-            'purchase_orders.update',
-            'purchase_orders.delete',
-
-            'purchases.index',
-            'purchases.create',
-            'purchases.update',
-            'purchases.delete',
-
-            'support_documents.index',
-            'support_documents.create',
-            'support_documents.update',
-            'support_documents.delete',
-
-            'adjustment_notes.index',
-            'adjustment_notes.create',
-            'adjustment_notes.update',
-            'adjustment_notes.delete',
-
-            'tax_periods.index',
-            'tax_periods.create',
-            'tax_periods.update',
-            'tax_periods.delete',
-
-            'electronic_documents.index',
-            'electronic_documents.create',
-            'electronic_documents.update',
-            'electronic_documents.delete',
 
             'affiliate_admin_charges.index',
             'affiliate_admin_charges.create',
             'affiliate_admin_charges.update',
             'affiliate_admin_charges.delete',
             'affiliate_admin_charges.profile',
-
-            'extract_of_contract.index',
-            'extract_of_contract.create',
-            'extract_of_contract.update',
-            'extract_of_contract.delete',
 
             'vehicles.index',
             'vehicles.create',
@@ -261,10 +156,15 @@ class RoleSeeder extends Seeder
             'vehicles.history_pdf',
             'vehicles.technical_sheet_pdf',
 
+            'reports.vehicles.index',
+            'reports.vehicles.export-excel',
+            'reports.vehicles.export-pdf',
+
             'vehicle_documents.index',
             'vehicle_documents.create',
             'vehicle_documents.update',
             'vehicle_documents.delete',
+            'vehicle_documents.profile',
 
             'operation_cards.index',
             'operation_cards.create',
@@ -323,6 +223,15 @@ class RoleSeeder extends Seeder
             'fleet_service_contracts.update',
             'fleet_service_contracts.delete',
 
+            'radicacion_to.index',
+            'radicacion_to.create',
+            'radicacion_to.update',
+
+            'service_provision_contracts.index',
+            'service_provision_contracts.create',
+            'service_provision_contracts.update',
+            'service_provision_contracts.delete',
+
             'capacity_inventory.index',
             'capacity_inventory.create',
             'capacity_inventory.update',
@@ -332,6 +241,26 @@ class RoleSeeder extends Seeder
             'objects_contracts.create',
             'objects_contracts.update',
             'objects_contracts.delete',
+
+            'brands.index',
+            'brands.create',
+            'brands.update',
+            'brands.delete',
+
+            'vehicle_classes.index',
+            'vehicle_classes.create',
+            'vehicle_classes.update',
+            'vehicle_classes.delete',
+
+            'inspection_items.index',
+            'inspection_items.create',
+            'inspection_items.update',
+            'inspection_items.delete',
+
+            'withholdings.index',
+            'withholdings.create',
+            'withholdings.update',
+            'withholdings.delete',
 
             'contractors.index',
             'contractors.create',
@@ -358,22 +287,53 @@ class RoleSeeder extends Seeder
             'service_delivery_control_sheets.view',
             'service_delivery_control_sheets.create',
             'service_delivery_control_sheets.update',
-            'service_delivery_control_sheets.edit',
             'service_delivery_control_sheets.delete',
             'service_delivery_control_sheets.history_pdf',
             'service_delivery_control_sheets.technical_sheet_pdf',
             'service_delivery_control_sheets.cold_chain_pdf',
-
-            'assistant_configuration.index',
-            'assistant_configuration.create',
-            'assistant_configuration.update',
-            'assistant_configuration.delete',
+            // SPEC-002 §4: excepción al cierre, para que una planilla incompleta
+            // no quede abierta para siempre ni exija inventar evidencia.
+            'service_delivery_control_sheets.close_exception',
 
             'projects.index',
             'projects.create',
             'projects.update',
             'projects.delete',
             'projects.profile',
+
+            'billing_providers.index',
+            'billing_providers.create',
+            'billing_providers.update',
+            'billing_providers.delete',
+
+            'billing_resolutions.index',
+            'billing_resolutions.create',
+            'billing_resolutions.update',
+            'billing_resolutions.delete',
+
+            'commercial_invoices.index',
+            'commercial_invoices.create',
+            'commercial_invoices.update',
+            'commercial_invoices.delete',
+            'commercial_invoices.profile',
+
+            'electronic_invoices.index',
+
+            'credit_notes.index',
+            'credit_notes.create',
+            'credit_notes.update',
+            'credit_notes.delete',
+
+            'debit_notes.index',
+            'debit_notes.create',
+            'debit_notes.update',
+            'debit_notes.delete',
+
+            'locations.view',
+            'locations.track',
+            'locations.history',
+            'locations.geofences',
+            'locations.alerts',
         ], 'and', false)->get();
 
         $empleadoPerms = Permission::query()->whereIn('name', [''], 'and', false)->get();
@@ -390,6 +350,7 @@ class RoleSeeder extends Seeder
             'vehicles.technical_sheet_pdf',
 
             'vehicle_documents.index',
+            'vehicle_documents.profile',
 
             'operation_cards.index',
 
@@ -423,12 +384,26 @@ class RoleSeeder extends Seeder
             'fuec.create',
             'fuec.profile',
 
+            // Rastreo de SUS conductores (AlcanceAfiliado acota el resultado en el backend).
+            'locations.view',
+            'locations.history',
+
         ], 'and', false)->get();
         $conductorPerms = Permission::query()->whereIn('name', [
             'vehicle_inspections.index',
             'vehicle_inspections.create',
 
             'fuec.index',
+            'fuec.profile',
+
+            'control_sheets.index',
+            'control_sheets.create',
+
+            'service_delivery_control_sheets.index',
+            'service_delivery_control_sheets.create',
+            'service_delivery_control_sheets.history_pdf',
+
+            'locations.track',
         ], 'and', false)->get();
 
         // 1. Asignar TODOS los permisos al SUPERADMIN

@@ -213,9 +213,16 @@
 </head>
 
 <body>
-    <div id="watermark">
-        <img src="data:image/png;base64,{{ $data['logo'] }}" />
-    </div>
+    @if (!empty($letterhead ?? null))
+        <div style="text-align:center;margin-bottom:6px;">
+            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+        </div>
+    @endif
+    @if (empty($ocultar_marca ?? false) && empty($letterhead ?? null) && !empty($logo_fondo ?? $data['logo'] ?? null))
+        <div id="watermark">
+            <img src="data:image/png;base64,{{ $logo_fondo ?? $data['logo'] }}" />
+        </div>
+    @endif
 
     @if (isset($data['cancelado']) && $data['cancelado'])
         <div id="cancelado-watermark">
@@ -356,9 +363,10 @@
                             {{ $conductor->last_name }}</td>
                         <td class="text-center"><strong>CÉDULA:</strong><br> {{ $conductor->document_number }}</td>
                         <td class="text-center"><strong>LICENCIA:</strong><br>
-                            {{ $conductor->driver_licenses->first()->number ?? 'N/A' }}</td>
+                            @php($licencia = $conductor->licenciaActual())
+                            {{ $licencia?->number ?? 'N/A' }}</td>
                         <td class="text-center"><strong>VIGENCIA:</strong><br>
-                            {{ $conductor->driver_licenses->first() ? \Carbon\Carbon::parse($conductor->driver_licenses->first()->expiration_date)->format('d/m/Y') : 'N/A' }}
+                            {{ $licencia?->expiration_date ? \Carbon\Carbon::parse($licencia->expiration_date)->format('d/m/Y') : 'N/A' }}
                         </td>
                     </tr>
                 @endif
@@ -540,7 +548,7 @@
         <tr>
             <td style="text-align:center; font-size:10px; color:#000000; padding:10px;">
                 Verifique la información de este Formato Único de Extracto de Contrato en: <br>
-                <a href="https://{{ $fuec->company->web_page }}/validacion-de-fuec/"
+                <a href="{{ $data['qr_url'] ?? ($fuec->company->web_page.'/#/validacion-de-fuec/'.$fuec->verification_code) }}"
                     style="color: blue; text-decoration: none;">Validacion de fuec</a><br><br>
                 Finalmente ingrese el siguiente código: <strong>{{ $fuec->verification_code }}</strong>
             </td>

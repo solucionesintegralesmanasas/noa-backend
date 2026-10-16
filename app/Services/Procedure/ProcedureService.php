@@ -73,6 +73,9 @@ class ProcedureService extends BaseService
     public function createProcedure(array $data): Model
     {
         return $this->transaction(fn () => Procedure::create([
+            'parent_procedure_uuid' => $data['parent_procedure_uuid'] ?? null,
+            'current_step' => $data['current_step'] ?? null,
+            'global_status' => $data['global_status'] ?? null,
             'link_type' => $data['link_type'] ?? null,
             'company_uuid' => $data['company_uuid'] ?? null,
             'third_party_uuid' => $data['third_party_uuid'] ?? null,

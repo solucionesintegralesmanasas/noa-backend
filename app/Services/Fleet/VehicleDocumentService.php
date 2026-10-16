@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services\Fleet;
 
+use App\Exceptions\GeneralException;
 use App\Models\VehicleDocument;
 use App\Models\Vehicle;
 use App\Services\BaseService;
-use App\Services\Notifications\EmailLogService;
 use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -46,12 +46,17 @@ class VehicleDocumentService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $documentType = null,
-        ?string $thirdPartyUuid = null
+        ?string $thirdPartyUuid = null,
+        ?string $vehicleUuid = null
     ): LengthAwarePaginator {
         $query = $this->query()->with(['vehicle.thirdParty']);
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
+        }
+
+        if ($vehicleUuid) {
+            $query->where('vehicle_uuid', $vehicleUuid);
         }
 
         if ($thirdPartyUuid) {
@@ -148,22 +153,30 @@ class VehicleDocumentService extends BaseService
 
         $grouped = $vehicles->map(function ($vehicle) use ($documents, $types) {
             $policies = $documents->get($vehicle->uuid, collect())->values();
-            $first = $policies->first();
 
-            $validExpiries = $policies->pluck('expiry_date')->filter()
-                ->map(fn ($date) => $date instanceof \Carbon\Carbon ? $date->toDateString() : (string) $date);
-            $expiry = $validExpiries->isEmpty() ? null : $validExpiries->sort()->first();
+            // Las reemplazadas son historial: la fila consolidada refleja un registro vivo.
+            $vivas = $policies->reject(fn ($doc) => in_array(strtoupper((string) ($doc->status ?? '')), VehicleDocument::ESTADOS_HISTORIAL, true))->values();
+            $base = $vivas->isNotEmpty() ? $vivas : $policies;
 
-            $hasVigente = $policies->contains(fn ($doc) => $doc->status === 'VIGENTE');
+            // Acepta SI por compatibilidad con registros anteriores a la normalización.
+            $vigentes = $base->filter(fn ($doc) => in_array($doc->status, ['VIGENTE', 'SI'], true));
+            $candidatas = $vigentes->isNotEmpty() ? $vigentes : $base;
+            $actual = $candidatas->sortByDesc(fn ($doc) => $this->marcaOrdenPoliza($doc))->first() ?? $policies->first();
+
+            $fecha = $actual?->expiry_date;
+            $expiry = $fecha instanceof \Carbon\Carbon ? $fecha->toDateString() : (($fecha !== null && $fecha !== '') ? (string) $fecha : null);
+
+            // Acepta SI por compatibilidad con registros anteriores a la normalización.
+            $hasVigente = $base->contains(fn ($doc) => in_array($doc->status, ['VIGENTE', 'SI'], true));
 
             return [
                 'uuid' => $vehicle->uuid,
                 'vehicle_uuid' => $vehicle->uuid,
-                'policy_number' => $first?->policy_number,
+                'policy_number' => $actual?->policy_number,
                 'document_type' => implode(',', collect($types)->unique()->values()->all()),
                 'issuing_entity' => $policies->pluck('issuing_entity')->filter()->unique()->implode(' / '),
                 'expiry_date' => $expiry,
-                'status' => $hasVigente ? 'VIGENTE' : ($first?->status ?? 'INACTIVA'),
+                'status' => $hasVigente ? 'VIGENTE' : ($actual?->status ?? 'INACTIVA'),
                 'vehicle' => [
                     'uuid' => $vehicle->uuid,
                     'vehicle_license_plate' => $vehicle->vehicle_license_plate,
@@ -174,8 +187,12 @@ class VehicleDocumentService extends BaseService
                         'vehicle_uuid' => $doc->vehicle_uuid,
                         'policy_number' => $doc->policy_number,
                         'document_type' => $doc->document_type,
-                        'issuing_entity' => $doc->issuing_entity,
+                        'issue_date' => $doc->issue_date?->toDateString(),
+                        'effective_date' => $doc->effective_date?->toDateString(),
                         'expiry_date' => $doc->expiry_date?->toDateString(),
+                        'issuing_entity' => $doc->issuing_entity,
+                        'tariff_code' => $doc->tariff_code,
+                        'taker' => $doc->taker,
                         'status' => $doc->status,
                     ];
                 })->all(),
@@ -183,6 +200,21 @@ class VehicleDocumentService extends BaseService
         });
 
         return $vehicles->setCollection($grouped);
+    }
+
+    /**
+     * Marca de orden para elegir la póliza viva representativa: mayor fecha de
+     * vencimiento y, a igual fecha, la última registrada. Orden lexicográfico
+     * válido porque ambas marcas usan formato cronológico fijo.
+     */
+    private function marcaOrdenPoliza(Model $doc): string
+    {
+        $vence = $doc->expiry_date;
+        $vence = $vence instanceof \Carbon\Carbon ? $vence->toDateString() : (string) ($vence ?? '');
+        $creada = $doc->created_at;
+        $creada = $creada instanceof \Carbon\Carbon ? $creada->toDateTimeString() : (string) ($creada ?? '');
+
+        return $vence.'|'.$creada;
     }
 
     /**
@@ -212,8 +244,12 @@ class VehicleDocumentService extends BaseService
             'vehicle_uuid',
             'policy_number',
             'document_type',
-            'issuing_entity',
+            'issue_date',
+            'effective_date',
             'expiry_date',
+            'issuing_entity',
+            'tariff_code',
+            'taker',
             'status',
         ]);
     }
@@ -233,6 +269,8 @@ class VehicleDocumentService extends BaseService
 
     public function createVehicleDocument(array $data): Model
     {
+        $this->asegurarQueElVehiculoAdmite($data['vehicle_uuid'] ?? null, $data['document_type'] ?? null);
+
         return $this->transaction(function () use ($data) {
             // Marcar documentos anteriores del mismo tipo como INACTIVA
             VehicleDocument::where('vehicle_uuid', $data['vehicle_uuid'])
@@ -256,15 +294,14 @@ class VehicleDocumentService extends BaseService
             try {
                 $document->load(['vehicle.thirdParty', 'company']);
 
-                // 1. Enviar correo instantáneo si aplica
-                app(EmailLogService::class)->processSingleDocument($document);
-
-                // 2. Eliminar la notificación de "FALTANTE" en la campanita web
+                // 1. Eliminar la notificación de "FALTANTE" en la campanita web
                 $hash = md5($document->vehicle_uuid.'_'.$document->document_type);
                 $entityUuid = sprintf('%08s-%04s-%04s-%04s-%12s', substr($hash, 0, 8), substr($hash, 8, 4), substr($hash, 12, 4), substr($hash, 16, 4), substr($hash, 20, 12));
                 app(NotificationsService::class)->deleteByEntity($entityUuid, 'VEHICLE_DOCUMENT');
 
-                // 3. Sincronizar notificaciones de la empresa de forma inmediata
+                // 2. Sincronizar notificaciones de la empresa de forma inmediata.
+                // El aviso por correo lo cubre el digest consolidado (EmailLogService),
+                // que corre en la mañana y en la tarde con su propia cadencia.
                 app(NotificationsService::class)->syncNotifications($document->company_uuid);
 
             } catch (\Exception $e) {
@@ -283,6 +320,13 @@ class VehicleDocumentService extends BaseService
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
 
+            // Solo si cambia el vehículo o el tipo: el historial existente se puede seguir editando.
+            $vehiculo = $data['vehicle_uuid'] ?? $record->vehicle_uuid;
+            $tipo = $data['document_type'] ?? $record->document_type;
+            if ($vehiculo !== $record->vehicle_uuid || strtoupper((string) $tipo) !== strtoupper((string) $record->document_type)) {
+                $this->asegurarQueElVehiculoAdmite($vehiculo, $tipo);
+            }
+
             $record->update([
                 'vehicle_uuid' => $data['vehicle_uuid'] ?? $record->vehicle_uuid,
                 'document_type' => $data['document_type'] ?? $record->document_type,
@@ -299,13 +343,11 @@ class VehicleDocumentService extends BaseService
             try {
                 $record->load(['vehicle.thirdParty', 'company']);
 
-                // 1. Enviar correo instantáneo de la nueva fecha si aplica
-                app(EmailLogService::class)->processSingleDocument($record);
-
-                // 2. Limpiar alertas previas ("VENCIDO" / "POR VENCER") en la campanita web
+                // 1. Limpiar alertas previas ("VENCIDO" / "POR VENCER") en la campanita web
                 app(NotificationsService::class)->deleteByEntity($record->uuid, 'VEHICLE_DOCUMENT');
 
-                // 3. Sincronizar notificaciones de la empresa de forma inmediata
+                // 2. Sincronizar notificaciones de la empresa de forma inmediata.
+                // El aviso por correo lo cubre el digest consolidado (EmailLogService).
                 app(NotificationsService::class)->syncNotifications($record->company_uuid);
 
             } catch (\Exception $e) {
@@ -326,6 +368,23 @@ class VehicleDocumentService extends BaseService
         } catch (\Exception $e) {
             Logger::error('VehicleDocumentService@deleteVehicleDocument: '.$e->getMessage());
             throw $e;
+        }
+    }
+
+    /**
+     * Un vehículo particular no tiene pólizas RCC/RCE (solo SOAT y RTM). Defensa en el servicio
+     * por si se invoca fuera de un FormRequest.
+     *
+     * @throws GeneralException
+     */
+    private function asegurarQueElVehiculoAdmite(?string $vehicleUuid, ?string $tipo): void
+    {
+        $vehiculo = $vehicleUuid ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first() : null;
+
+        if ($vehiculo && ! $vehiculo->admiteTipoDocumento($tipo)) {
+            throw GeneralException::unprocessable(
+                'Un vehículo particular no tiene pólizas RCC/RCE: solo registra SOAT y tecnomecánica.'
+            );
         }
     }
 }

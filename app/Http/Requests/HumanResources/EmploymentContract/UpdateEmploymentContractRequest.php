@@ -31,6 +31,7 @@ class UpdateEmploymentContractRequest extends FormRequest
     {
         return [
             'contract_type' => ['sometimes', 'required', 'string', 'in:TERMINO_FIJO,TERMINO_INDEFINIDO,OBRA_LABOR,PRESTACION_SERVICIOS,APRENDIZAJE'],
+            'position' => ['nullable', 'string', 'max:150'],
             'start_date' => ['sometimes', 'required', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'base_salary' => ['sometimes', 'required', 'numeric', 'min:0'],
@@ -59,6 +60,7 @@ class UpdateEmploymentContractRequest extends FormRequest
     {
         return [
             'contract_type' => 'Tipo de contrato',
+            'position' => 'Cargo',
             'start_date' => 'Fecha de inicio',
             'end_date' => 'Fecha de finalización',
             'base_salary' => 'Salario base',

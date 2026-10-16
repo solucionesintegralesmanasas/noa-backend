@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Services\Auth;
 
+use App\Models\ThirdParty;
+use App\Exceptions\GeneralException;
 use App\Models\User;
+use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 
 /**
  * Servicio para la gestión de usuarios.
@@ -26,6 +30,8 @@ use Illuminate\Support\Collection;
  */
 class UserService extends BaseService
 {
+    use ProtegeRolesPrivilegiados;
+
     /**
      * Campos sobre los cuales se aplica la búsqueda libre.
      *
@@ -109,7 +115,7 @@ class UserService extends BaseService
             'name' => $data['name'],
             'email' => $data['email'],
             'email_verified_at' => now(),
-            'user_name' => $data['user_name'] ?? null,
+            'user_name' => $this->resolveUserName($data),
             'password' => $data['password'],
             'verification_code' => $data['verification_code'] ?? null,
             'verification_code_expires_at' => $data['verification_code_expires_at'] ?? null,
@@ -125,6 +131,28 @@ class UserService extends BaseService
     }
 
     /**
+     * Resuelve el user_name del usuario a partir del número de documento del
+     * tercero vinculado (third_party_uuid). Si no hay tercero, se usa el
+     * user_name enviado explícitamente o null.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function resolveUserName(array $data): ?string
+    {
+        if (! empty($data['third_party_uuid'])) {
+            $documentNumber = ThirdParty::query()
+                ->where('uuid', $data['third_party_uuid'])
+                ->value('document_number');
+
+            if ($documentNumber) {
+                return $documentNumber;
+            }
+        }
+
+        return $data['user_name'] ?? null;
+    }
+
+    /**
      * Método updateUser.
      * Si se envía `roles` sincroniza los roles RBAC (permite quitar).
      */
@@ -132,6 +160,7 @@ class UserService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid, ['*'], ['roles']);
+            $this->asegurarPuedeGestionar($record, (array) ($data['roles'] ?? []));
 
             $payload = [
                 'name' => $data['name'] ?? $record->name,
@@ -160,6 +189,9 @@ class UserService extends BaseService
             // Sincronización de roles RBAC - permite quitar roles enviando array sin ese rol
             if (array_key_exists('roles', $data)) {
                 $rolesToSync = array_values(array_filter((array) $data['roles']));
+                foreach (array_diff($rolesToSync, $record->getRoleNames()->all()) as $nuevo) {
+                    $this->asegurarRolAsignable((string) $nuevo);
+                }
                 $record->syncRoles($rolesToSync);
             }
 
@@ -177,6 +209,8 @@ class UserService extends BaseService
      */
     public function deleteUser(string $uuid): void
     {
+        $this->asegurarPuedeGestionar($this->findByUuid($uuid, ['*'], ['roles']));
+
         if (! $this->delete($uuid)) {
             throw new \RuntimeException(
                 "No se pudo eliminar el usuario con UUID: {$uuid}"
@@ -189,6 +223,30 @@ class UserService extends BaseService
      */
     public function toggleUserStatus(string $uuid): bool
     {
+        $this->asegurarPuedeGestionar($this->findByUuid($uuid, ['*'], ['roles']));
+
         return $this->toggleStatus($uuid, 'status');
+    }
+
+    /**
+     * Solo un SUPERADMIN puede modificar, desactivar o eliminar a otro SUPERADMIN, y solo
+     * un SUPERADMIN puede conceder ese rol. Evita que un ADMIN_EMPRESA se eleve a sí mismo
+     * (o a un tercero) a SUPERADMIN a través de la edición de usuarios.
+     *
+     * @param  array<int, string>  $rolesSolicitados
+     *
+     * @throws GeneralException
+     */
+    private function asegurarPuedeGestionar(User $objetivo, array $rolesSolicitados = []): void
+    {
+        $actor = Auth::user();
+
+        if ($actor && $actor->hasRole('SUPERADMIN')) {
+            return;
+        }
+
+        if ($objetivo->hasRole('SUPERADMIN') || in_array('SUPERADMIN', $rolesSolicitados, true)) {
+            throw GeneralException::forbidden('Solo un SUPERADMIN puede gestionar usuarios SUPERADMIN.');
+        }
     }
 }

@@ -64,7 +64,8 @@ class VehicleInspectionService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $thirdPartyUuid = null,
-        ?string $vehicleUuid = null
+        ?string $vehicleUuid = null,
+        ?string $driverUuid = null
     ): LengthAwarePaginator {
         // Optimizamos la consulta para la tabla de Vue:
         // No cargamos los 'inspectionResults' y seleccionamos solo las columnas requeridas
@@ -80,10 +81,41 @@ class VehicleInspectionService extends BaseService
             $this->applyCompanyFilter($query, $companyUuid);
         }
 
-        if ($thirdPartyUuid) {
+        // Filtro por propietario del vehículo (afiliado/dueño).
+        // Se omite si ya se filtra por conductor (driver_uuid) para evitar un AND que retorna 0 resultados,
+        // ya que el conductor no es necesariamente el propietario registrado del vehículo.
+        if ($thirdPartyUuid && ! $driverUuid) {
             $query->whereHas('vehicle', function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid);
             });
+        }
+
+        // Filtro por conductor: muestra inspecciones donde él es el conductor registrado
+        // O inspecciones de vehículos asignados a él en proyectos.
+        // Si no tiene ninguna asignación ni inspección propia, devuelve todas las de la empresa
+        // para que el conductor pueda operar sin bloqueo.
+        if ($driverUuid) {
+            // Verificar si el conductor tiene asignaciones en proyectos
+            $hasAssignments = \App\Models\ProjectDriverVehicle::withoutGlobalScopes()
+                ->where('third_party_uuid', $driverUuid)
+                ->exists();
+
+            if ($hasAssignments) {
+                // Filtrar por sus asignaciones
+                $query->where(function ($q) use ($driverUuid) {
+                    $q->where('driver_uuid', $driverUuid)
+                        ->orWhereHas('vehicle', function ($qv) use ($driverUuid) {
+                            $qv->whereHas('driverVehicleAssignments', function ($qp) use ($driverUuid) {
+                                $qp->where('third_party_uuid', $driverUuid);
+                            });
+                        });
+                });
+            } else {
+                // Sin asignaciones: mostrar sus propias inspecciones únicamente (driver_uuid coincide)
+                // Esto también cubre el caso donde el conductor nunca ha creado inspecciones
+                // y devuelve resultados cuando guarda con su driver_uuid
+                $query->where('driver_uuid', $driverUuid);
+            }
         }
 
         if ($vehicleUuid) {
@@ -185,10 +217,49 @@ class VehicleInspectionService extends BaseService
 
     /**
      * Método createVehicleInspection.
+     *
+     * Regla de negocio: una sola inspección al día por vehículo. Si ya existe
+     * una inspección para el mismo vehículo en la misma fecha, se retorna y
+     * actualiza el registro existente (idempotente) en lugar de duplicarlo.
      */
     public function createVehicleInspection(array $data): Model
     {
         return $this->transaction(function () use ($data) {
+            $existing = VehicleInspection::query()
+                ->where('vehicle_uuid', $data['vehicle_uuid'])
+                ->whereDate('inspection_date', $data['inspection_date'])
+                ->when(! empty($data['company_uuid']), function ($q) use ($data) {
+                    $q->where('company_uuid', $data['company_uuid']);
+                })
+                ->latest('id')
+                ->first();
+
+            if ($existing) {
+                $existing->update([
+                    'inspector_name' => $data['inspector_name'] ?? $existing->inspector_name,
+                    'mileage' => $data['mileage'] ?? $existing->mileage,
+                    'driver_uuid' => $data['driver_uuid'] ?? $existing->driver_uuid,
+                    'notes' => $data['notes'] ?? $existing->notes,
+                ]);
+
+                if (isset($data['results']) && is_array($data['results'])) {
+                    $existing->inspectionResults()->delete();
+                    foreach ($data['results'] as $result) {
+                        $this->resultService->createInspectionResult(array_merge($result, [
+                            'inspection_uuid' => $existing->uuid,
+                        ]));
+                    }
+                }
+
+                try {
+                    app(NotificationsService::class)->syncNotifications($existing->company_uuid);
+                } catch (\Exception $e) {
+                    Logger::warning('Error syncing notifications after vehicle inspection creation: '.$e->getMessage());
+                }
+
+                return $existing->load('inspectionResults');
+            }
+
             $inspection = VehicleInspection::create([
                 'company_uuid' => $data['company_uuid'],
                 'vehicle_uuid' => $data['vehicle_uuid'],
@@ -280,6 +351,26 @@ class VehicleInspectionService extends BaseService
             Logger::error('VehicleInspectionService@deleteVehicleInspection: '.$e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Verifica si existe una inspección para un vehículo en una fecha dada.
+     * Se usa para exigir una sola inspección al día antes de iniciar un servicio.
+     *
+     * @return Model|null Inspección encontrada o null.
+     */
+    public function existsInspectionForDate(string $vehicleUuid, string $date, ?string $companyUuid = null): ?Model
+    {
+        $query = VehicleInspection::query()
+            ->where('vehicle_uuid', $vehicleUuid)
+            ->whereDate('inspection_date', $date)
+            ->orderBy('created_at', 'desc');
+
+        if ($companyUuid) {
+            $query->where('company_uuid', $companyUuid);
+        }
+
+        return $query->first(['id', 'uuid', 'company_uuid', 'vehicle_uuid', 'driver_uuid', 'inspection_date', 'inspector_name', 'mileage']);
     }
 
     /**

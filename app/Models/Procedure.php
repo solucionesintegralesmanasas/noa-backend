@@ -39,6 +39,16 @@ class Procedure extends Model
      */
     protected $fillable = [
         'uuid',
+        'parent_procedure_uuid',
+        'current_step',
+        'global_status',
+        'simit_clear',
+        'soat_valid',
+        'rtm_valid',
+        'old_card_number',
+        'radicado_number',
+        'payment_status',
+        'resolution_number',
         'link_type',
         'company_uuid',
         'third_party_uuid',

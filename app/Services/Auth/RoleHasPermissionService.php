@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Auth;
 
 use App\Models\RoleHasPermission;
+use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -26,6 +27,8 @@ use Illuminate\Support\Collection;
  */
 class RoleHasPermissionService extends BaseService
 {
+    use ProtegeRolesPrivilegiados;
+
     protected array $searchableFields = [];
 
     protected function getModelInstance(): Model
@@ -68,6 +71,9 @@ class RoleHasPermissionService extends BaseService
      */
     public function createRoleHasPermission(array $data): Model
     {
+        $this->asegurarRolNoPrivilegiado((int) $data['role_id']);
+        $this->asegurarPermisosPropios([(int) $data['permission_id']]);
+
         return $this->transaction(fn () => RoleHasPermission::create([
             'permission_id' => $data['permission_id'],
             'role_id' => $data['role_id'],
@@ -79,6 +85,8 @@ class RoleHasPermissionService extends BaseService
      */
     public function deleteByCompositeKey(int $permissionId, int $roleId): void
     {
+        $this->asegurarRolNoPrivilegiado($roleId);
+
         $this->transaction(function () use ($permissionId, $roleId) {
             $record = $this->getByCompositeKey($permissionId, $roleId);
             if ($record) {

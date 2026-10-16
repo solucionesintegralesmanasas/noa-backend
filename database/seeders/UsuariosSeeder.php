@@ -14,17 +14,15 @@ class UsuariosSeeder extends Seeder
     public function run(): void
     {
         $superAdmin = User::firstOrCreate(
-            ['email' => 'mdarwin1992@gmail.com'],
+            ['email' => 'mdarwin1992@hotmail.com'],
             [
                 'name' => 'Darwin Montes Lopez',
                 'user_name' => 'mdarwin1992',
+                'email_verified_at' => now(),
                 'password' => bcrypt('123456789'),
                 'uuid' => Str::uuid()->toString(),
             ]
         );
-
-        $superAdmin->email_verified_at = now();
-        $superAdmin->save();
 
         $superAdmin->assignRole('SUPERADMIN');
     }

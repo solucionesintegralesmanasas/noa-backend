@@ -13,7 +13,6 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de Tercero.
@@ -112,23 +111,45 @@ class ThirdPartyService extends BaseService
             'company_uuid',
         ], 'page', $page);
 
+        $today = now()->toDateString();
+
         // Optimización de payload in-place
-        $paginator->getCollection()->transform(fn ($tp) => [
-            'uuid' => $tp->uuid,
-            'document_number' => $tp->document_number,
-            'full_name' => $tp->company_name ?: "{$tp->first_name} {$tp->last_name}",
-            'email' => $tp->email,
-            'phone' => $tp->phone,
-            'is_active' => (bool) $tp->is_active,
-            'is_driver' => (bool) $tp->is_driver,
-            'is_employee' => (bool) $tp->is_employee,
-            'is_affiliate' => (bool) $tp->is_affiliate,
-            'is_customer' => (bool) $tp->is_customer,
-            'is_supplier' => (bool) $tp->is_supplier,
-            'is_others' => (bool) $tp->is_others,
-            'company_uuid' => $tp->company_uuid,
-            'has_valid_license' => $tp->driverLicenses->where('expiration_date', '>', now()->toDateString())->isNotEmpty(),
-        ]);
+        $paginator->getCollection()->transform(function ($tp) use ($today) {
+            $licenses = $tp->driverLicenses
+                ->map(fn ($l) => [
+                    'uuid' => $l->uuid,
+                    'status' => $l->status,
+                    'expiration_date' => $l->expiration_date?->toDateString(),
+                ])
+                ->values()
+                ->all();
+
+            // Licencia vigente: estado ACTIVA (insensible a mayúsculas/espacios)
+            // y fecha de expiración hoy o futura, con granularidad de día.
+            $hasValidLicense = collect($licenses)->contains(
+                fn ($l) => strtoupper(trim((string) $l['status'])) === 'ACTIVA'
+                    && $l['expiration_date'] !== null
+                    && $l['expiration_date'] >= $today
+            );
+
+            return [
+                'uuid' => $tp->uuid,
+                'document_number' => $tp->document_number,
+                'full_name' => $tp->company_name ?: "{$tp->first_name} {$tp->last_name}",
+                'email' => $tp->email,
+                'phone' => $tp->phone,
+                'is_active' => (bool) $tp->is_active,
+                'is_driver' => (bool) $tp->is_driver,
+                'is_employee' => (bool) $tp->is_employee,
+                'is_affiliate' => (bool) $tp->is_affiliate,
+                'is_customer' => (bool) $tp->is_customer,
+                'is_supplier' => (bool) $tp->is_supplier,
+                'is_others' => (bool) $tp->is_others,
+                'company_uuid' => $tp->company_uuid,
+                'driver_licenses' => $licenses,
+                'has_valid_license' => $hasValidLicense,
+            ];
+        });
 
         return $paginator;
     }
@@ -159,12 +180,23 @@ class ThirdPartyService extends BaseService
             'company_uuid',
         ];
 
-        if ($type && in_array($type, ['is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others'])) {
-            $query->where($type, true);
-            $columns[] = $type; // Agrega dinámicamente solo la columna que se solicitó (la que será true)
+        $allowedTypes = ['is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others'];
+        $types = array_values(array_intersect(
+            array_map('trim', explode(',', (string) $type)),
+            $allowedTypes
+        ));
+
+        if (!empty($types)) {
+            // Un solo query con OR: un tercero con varios roles aparece una única vez.
+            $query->where(function ($q) use ($types) {
+                foreach ($types as $t) {
+                    $q->orWhere($t, true);
+                }
+            });
+            array_push($columns, ...$types);
         } else {
             // Si no se filtra por tipo, traemos todas para saber qué roles tiene
-            array_push($columns, 'is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others');
+            array_push($columns, ...$allowedTypes);
         }
 
         return $query->get($columns);
@@ -207,6 +239,8 @@ class ThirdPartyService extends BaseService
     public function createThirdParty(array $data): Model
     {
         return $this->transaction(function () use ($data) {
+            $this->asegurarCorreoLibreDeOtroTercero((string) $data['email'], (string) $data['company_uuid']);
+
             $thirdParty = ThirdParty::create([
                 'company_uuid' => $data['company_uuid'],
                 'person_type' => $data['person_type'],
@@ -273,6 +307,57 @@ class ThirdPartyService extends BaseService
     private const MANAGED_ACCESS_ROLES = ['EMPLEADO', 'AFILIADO', 'CONDUCTOR'];
 
     /**
+     * Rechaza (422) guardar un tercero con el correo del usuario de OTRO tercero de la empresa: el usuario es único
+     * por correo y guardarlo lo re-enlazaría y le cambiaría el rol (pasó con TURISVAL y su conductor).
+     *
+     * @throws \Illuminate\Validation\ValidationException
+     */
+    private function asegurarCorreoLibreDeOtroTercero(string $email, string $companyUuid, ?string $excluirUuid = null): void
+    {
+        $otro = $email !== '' ? $this->correoEnUsoPorOtroTercero($email, $companyUuid, $excluirUuid) : null;
+        if ($otro) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'email' => "Este correo ya es el usuario de «{$otro['nombre']}» (".(implode(', ', $otro['roles']) ?: 'sin rol').'). Use otro correo para este tercero.',
+            ]);
+        }
+    }
+
+    /**
+     * ¿El correo ya es el usuario de OTRO tercero de la empresa? El usuario es único por correo: guardar un
+     * tercero con ese correo re-enlaza al usuario (y le cambia el rol), como pasó con TURISVAL y su conductor.
+     * Alimenta el aviso previo del formulario (`email-check`) y el bloqueo al guardar. Devuelve null si el correo
+     * es libre o ya pertenece a `$excluirUuid`.
+     *
+     * @return array{nombre: string, roles: array<int, string>}|null
+     */
+    public function correoEnUsoPorOtroTercero(string $email, string $companyUuid, ?string $excluirUuid = null): ?array
+    {
+        $usuario = User::where('email', $email)->first();
+        if (! $usuario) {
+            return null;
+        }
+
+        $enlazado = $usuario->companies()
+            ->where('company_user.company_uuid', $companyUuid)
+            ->whereNotNull('company_user.third_party_uuid')
+            ->first()?->pivot?->third_party_uuid;
+
+        if (! $enlazado || $enlazado === $excluirUuid) {
+            return null;
+        }
+
+        $tercero = ThirdParty::query()->where('uuid', $enlazado)->first();
+        if (! $tercero) {
+            return null;
+        }
+
+        return [
+            'nombre' => $tercero->company_name ?: trim($tercero->first_name.' '.$tercero->last_name),
+            'roles' => $usuario->getRoleNames()->all(),
+        ];
+    }
+
+    /**
      * Crea (o recupera) el usuario vinculado al tercero y le asigna los roles
      * de acceso correspondientes según los flags is_employee, is_affiliate,
      * is_driver y/o los roles RBAC solicitados de forma explícita.
@@ -323,10 +408,14 @@ class ThirdPartyService extends BaseService
         $flagEmp = $data['is_employee'] ?? $thirdParty->is_employee ?? false;
         $isEmployee = $flagEmp === true || $flagEmp === 1 || $flagEmp === '1' || $flagEmp === 'true';
 
-        // Si existe usuario vinculado por pivote, actualizar su email si cambió
+        // Si existe usuario vinculado por pivote, actualizar su email y user_name si cambiaron
         if ($linkedUser) {
+            $documentNumber = $data['document_number'] ?? $thirdParty->document_number;
             if ($email && $linkedUser->email !== $email) {
                 $linkedUser->update(['email' => $email]);
+            }
+            if ($documentNumber && $linkedUser->user_name !== $documentNumber) {
+                $linkedUser->update(['user_name' => $documentNumber]);
             }
             $linkedUser->companies()->syncWithoutDetaching([
                 $thirdParty->company_uuid => [
@@ -345,19 +434,18 @@ class ThirdPartyService extends BaseService
 
         $firstName = $data['first_name'] ?? $thirdParty->first_name ?? $data['trade_name'] ?? $thirdParty->trade_name ?? $data['company_name'] ?? $thirdParty->company_name ?? 'Usuario';
         $lastName = $data['last_name'] ?? $thirdParty->last_name ?? '';
-        $fullName = trim($firstName.' '.$lastName);
-        $userName = Str::slug($email);
+        $fullName = mb_strtoupper(trim($firstName.' '.$lastName), 'UTF-8');
 
-        // Contraseña temporal = número de documento (el usuario debe cambiarla)
-        $tempPassword = $data['document_number'] ?? $thirdParty->document_number;
+        // user_name y contraseña temporal = número de documento (el usuario debe cambiarla)
+        $documentNumber = $data['document_number'] ?? $thirdParty->document_number;
 
         /** @var User $user */
         $user = User::firstOrCreate(
             ['email' => $email],
             [
                 'name' => $fullName,
-                'user_name' => $userName,
-                'password' => Hash::make($tempPassword),
+                'user_name' => $documentNumber,
+                'password' => Hash::make($documentNumber),
                 'email_verified_at' => now(),
                 'status' => 1,
             ]
@@ -442,6 +530,8 @@ class ThirdPartyService extends BaseService
             if (! $record) {
                 throw new \RuntimeException('ThirdParty not found.');
             }
+
+            $this->asegurarCorreoLibreDeOtroTercero((string) ($data['email'] ?? $record->email), (string) $record->company_uuid, $record->uuid);
 
             $record->update([
                 'person_type' => $data['person_type'] ?? $record->person_type,
@@ -542,6 +632,9 @@ class ThirdPartyService extends BaseService
                     $q->orderBy('created_at', 'desc');
                 },
                 'socialSecurityContributions',
+                'employmentContracts' => function ($q) {
+                    $q->orderByDesc('start_date');
+                },
             ]);
 
         $record = $query->where('uuid', $thirdPartyUuid)->firstOrFail();

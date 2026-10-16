@@ -41,9 +41,10 @@ class SetCompanyContext
 
             if (Auth::check()) {
                 $user = Auth::user();
-                $companyUser = $user->companies()->where('company_user.company_uuid', $company->uuid)->first()
-                    ?? $user->companies()->where('companies.uuid', $company->uuid)->first()
-                    ?? $user->companies()->first();
+                // Pertenencia estricta a la empresa pedida. No hay respaldo a "la primera empresa
+                // del usuario": con ese respaldo cualquier usuario autenticado podía operar sobre
+                // una empresa ajena enviando su UUID en X-Company-UUID. SUPERADMIN opera en cualquiera.
+                $companyUser = $user->companies()->where('companies.uuid', $company->uuid)->first();
 
                 if (! $companyUser && ! $user->hasRole('SUPERADMIN')) {
                     throw new AccessDeniedHttpException('Access denied to this company');
@@ -71,7 +72,12 @@ class SetCompanyContext
 
             $request->attributes->set('current_company_uuid', $company->uuid);
             $request->attributes->set('current_company', $company);
-            session(['current_company_uuid' => $company->uuid]);
+            // La sesión solo se escribe si cambió: con SESSION_DRIVER=database cada
+            // escritura es un UPDATE a la misma fila y las peticiones API en paralelo
+            // (la vista dispara ~8 a la vez) se bloquean entre sí hasta el timeout.
+            if (session('current_company_uuid') !== $company->uuid) {
+                session(['current_company_uuid' => $company->uuid]);
+            }
         }
 
         return $next($request);

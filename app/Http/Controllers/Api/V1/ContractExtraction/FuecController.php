@@ -450,7 +450,7 @@ class FuecController extends Controller
 
             return response($pdf->output(), 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'inline; filename="'.$fileName.'"',
+                'Content-Disposition' => 'inline; filename="'.$fileName.'"; filename*=UTF-8\'\''.rawurlencode($fileName),
             ]);
         } catch (\Throwable $e) {
             return $this->handleException($e);

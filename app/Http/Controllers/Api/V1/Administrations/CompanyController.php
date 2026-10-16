@@ -277,7 +277,8 @@ class CompanyController extends Controller
     public function uploadLogo(Request $request, string $uuid): JsonResponse
     {
         $request->validate([
-            'logo' => ['required', 'file', 'mimes:jpg,jpeg,png,svg,webp', 'max:2048'],
+            // Se usa extensions en vez de mimes para no depender de ext-fileinfo en el servidor.
+            'logo' => ['required', 'file', 'extensions:jpg,jpeg,png,svg,webp', 'max:2048'],
         ]);
 
         try {
@@ -325,7 +326,8 @@ class CompanyController extends Controller
     public function uploadSignature(Request $request, string $uuid): JsonResponse
     {
         $request->validate([
-            'signature' => ['required', 'file', 'mimes:jpg,jpeg,png,svg,webp', 'max:2048'],
+            // Se usa extensions en vez de mimes para no depender de ext-fileinfo en el servidor.
+            'signature' => ['required', 'file', 'extensions:jpg,jpeg,png,svg,webp', 'max:2048'],
         ]);
 
         try {

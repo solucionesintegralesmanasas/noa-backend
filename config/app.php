@@ -56,6 +56,10 @@ return [
 
     'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
 
+    // Licencia híbrida: la clave HMAC firma los códigos de licencia y nunca va quemada en el código.
+    'license_hmac_secret' => env('LICENSE_HMAC_SECRET'),
+    'license_key' => env('APP_LICENSE_KEY', ''),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

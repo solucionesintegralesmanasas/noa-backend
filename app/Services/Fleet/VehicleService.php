@@ -47,6 +47,22 @@ class VehicleService extends BaseService
     }
 
     /**
+     * Normaliza un campo opcional: cadena vacía o solo espacios se guarda como NULL.
+     */
+    private function optionalText(array $data, string $key): ?string
+    {
+        if (! array_key_exists($key, $data)) {
+            return null;
+        }
+        $value = $data[$key];
+        if ($value === null) {
+            return null;
+        }
+        $value = trim((string) $value);
+        return $value === '' ? null : $value;
+    }
+
+    /**
      * Método getAllVehiclesWithPagination.
      */
     public function getAllVehiclesWithPagination(int $perPage = 15, int $page = 1, string $search = '', ?string $companyUuid = null, ?string $thirdPartyUuid = null): LengthAwarePaginator
@@ -76,7 +92,23 @@ class VehicleService extends BaseService
             $this->applyCompanyFilter($query, $companyUuid);
         }
 
-        if ($thirdPartyUuid) {
+        $user = Auth::user();
+        if ($user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR')) {
+            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
+                ?? $user->companies()->first()?->pivot?->third_party_uuid
+                ?? $user->third_party_uuid;
+
+            if ($driverThirdPartyUuid) {
+                $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
+                // Si el conductor tiene asignaciones, mostrar solo esas.
+                // Si no tiene ninguna, mostrar todos los vehículos activos de la empresa.
+                if (! empty($allowedUuids)) {
+                    $query->whereIn('uuid', $allowedUuids);
+                }
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -147,45 +179,26 @@ class VehicleService extends BaseService
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
-        } else {
-            // Seguridad: Si no hay companyUuid, asegurar el aislamiento estricto por tercero si es AFILIADO o CONDUCTOR
-            if ($user && ($user->hasRole('AFILIADO') || $user->hasRole('CONDUCTOR'))) {
-                $tUuid = request()->attributes->get('current_third_party_uuid');
-                if (! $tUuid) {
-                    $companyUser = $user->companies()->first();
-                    $tUuid = $companyUser?->pivot?->third_party_uuid;
-                }
-
-                $affiliateUuid = request()->attributes->get('current_affiliate_uuid');
-                if (! $affiliateUuid && $user->hasRole('CONDUCTOR') && $tUuid) {
-                    $affiliate = \App\Models\OwnerDriver::withoutGlobalScopes()->whereIn(
-                        'driver_license_uuid',
-                        \App\Models\DriverLicense::withoutGlobalScopes()
-                            ->where('third_party_uuid', $tUuid)
-                            ->whereIn('status', ['VIGENTE', 'ACTIVA'])
-                            ->pluck('uuid')
-                    )->first();
-                    if ($affiliate) {
-                        $affiliateUuid = $affiliate->third_party_uuid;
-                    }
-                }
-
-                $finalThirdPartyUuid = $affiliateUuid ?? $tUuid;
-
-                if ($finalThirdPartyUuid) {
-                    $query->where(function ($q) use ($finalThirdPartyUuid) {
-                        $q->where('third_party_uuid', $finalThirdPartyUuid)
-                            ->orWhereHas('owners', function ($ownerQuery) use ($finalThirdPartyUuid) {
-                                $ownerQuery->where('third_party_uuid', $finalThirdPartyUuid);
-                            });
-                    });
-                } else {
-                    $query->whereRaw('1 = 0');
-                }
-            }
         }
 
-        if ($thirdPartyUuid) {
+        if ($user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR')) {
+            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
+                ?? $user->companies()->first()?->pivot?->third_party_uuid
+                ?? $user->third_party_uuid;
+
+            if ($driverThirdPartyUuid) {
+                $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
+                // Si el conductor tiene asignaciones, mostrar solo esas.
+                // Si no tiene ninguna, mostrar todos los vehículos activos de la empresa
+                // para que pueda registrar inspecciones sin bloqueo.
+                if (! empty($allowedUuids)) {
+                    $query->whereIn('uuid', $allowedUuids);
+                }
+                // else: no se aplica filtro adicional -> devuelve todos los de la empresa
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -194,12 +207,46 @@ class VehicleService extends BaseService
             });
         }
 
-        \Illuminate\Support\Facades\Log::info('SQL Query:', [
-            'sql' => $query->toSql(),
-            'bindings' => $query->getBindings()
-        ]);
+        return $query->get(['uuid', 'company_uuid', 'vehicle_license_plate', 'vehicle_class_uuid', 'type_of_service']);
+    }
 
-        return $query->get(['uuid', 'company_uuid', 'vehicle_license_plate', 'vehicle_class_uuid']);
+    /**
+     * Obtiene los UUIDs de los vehículos asignados estrictamente a un conductor:
+     * 1. Vehículos donde esté vinculado directamente en Proyectos existentes
+     *    (project_driver_vehicles para este conductor, incluyendo historial ante cambio de vehículo).
+     * 2. Vehículos donde exista un extracto de contrato (FUEC) donde figure como conductor.
+     *
+     * @return array<int, string>
+     */
+    public function getVehicleUuidsForConductor(string $driverThirdPartyUuid): array
+    {
+        // 1. Vehículos vinculados directamente a este conductor en Proyectos existentes
+        // Incluye tanto la asignación activa como el historial ante cambios de vehículo del conductor
+        $projectVehicleUuids = \App\Models\ProjectDriverVehicle::withoutGlobalScopes()
+            ->where('third_party_uuid', $driverThirdPartyUuid)
+            ->whereHas('project')
+            ->pluck('vehicle_uuid')
+            ->filter()
+            ->unique()
+            ->toArray();
+
+        // 2. Vehículos donde el conductor figura en extractos de contrato (FUEC)
+        $fuecVehicleUuids = \App\Models\Fuec::withoutGlobalScopes()
+            ->where(function ($q) use ($driverThirdPartyUuid) {
+                $q->where('main_conductor_uuid', $driverThirdPartyUuid)
+                    ->orWhere('secondary_conductor_uuid', $driverThirdPartyUuid)
+                    ->orWhere('tertiary_conductor_uuid', $driverThirdPartyUuid);
+            })
+            ->whereNotNull('vehicle_uuid')
+            ->pluck('vehicle_uuid')
+            ->filter()
+            ->unique()
+            ->toArray();
+
+        return array_values(array_unique(array_filter(array_merge(
+            $projectVehicleUuids,
+            $fuecVehicleUuids
+        ))));
     }
 
     /**
@@ -210,6 +257,8 @@ class VehicleService extends BaseService
         $vehicle = $this->findByUuid($uuid);
         if ($vehicle) {
             $vehicle->load([
+                'brand:uuid,description',
+                'vehicleClass:uuid,description',
                 'owners',
                 'vehicleDocuments',
                 'operationCards',
@@ -258,10 +307,10 @@ class VehicleService extends BaseService
                 'line' => $data['line'],
                 'model' => $data['model'],
                 'color' => $data['color'],
-                'serial_number' => $data['serial_number'] ?? null,
+                'serial_number' => $this->optionalText($data, 'serial_number'),
                 'engine_number' => $data['engine_number'],
                 'chassis_number' => $data['chassis_number'],
-                'vin_number' => $data['vin_number'] ?? null,
+                'vin_number' => $this->optionalText($data, 'vin_number'),
                 'engine_displacement' => $data['engine_displacement'],
                 'body_type' => $data['body_type'],
                 'fuel_type' => $data['fuel_type'],
@@ -347,10 +396,10 @@ class VehicleService extends BaseService
                 'line' => $data['line'] ?? $record->line,
                 'model' => $data['model'] ?? $record->model,
                 'color' => $data['color'] ?? $record->color,
-                'serial_number' => array_key_exists('serial_number', $data) ? $data['serial_number'] : $record->serial_number,
+                'serial_number' => array_key_exists('serial_number', $data) ? $this->optionalText($data, 'serial_number') : $record->serial_number,
                 'engine_number' => $data['engine_number'] ?? $record->engine_number,
                 'chassis_number' => $data['chassis_number'] ?? $record->chassis_number,
-                'vin_number' => array_key_exists('vin_number', $data) ? $data['vin_number'] : $record->vin_number,
+                'vin_number' => array_key_exists('vin_number', $data) ? $this->optionalText($data, 'vin_number') : $record->vin_number,
                 'engine_displacement' => $data['engine_displacement'] ?? $record->engine_displacement,
                 'body_type' => $data['body_type'] ?? $record->body_type,
                 'fuel_type' => $data['fuel_type'] ?? $record->fuel_type,
@@ -522,7 +571,7 @@ class VehicleService extends BaseService
             'brand:uuid,description',
             'business_collaboration_agreements:uuid,vehicle_uuid,expiry_date,contracting_entity_name,agreement_internal_id',
             'vehicle_class:uuid,description',
-            'operation_cards:vehicle_uuid,uuid,affiliated_company,area_of_coverage,service_type,transport_mode,issue_date,expiration_date,operating_card_number',
+            'operation_cards:vehicle_uuid,uuid,company_uuid,affiliated_company,area_of_coverage,service_type,transport_mode,issue_date,expiration_date,operating_card_number,status',
             'vehicle_documents:vehicle_uuid,uuid,document_type,policy_number,issue_date,effective_date,expiry_date,issuing_entity,tariff_code,status',
             'affiliate_admin_charges:vehicle_uuid,next_payment_date,payment_date,status',
             'maintenances:uuid,vehicle_uuid,maintenance_type,next_maintenance_date,status',
@@ -597,12 +646,16 @@ class VehicleService extends BaseService
             ])->toArray() : [],
             'operation_cards' => $record->operation_cards ? $record->operation_cards->map(fn($oc) => [
                 'uuid' => $oc->uuid,
+                'company_uuid' => $oc->company_uuid,
+                'vehicle_uuid' => $oc->vehicle_uuid,
                 'affiliated_company' => $oc->affiliated_company,
                 'area_of_coverage' => $oc->area_of_coverage,
                 'service_type' => $oc->service_type,
                 'transport_mode' => $oc->transport_mode,
                 'operating_card_number' => $oc->operating_card_number,
+                'issue_date' => $oc->issue_date,
                 'expiration_date' => $oc->expiration_date,
+                'status' => $oc->status,
             ])->toArray() : [],
             'vehicle_documents' => $record->vehicle_documents ? $record->vehicle_documents->map(fn($vd) => [
                 'uuid' => $vd->uuid,

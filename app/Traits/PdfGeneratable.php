@@ -30,11 +30,13 @@ trait PdfGeneratable
         array $data,
         string $fileName = 'document.pdf',
         bool $download = false,
-        string $paperSize = 'A4',
+        string $paperSize = 'letter',
         string $orientation = 'portrait'
     ) {
         $pdf = Pdf::loadView($viewPath, $data);
         $pdf->setPaper($paperSize, $orientation);
+        $pdf->setOption(['dpi' => 120, 'isFontSubsettingEnabled' => true]);
+        $pdf->setWarnings((bool) config('app.debug', false));
 
         if ($download) {
             return $pdf->download($fileName);

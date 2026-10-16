@@ -34,8 +34,18 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
             'ending_kilometer' => ['sometimes', 'nullable', 'string', 'max:10'],
             'number_of_tolls' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'total_toll_value' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'type_of_control_sheet' => ['sometimes', 'nullable', 'in:DIRECTO_CON_LA_EMPRESA,SUBCONTRATADO'],
+            'type_of_control_sheet' => ['sometimes', 'nullable', 'in:DIRECTO_CON_LA_EMPRESA,SUBCONTRATADO,CON_VEHICULO_CONTRATADO,EXTERNO_PLATAFORMA'],
+            'day_kind' => ['sometimes', 'nullable', 'in:operacion,disponibilidad'],
+            'availability_reason' => ['sometimes', 'nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'nullable', 'boolean'],
+            'project_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:projects,uuid'],
+            'routes' => ['sometimes', 'nullable', 'array'],
+            'routes.*.uuid' => ['sometimes', 'nullable', 'string'],
+            'routes.*.order_index' => ['sometimes', 'nullable', 'integer'],
+            'routes.*.origin' => ['nullable', 'string', 'max:255'],
+            'routes.*.destination' => ['nullable', 'string', 'max:255'],
+            'routes.*.funcionario_nombre' => ['nullable', 'string', 'max:150'],
+            'routes.*.funcionario_cc' => ['nullable', 'string', 'max:30'],
         ];
     }
 
@@ -50,7 +60,7 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
             'service_date.required' => 'El campo fecha del servicio es obligatorio.',
             'service_date.date' => 'El campo fecha del servicio debe ser una fecha válida.',
             'start_date.date' => 'La fecha de inicio debe ser una fecha válida.',
-            'end_date.date' => 'La fecha de fin debe ser una fecha válida.',
+            'end_date.date' => 'El campo fecha de fin debe ser una fecha válida.',
             'end_date.after_or_equal' => 'La fecha de fin debe ser igual o posterior a la fecha de inicio.',
             'daily_route.string' => 'La ruta diaria debe ser una cadena de texto.',
             'daily_route.max' => 'La ruta diaria no debe exceder los 255 caracteres.',
@@ -65,8 +75,21 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
             'number_of_tolls.min' => 'El número de peajes no puede ser negativo.',
             'total_toll_value.numeric' => 'El valor total de peajes debe ser un número.',
             'total_toll_value.min' => 'El valor total de peajes no puede ser negativo.',
-            'type_of_control_sheet.in' => 'El tipo de control de hoja debe ser DIRECTO_CON_LA_EMPRESA o SUBCONTRATADO.',
+            'type_of_control_sheet.in' => 'El tipo de control de hoja debe ser DIRECTO_CON_LA_EMPRESA, SUBCONTRATADO, CON_VEHICULO_CONTRATADO o EXTERNO_PLATAFORMA.',
+            'day_kind.in' => 'La modalidad del día debe ser operacion o disponibilidad.',
+            'availability_reason.string' => 'El motivo de disponibilidad debe ser texto.',
+            'availability_reason.max' => 'El motivo de disponibilidad no debe exceder los 255 caracteres.',
             'is_active.boolean' => 'El estado activo debe ser verdadero o falso.',
+            'project_uuid.exists' => 'El proyecto seleccionado no existe.',
+            'routes.array' => 'Los recorridos deben ser un array.',
+            'routes.*.origin.string' => 'El origen debe ser una cadena de texto.',
+            'routes.*.origin.max' => 'El origen no debe exceder los 255 caracteres.',
+            'routes.*.destination.string' => 'El destino debe ser una cadena de texto.',
+            'routes.*.destination.max' => 'El destino no debe exceder los 255 caracteres.',
+            'routes.*.funcionario_nombre.string' => 'El nombre del funcionario debe ser una cadena de texto.',
+            'routes.*.funcionario_nombre.max' => 'El nombre del funcionario no debe exceder los 150 caracteres.',
+            'routes.*.funcionario_cc.string' => 'El CC del funcionario debe ser una cadena de texto.',
+            'routes.*.funcionario_cc.max' => 'El CC del funcionario no debe exceder los 30 caracteres.',
         ];
     }
 
@@ -87,7 +110,11 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
             'number_of_tolls' => 'número de peajes',
             'total_toll_value' => 'valor total peajes',
             'type_of_control_sheet' => 'tipo de control de hoja',
+            'day_kind' => 'modalidad del día',
+            'availability_reason' => 'motivo de disponibilidad',
             'is_active' => 'estado activo',
+            'project_uuid' => 'proyecto',
+            'routes' => 'recorridos',
         ];
     }
 

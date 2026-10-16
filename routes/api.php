@@ -23,6 +23,11 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
+use App\Http\Controllers\Api\V1\Billing\BillingProviderController;
+use App\Http\Controllers\Api\V1\Billing\BillingResolutionController;
+use App\Http\Controllers\Api\V1\Billing\CommercialInvoiceController;
+use App\Http\Controllers\Api\V1\Billing\CreditNoteController;
+use App\Http\Controllers\Api\V1\Billing\DebitNoteController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -40,7 +45,6 @@ use App\Http\Controllers\Api\V1\Catalogs\TributeController;
 use App\Http\Controllers\Api\V1\Catalogs\TypeOfDocumentController;
 use App\Http\Controllers\Api\V1\Catalogs\VehicleClassController;
 use App\Http\Controllers\Api\V1\Catalogs\WithholdingController;
-use App\Http\Controllers\Api\V1\Chat\ChatController;
 use App\Http\Controllers\Api\V1\ContractExtraction\ContractorController;
 use App\Http\Controllers\Api\V1\ContractExtraction\FuecController;
 use App\Http\Controllers\Api\V1\ContractExtraction\FuecPassengerController;
@@ -61,11 +65,16 @@ use App\Http\Controllers\Api\V1\Fleet\VehicleBranchController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleDocumentController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleInspectionController;
+use App\Http\Controllers\Api\V1\Fleet\DriverLocationController;
+use App\Http\Controllers\Api\V1\Fleet\GeofenceController;
+use App\Http\Controllers\Api\V1\Fleet\LocationHistoryController;
 use App\Http\Controllers\Api\V1\Integration\GoogleDriveController;
 use App\Http\Controllers\Api\V1\Notifications\NotificationsController;
 use App\Http\Controllers\Api\V1\Procedure\CapacityInventoryController;
 use App\Http\Controllers\Api\V1\Procedure\FleetServiceContractController;
 use App\Http\Controllers\Api\V1\Procedure\ProcedureController;
+use App\Http\Controllers\Api\V1\Procedure\RadicacionController;
+use App\Http\Controllers\Api\V1\Procedure\ServiceProvisionContractController;
 use App\Http\Controllers\Api\V1\Procedure\TerritorialDirectorController;
 use App\Http\Controllers\Api\V1\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetController;
 use App\Http\Controllers\Api\V1\Settings\SystemConfigurationController;
@@ -94,6 +103,21 @@ Route::prefix('v1')->group(function () {
             ->name('api.v1.public.vehicle-inspections.show');
         Route::post('/public/vehicle-inspections/{uuid}', [VehicleInspectionController::class, 'signPublic'])
             ->name('api.v1.public.vehicle-inspections.sign');
+        Route::get('/public/service-delivery-control-sheets/{uuid}', [ServiceDeliveryControlSheetController::class, 'showPublic'])
+            ->name('api.v1.public.service-delivery-control-sheets.show');
+        Route::post('/public/service-delivery-control-sheets/{uuid}', [ServiceDeliveryControlSheetController::class, 'signPublic'])
+            ->name('api.v1.public.service-delivery-control-sheets.sign');
+        Route::get('/public/contracts/sign/{token}', [RadicacionController::class, 'showPublic'])
+            ->name('api.v1.public.contracts.sign-show');
+        Route::post('/public/contracts/sign/{token}', [RadicacionController::class, 'signPublic'])
+            ->name('api.v1.public.contracts.sign');
+        Route::get('/public/contracts/sign/{token}/documento', [RadicacionController::class, 'documentoPublico'])
+            ->name('api.v1.public.contracts.documento');
+        // Ruta aparte para descargar: el middleware `signed` incluye todos los
+        // parámetros de la URL en el hash, así que "descargar" no puede ser un
+        // query param agregado por el cliente; tiene su propia ruta firmada.
+        Route::get('/public/contracts/sign/{token}/documento/descargar', [RadicacionController::class, 'documentoPublico'])
+            ->name('api.v1.public.contracts.documento-descarga');
     });
 
     // ─── RUTAS PÚBLICAS (Sin Autenticación) ───
@@ -106,19 +130,19 @@ Route::prefix('v1')->group(function () {
             $service->notifyExpiringDocuments();
 
             return response()->json(['success' => true, 'message' => 'Verificación y envío completados.']);
-        })->name('api.v1.public.cron.trigger');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.trigger');
 
         Route::get('/cron/sync-notifications', function (NotificationsService $service) {
             $service->syncNotifications();
 
             return response()->json(['success' => true, 'message' => 'Notificaciones sincronizadas correctamente.']);
-        })->name('api.v1.public.cron.sync');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.sync');
 
         Route::get('/cron/sync-social-security', function (SocialSecurityContributionService $service) {
             $result = $service->autoUpdateExpiredStatuses();
 
             return response()->json(['success' => true, 'message' => $result['message'], 'data' => $result]);
-        })->name('api.v1.public.cron.sync-social-security');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.sync-social-security');
 
         Route::get('/cron/run-all', function (
             EmailLogService $emailService,
@@ -130,11 +154,15 @@ Route::prefix('v1')->group(function () {
             $socialSecurityService->autoUpdateExpiredStatuses();
 
             return response()->json(['success' => true, 'message' => 'Todos los procesos automáticos se ejecutaron correctamente.']);
-        })->name('api.v1.public.cron.run-all');
+        })->middleware(['cron.token', 'throttle:12,1'])->name('api.v1.public.cron.run-all');
     });
 
+    // ─── SSE NOTIFICACIONES (fuera de auth:sanctum: EventSource no envía
+    // headers Authorization, el controlador acepta Bearer o ?token=) ───
+    Route::get('/notifications/stream', [NotificationsController::class, 'stream'])->name('api.v1.notifications.stream');
+
     // ─── RUTAS PROTEGIDAS POR AUTENTICACIÓN (Sanctum) ───
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'authz'])->group(function () {
 
         // Perfil y Sesión
         Route::get('/me', [AuthController::class, 'me'])->name('api.v1.auth.me');
@@ -163,63 +191,67 @@ Route::prefix('v1')->group(function () {
                 return response()->json(['ping' => 'pong']);
             })->name('api.v1.dashboard.ping');
             Route::get('/summary', [DashboardController::class, 'summary'])->name('api.v1.dashboard.summary');
+            Route::get('/conductor-summary', [DashboardController::class, 'conductorSummary'])->name('api.v1.dashboard.conductor-summary');
             Route::get('/recent-activity', [DashboardController::class, 'recentActivity'])->name('api.v1.dashboard.recent-activity');
             Route::get('/alerts', [DashboardController::class, 'alerts'])->name('api.v1.dashboard.alerts');
         });
 
         // ─── MÓDULO AUTH: USUARIOS ───
+        // Administración de identidades: las lecturas siguen abiertas a usuarios autenticados (el frontend
+        // las usa para poblar formularios); las ESCRITURAS exigen rol (roles y asignaciones: SUPERADMIN o ADMIN_EMPRESA con salvaguardas en los servicios; definición de permisos: SUPERADMIN). Sin esto cualquier usuario
+        // autenticado podía crear roles, concederse permisos o asignarse SUPERADMIN.
         Route::prefix('auth')->group(function () {
 
             // Usuarios
             Route::prefix('users')->group(function () {
                 Route::get('/', [UserController::class, 'index'])->name('api.v1.auth.users.index');
                 Route::get('/list', [UserController::class, 'list'])->name('api.v1.auth.users.list');
-                Route::post('/', [UserController::class, 'store'])->name('api.v1.auth.users.store');
+                Route::post('/', [UserController::class, 'store'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.store');
                 Route::get('/{uuid}', [UserController::class, 'show'])->name('api.v1.auth.users.show');
-                Route::put('/{uuid}', [UserController::class, 'update'])->name('api.v1.auth.users.update');
-                Route::delete('/{uuid}', [UserController::class, 'destroy'])->name('api.v1.auth.users.destroy');
-                Route::patch('/{uuid}/toggle-status', [UserController::class, 'toggleStatus'])->name('api.v1.auth.users.toggle-status');
+                Route::put('/{uuid}', [UserController::class, 'update'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.update');
+                Route::delete('/{uuid}', [UserController::class, 'destroy'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.destroy');
+                Route::patch('/{uuid}/toggle-status', [UserController::class, 'toggleStatus'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.users.toggle-status');
             });
 
             // Roles
             Route::prefix('roles')->group(function () {
                 Route::get('/', [RoleController::class, 'index'])->name('api.v1.auth.roles.index');
                 Route::get('/list', [RoleController::class, 'list'])->name('api.v1.auth.roles.list');
-                Route::post('/', [RoleController::class, 'store'])->name('api.v1.auth.roles.store');
+                Route::post('/', [RoleController::class, 'store'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.roles.store');
                 Route::get('/{id}', [RoleController::class, 'show'])->name('api.v1.auth.roles.show');
-                Route::put('/{id}', [RoleController::class, 'update'])->name('api.v1.auth.roles.update');
-                Route::delete('/{id}', [RoleController::class, 'destroy'])->name('api.v1.auth.roles.destroy');
+                Route::put('/{id}', [RoleController::class, 'update'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.roles.update');
+                Route::delete('/{id}', [RoleController::class, 'destroy'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.roles.destroy');
             });
 
             // Permisos
             Route::prefix('permissions')->group(function () {
                 Route::get('/', [PermissionController::class, 'index'])->name('api.v1.auth.permissions.index');
                 Route::get('/list', [PermissionController::class, 'list'])->name('api.v1.auth.permissions.list');
-                Route::post('/', [PermissionController::class, 'store'])->name('api.v1.auth.permissions.store');
+                Route::post('/', [PermissionController::class, 'store'])->middleware('role:SUPERADMIN')->name('api.v1.auth.permissions.store');
                 Route::get('/{id}', [PermissionController::class, 'show'])->name('api.v1.auth.permissions.show');
-                Route::put('/{id}', [PermissionController::class, 'update'])->name('api.v1.auth.permissions.update');
-                Route::delete('/{id}', [PermissionController::class, 'destroy'])->name('api.v1.auth.permissions.destroy');
+                Route::put('/{id}', [PermissionController::class, 'update'])->middleware('role:SUPERADMIN')->name('api.v1.auth.permissions.update');
+                Route::delete('/{id}', [PermissionController::class, 'destroy'])->middleware('role:SUPERADMIN')->name('api.v1.auth.permissions.destroy');
             });
 
             // Asignación directa de permisos a modelos (model_has_permissions)
             Route::prefix('model-has-permissions')->group(function () {
                 Route::get('/', [ModelHasPermissionController::class, 'index'])->name('api.v1.auth.model-has-permissions.index');
-                Route::post('/', [ModelHasPermissionController::class, 'store'])->name('api.v1.auth.model-has-permissions.store');
-                Route::delete('/{permissionId}/{modelId}/{modelType}', [ModelHasPermissionController::class, 'destroy'])->name('api.v1.auth.model-has-permissions.destroy');
+                Route::post('/', [ModelHasPermissionController::class, 'store'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.model-has-permissions.store');
+                Route::delete('/{permissionId}/{modelId}/{modelType}', [ModelHasPermissionController::class, 'destroy'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.model-has-permissions.destroy');
             });
 
             // Asignación de roles a modelos (model_has_roles)
             Route::prefix('model-has-roles')->group(function () {
                 Route::get('/', [ModelHasRoleController::class, 'index'])->name('api.v1.auth.model-has-roles.index');
-                Route::post('/', [ModelHasRoleController::class, 'store'])->name('api.v1.auth.model-has-roles.store');
-                Route::delete('/{roleId}/{modelId}/{modelType}', [ModelHasRoleController::class, 'destroy'])->name('api.v1.auth.model-has-roles.destroy');
+                Route::post('/', [ModelHasRoleController::class, 'store'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.model-has-roles.store');
+                Route::delete('/{roleId}/{modelId}/{modelType}', [ModelHasRoleController::class, 'destroy'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.model-has-roles.destroy');
             });
 
             // Permisos asignados a roles (role_has_permissions)
             Route::prefix('role-has-permissions')->group(function () {
                 Route::get('/', [RoleHasPermissionController::class, 'index'])->name('api.v1.auth.role-has-permissions.index');
-                Route::post('/', [RoleHasPermissionController::class, 'store'])->name('api.v1.auth.role-has-permissions.store');
-                Route::delete('/{permissionId}/{roleId}', [RoleHasPermissionController::class, 'destroy'])->name('api.v1.auth.role-has-permissions.destroy');
+                Route::post('/', [RoleHasPermissionController::class, 'store'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.role-has-permissions.store');
+                Route::delete('/{permissionId}/{roleId}', [RoleHasPermissionController::class, 'destroy'])->middleware('role:SUPERADMIN|ADMIN_EMPRESA')->name('api.v1.auth.role-has-permissions.destroy');
             });
         });
 
@@ -537,6 +569,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [ThirdPartyController::class, 'index'])->name('api.v1.third-parties.index');
             Route::get('/list', [ThirdPartyController::class, 'list'])->name('api.v1.third-parties.list');
             Route::post('/', [ThirdPartyController::class, 'store'])->name('api.v1.third-parties.store');
+            Route::get('/email-check', [ThirdPartyController::class, 'emailCheck'])->name('api.v1.third-parties.email-check');
             Route::get('/{uuid}', [ThirdPartyController::class, 'show'])->name('api.v1.third-parties.show');
             Route::get('/{uuid}/technical-sheet', [ThirdPartyController::class, 'technicalSheet'])->name('api.v1.third-parties.technical-sheet');
             Route::get('/{uuid}/technical-sheet/pdf', [ThirdPartyController::class, 'technicalSheetPdf'])->name('api.v1.third-parties.technical-sheet.pdf');
@@ -562,6 +595,57 @@ Route::prefix('v1')->group(function () {
             Route::get('/{uuid}', [EmploymentContractController::class, 'show'])->name('api.v1.third-parties.employment-contracts.show');
             Route::put('/{uuid}', [EmploymentContractController::class, 'update'])->name('api.v1.third-parties.employment-contracts.update');
             Route::delete('/{uuid}', [EmploymentContractController::class, 'destroy'])->name('api.v1.third-parties.employment-contracts.destroy');
+            Route::get('/{uuid}/pdf', [EmploymentContractController::class, 'contractPdf'])->name('api.v1.third-parties.employment-contracts.pdf');
+        });
+
+        // ─── MÓDULO FACTURACIÓN (cotización fase 1, factura interna fase 2, sin FE) ───
+        Route::prefix('billing')->group(function () {
+            Route::prefix('billing-providers')->group(function () {
+                Route::get('/', [BillingProviderController::class, 'index'])->name('api.v1.billing.billing-providers.index');
+                Route::post('/', [BillingProviderController::class, 'store'])->name('api.v1.billing.billing-providers.store');
+                Route::get('/{uuid}', [BillingProviderController::class, 'show'])->name('api.v1.billing.billing-providers.show');
+                Route::put('/{uuid}', [BillingProviderController::class, 'update'])->name('api.v1.billing.billing-providers.update');
+                Route::delete('/{uuid}', [BillingProviderController::class, 'destroy'])->name('api.v1.billing.billing-providers.destroy');
+            });
+
+            Route::prefix('billing-resolutions')->group(function () {
+                Route::get('/', [BillingResolutionController::class, 'index'])->name('api.v1.billing.billing-resolutions.index');
+                Route::get('/list', [BillingResolutionController::class, 'list'])->name('api.v1.billing.billing-resolutions.list');
+                Route::post('/', [BillingResolutionController::class, 'store'])->name('api.v1.billing.billing-resolutions.store');
+                Route::get('/{uuid}', [BillingResolutionController::class, 'show'])->name('api.v1.billing.billing-resolutions.show');
+                Route::put('/{uuid}', [BillingResolutionController::class, 'update'])->name('api.v1.billing.billing-resolutions.update');
+                Route::delete('/{uuid}', [BillingResolutionController::class, 'destroy'])->name('api.v1.billing.billing-resolutions.destroy');
+            });
+
+            Route::prefix('commercial-invoices')->group(function () {
+                Route::get('/', [CommercialInvoiceController::class, 'index'])->name('api.v1.billing.commercial-invoices.index');
+                Route::post('/quotations', [CommercialInvoiceController::class, 'storeQuotation'])->name('api.v1.billing.commercial-invoices.store-quotation');
+                Route::post('/invoices', [CommercialInvoiceController::class, 'storeInvoice'])->name('api.v1.billing.commercial-invoices.store-invoice');
+                Route::get('/{uuid}', [CommercialInvoiceController::class, 'show'])->name('api.v1.billing.commercial-invoices.show');
+                Route::put('/{uuid}', [CommercialInvoiceController::class, 'update'])->name('api.v1.billing.commercial-invoices.update');
+                Route::patch('/{uuid}/estado', [CommercialInvoiceController::class, 'cambiarEstado'])->name('api.v1.billing.commercial-invoices.estado');
+                Route::post('/{uuid}/convertir', [CommercialInvoiceController::class, 'convertir'])->name('api.v1.billing.commercial-invoices.convertir');
+                Route::post('/{uuid}/pagos', [CommercialInvoiceController::class, 'pago'])->name('api.v1.billing.commercial-invoices.pago');
+                Route::post('/{uuid}/anular', [CommercialInvoiceController::class, 'anular'])->name('api.v1.billing.commercial-invoices.anular');
+                Route::get('/{uuid}/pdf', [CommercialInvoiceController::class, 'pdf'])->name('api.v1.billing.commercial-invoices.pdf');
+                Route::delete('/{uuid}', [CommercialInvoiceController::class, 'destroy'])->name('api.v1.billing.commercial-invoices.destroy');
+            });
+
+            Route::prefix('credit-notes')->group(function () {
+                Route::get('/', [CreditNoteController::class, 'index'])->name('api.v1.billing.credit-notes.index');
+                Route::post('/', [CreditNoteController::class, 'store'])->name('api.v1.billing.credit-notes.store');
+                Route::get('/{uuid}', [CreditNoteController::class, 'show'])->name('api.v1.billing.credit-notes.show');
+                Route::post('/{uuid}/emitir', [CreditNoteController::class, 'emitir'])->name('api.v1.billing.credit-notes.emitir');
+                Route::post('/{uuid}/anular', [CreditNoteController::class, 'anular'])->name('api.v1.billing.credit-notes.anular');
+            });
+
+            Route::prefix('debit-notes')->group(function () {
+                Route::get('/', [DebitNoteController::class, 'index'])->name('api.v1.billing.debit-notes.index');
+                Route::post('/', [DebitNoteController::class, 'store'])->name('api.v1.billing.debit-notes.store');
+                Route::get('/{uuid}', [DebitNoteController::class, 'show'])->name('api.v1.billing.debit-notes.show');
+                Route::post('/{uuid}/emitir', [DebitNoteController::class, 'emitir'])->name('api.v1.billing.debit-notes.emitir');
+                Route::post('/{uuid}/anular', [DebitNoteController::class, 'anular'])->name('api.v1.billing.debit-notes.anular');
+            });
         });
 
         // ─── RUTAS PARA EL MODULO DE FLOTA ───
@@ -639,6 +723,7 @@ Route::prefix('v1')->group(function () {
             Route::prefix('vehicle-inspections')->group(function () {
                 Route::get('/', [VehicleInspectionController::class, 'index'])->name('api.v1.fleet.vehicle-inspections.index');
                 Route::get('/list', [VehicleInspectionController::class, 'list'])->name('api.v1.fleet.vehicle-inspections.list');
+                Route::get('/check-today', [VehicleInspectionController::class, 'checkToday'])->name('api.v1.fleet.vehicle-inspections.check-today');
                 Route::post('/', [VehicleInspectionController::class, 'store'])->name('api.v1.fleet.vehicle-inspections.store');
                 Route::get('/{uuid}', [VehicleInspectionController::class, 'show'])->name('api.v1.fleet.vehicle-inspections.show');
                 Route::get('/{uuid}/pdf', [VehicleInspectionController::class, 'downloadPdf'])->name('api.v1.fleet.vehicle-inspections.pdf');
@@ -803,14 +888,24 @@ Route::prefix('v1')->group(function () {
             Route::prefix('service-delivery-control-sheets')->group(function () {
                 Route::get('/', [ServiceDeliveryControlSheetController::class, 'index'])->name('api.v1.fleet.service-delivery-control-sheets.index');
                 Route::get('/list', [ServiceDeliveryControlSheetController::class, 'list'])->name('api.v1.fleet.service-delivery-control-sheets.list');
-                Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
+                Route::get('/project-summary', [ServiceDeliveryControlSheetController::class, 'projectSummary'])->name('api.v1.fleet.service-delivery-control-sheets.project-summary');
+                Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
+                Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
+                Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
+                Route::get('/reports/{tipo}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadReportPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.pdf');
+                Route::get('/reports/{tipo}/excel', [ServiceDeliveryControlSheetController::class, 'downloadReportExcel'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.excel');
                 Route::post('/', [ServiceDeliveryControlSheetController::class, 'store'])->name('api.v1.fleet.service-delivery-control-sheets.store');
                 Route::get('/{uuid}', [ServiceDeliveryControlSheetController::class, 'show'])->name('api.v1.fleet.service-delivery-control-sheets.show');
-                Route::get('/{uuid}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadDailyPdf'])->name('api.v1.fleet.service-delivery-control-sheets.pdf');
+                Route::get('/{uuid}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadDailyPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.pdf');
                 Route::put('/{uuid}', [ServiceDeliveryControlSheetController::class, 'update'])->name('api.v1.fleet.service-delivery-control-sheets.update');
                 Route::delete('/{uuid}', [ServiceDeliveryControlSheetController::class, 'destroy'])->name('api.v1.fleet.service-delivery-control-sheets.destroy');
                 Route::post('/{uuid}/start', [ServiceDeliveryControlSheetController::class, 'start'])->name('api.v1.fleet.service-delivery-control-sheets.start');
                 Route::post('/{uuid}/close', [ServiceDeliveryControlSheetController::class, 'close'])->name('api.v1.fleet.service-delivery-control-sheets.close');
+                Route::post('/{uuid}/close-route', [ServiceDeliveryControlSheetController::class, 'closeRoute'])->name('api.v1.fleet.service-delivery-control-sheets.close-route');
+                // SPEC-002 §4: cerrar con excepción es una excepción a la regla, así
+                // que exige permiso propio (solo ADMIN_EMPRESA y SUPERADMIN).
+                Route::post('/{uuid}/close-exception', [ServiceDeliveryControlSheetController::class, 'closeException'])->middleware('permission:service_delivery_control_sheets.close_exception')->name('api.v1.fleet.service-delivery-control-sheets.close-exception');
+                Route::post('/{uuid}/generate-sign-url', [ServiceDeliveryControlSheetController::class, 'generateSignUrl'])->name('api.v1.fleet.service-delivery-control-sheets.generate-sign-url');
             });
         });
 
@@ -856,28 +951,35 @@ Route::prefix('v1')->group(function () {
                 Route::put('/{uuid}', [FleetServiceContractController::class, 'update'])->name('api.v1.procedure.fleet-service-contracts.update');
                 Route::delete('/{uuid}', [FleetServiceContractController::class, 'destroy'])->name('api.v1.procedure.fleet-service-contracts.destroy');
             });
+
+            // Contratos de Prestación de Servicios
+            Route::prefix('service-provision-contracts')->group(function () {
+                Route::get('/', [ServiceProvisionContractController::class, 'index'])->name('api.v1.procedure.service-provision-contracts.index');
+                Route::get('/list', [ServiceProvisionContractController::class, 'list'])->name('api.v1.procedure.service-provision-contracts.list');
+                Route::post('/', [ServiceProvisionContractController::class, 'store'])->name('api.v1.procedure.service-provision-contracts.store');
+                Route::get('/{uuid}', [ServiceProvisionContractController::class, 'show'])->name('api.v1.procedure.service-provision-contracts.show');
+                Route::put('/{uuid}', [ServiceProvisionContractController::class, 'update'])->name('api.v1.procedure.service-provision-contracts.update');
+                Route::delete('/{uuid}', [ServiceProvisionContractController::class, 'destroy'])->name('api.v1.procedure.service-provision-contracts.destroy');
+            });
+
+            // Radicación TO: ruta, validación, firma por enlace y TXT RUNT
+            Route::prefix('radicacion')->group(function () {
+                Route::get('/expedientes', [RadicacionController::class, 'expedientes'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.expedientes');
+                Route::post('/expediente', [RadicacionController::class, 'crearExpediente'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.expediente');
+                Route::get('/{uuid}/detalle', [RadicacionController::class, 'detalle'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.detalle');
+                Route::post('/{uuid}/avanzar', [RadicacionController::class, 'avanzar'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.avanzar');
+                Route::get('/{uuid}/ruta', [RadicacionController::class, 'ruta'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.ruta');
+                Route::get('/{uuid}/validar', [RadicacionController::class, 'validar'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.validar');
+                Route::post('/enlace-firma', [RadicacionController::class, 'enlaceFirma'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.enlace-firma');
+                Route::post('/{uuid}/txt', [RadicacionController::class, 'generarTxt'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.txt');
+                Route::get('/{uuid}/documento/{documento}', [RadicacionController::class, 'documento'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.documento');
+            });
         });
-
-        // ─── MÓDULO CHAT ASISTENTE (OCULTO TEMPORALMENTE) ───
-        // Route::prefix('chat')->group(function () {
-        //     Route::prefix('sessions')->group(function () {
-        //         Route::get('/', [ChatController::class, 'index'])->name('api.v1.chat.sessions.index');
-        //         Route::post('/', [ChatController::class, 'store'])->name('api.v1.chat.sessions.store');
-        //         Route::get('/{uuid}', [ChatController::class, 'show'])->name('api.v1.chat.sessions.show');
-        //         Route::post('/{uuid}/messages', [ChatController::class, 'send'])->name('api.v1.chat.sessions.send')
-        //             ->middleware('chat.limiter');
-        //         Route::delete('/{uuid}', [ChatController::class, 'destroy'])->name('api.v1.chat.sessions.destroy');
-        //     });
-        //
-        //     Route::post('/messages/{uuid}/feedback', [ChatController::class, 'rateFeedback'])->name('api.v1.chat.messages.feedback');
-        // });
-
-        // ─── MÓDULO NOTIFICACIONES ───
 
         // ─── MÓDULO NOTIFICACIONES ───
         Route::prefix('notifications')->group(function () {
             Route::get('/', [NotificationsController::class, 'index'])->name('api.v1.notifications.index');
-            Route::get('/stream', [NotificationsController::class, 'stream'])->name('api.v1.notifications.stream');
+            Route::get('/counts', [NotificationsController::class, 'counts'])->name('api.v1.notifications.counts');
             Route::post('/sync', [NotificationsController::class, 'sync'])->name('api.v1.notifications.sync');
             Route::post('/read-all', [NotificationsController::class, 'markAllAsRead'])->name('api.v1.notifications.read-all');
             Route::patch('/{uuid}/toggle-status', [NotificationsController::class, 'toggleStatus'])->name('api.v1.notifications.toggle-status');
@@ -891,6 +993,79 @@ Route::prefix('v1')->group(function () {
             Route::get('/latest', [SignatureController::class, 'latest'])->name('api.v1.signatures.latest');
             Route::put('/{uuid}', [SignatureController::class, 'replace'])->name('api.v1.signatures.replace');
             Route::delete('/{uuid}', [SignatureController::class, 'destroy'])->name('api.v1.signatures.destroy');
+        });
+
+        // ─── MÓDULO GEOLOCALIZACIÓN ───
+        Route::prefix('tracking')->group(function () {
+            // Conductor envía ubicación
+            Route::post('/location', [DriverLocationController::class, 'store'])
+                ->middleware('permission:locations.track')
+                ->name('api.v1.tracking.location.store');
+
+            // Conductor inicia/detiene sesión
+            Route::post('/session/start', [DriverLocationController::class, 'startSession'])
+                ->middleware('permission:locations.track')
+                ->name('api.v1.tracking.session.start');
+            Route::post('/session/stop', [DriverLocationController::class, 'stopSession'])
+                ->middleware('permission:locations.track')
+                ->name('api.v1.tracking.session.stop');
+
+            // Admin: ver conductores activos
+            Route::get('/active-drivers', [DriverLocationController::class, 'activeDrivers'])
+                ->middleware('permission:locations.view')
+                ->name('api.v1.tracking.active-drivers');
+
+            // Admin: última ubicación de un conductor
+            Route::get('/last-location/{uuid}', [DriverLocationController::class, 'lastLocation'])
+                ->middleware('permission:locations.view')
+                ->name('api.v1.tracking.last-location');
+
+            // Historial de rutas
+            Route::get('/driver/{uuid}/history', [LocationHistoryController::class, 'driverHistory'])
+                ->middleware('permission:locations.history')
+                ->name('api.v1.tracking.driver-history');
+            Route::get('/driver/{uuid}/stats', [LocationHistoryController::class, 'driverStats'])
+                ->middleware('permission:locations.history')
+                ->name('api.v1.tracking.driver-stats');
+
+            // CRUD Geocercas
+            Route::prefix('geofences')->group(function () {
+                Route::get('/', [GeofenceController::class, 'index'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.index');
+                Route::post('/', [GeofenceController::class, 'store'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.store');
+                Route::get('/{uuid}', [GeofenceController::class, 'show'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.show');
+                Route::put('/{uuid}', [GeofenceController::class, 'update'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.update');
+                Route::delete('/{uuid}', [GeofenceController::class, 'destroy'])
+                    ->middleware('permission:locations.geofences')
+                    ->name('api.v1.tracking.geofences.destroy');
+            });
+
+            // Alertas
+            Route::get('/alerts', [DriverLocationController::class, 'alerts'])
+                ->middleware('permission:locations.alerts')
+                ->name('api.v1.tracking.alerts');
+            Route::patch('/alerts/{uuid}/read', [DriverLocationController::class, 'markAlertRead'])
+                ->middleware('permission:locations.alerts')
+                ->name('api.v1.tracking.alerts.read');
+        });
+
+        // ─── MÓDULO REPORTES ───
+        Route::prefix('reports')->group(function () {
+            Route::prefix('vehicles')->group(function () {
+                Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'index'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.index');
+                Route::get('/catalogs/affiliated-companies', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'affiliatedCompanies'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.affiliated-companies');
+                Route::get('/catalogs/agreements', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'agreements'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.agreements');
+                Route::get('/catalogs/drivers', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'drivers'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.drivers');
+                Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'excel'])->middleware('permission:reports.vehicles.export-excel')->name('api.v1.reports.vehicles.excel');
+                Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'pdf'])->middleware('permission:reports.vehicles.export-pdf')->name('api.v1.reports.vehicles.pdf');
+            });
         });
 
         // ─── MÓDULO CONFIGURACIONES ───
@@ -911,6 +1086,107 @@ Route::prefix('v1')->group(function () {
         });
     });
 
+    // ─── RUTAS DE LICENCIA HÍBRIDA ───
+    // Estas rutas verifican la licencia antes de permitir acceso a la API.
+    // Funcionan tanto en modo online (verificación BD) como offline (datos locales).
+    Route::middleware(['throttle:60,1'])->group(function () {
+        Route::get('/license/verify/{key}', function (\Illuminate\Http\Request $request, $key) {
+            $service = new \App\Services\LicenseService();
+            $result = $service->verifyKey($key);
+
+            if ($result && $result['status'] === 'valid') {
+                // Registrar verificación online y actualizar contadores
+                $service->recordOnlineVerification($key, $result['company_uuid']);
+
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'status' => 'valid',
+                        'company_uuid' => $result['company_uuid'],
+                        'expires_at' => $result['expires_at'],
+                        'mode' => 'online_verified'
+                    ],
+                    'message' => 'Licencia verificada exitosamente'
+                ]);
+            }
+
+            // Si falla online, intentar verificación offline
+            if ($result && $result['status'] === 'expired') {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'expired',
+                    'message' => 'Licencia vencida. Contacte a su administrador.'
+                ], 403);
+            }
+
+            // Verificar modo offline usando BD
+            $offlineResult = $service->verifyOffline($key);
+            if ($offlineResult && $offlineResult['status'] === 'valid') {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'status' => 'valid',
+                        'company_uuid' => $offlineResult['company_uuid'],
+                        'expires_at' => $offlineResult['expires_at'],
+                        'mode' => 'offline',
+                        'offline_uses' => $offlineResult['offline_uses']
+                    ],
+                    'message' => 'Licencia verificada en modo offline'
+                ]);
+            }
+
+            return response()->json([
+                'success' => false,
+                'error' => 'invalid',
+                'message' => 'Código de licencia inválido o no encontrado'
+            ], 403);
+        })->withoutMiddleware('auth')->where('key', '.*'); // Licencia check va antes de auth
+    });
+
+    // ─── ADMIN DE LICENCIAS (mutan estado: solo SUPERADMIN autenticado) ───
+    Route::middleware(['auth:sanctum', 'role:SUPERADMIN', 'throttle:60,1'])->group(function () {
+        // Ruta para revocar licencia (desde panel admin)
+        Route::post('/license/revoke', function (\Illuminate\Http\Request $request) {
+            $key = trim((string) $request->input('license_key', ''));
+            if ($key === '') {
+                return response()->json(['success' => false, 'message' => 'La licencia es obligatoria.'], 422);
+            }
+            $service = new \App\Services\LicenseService();
+            if ($service->revokeKey($key)) {
+                return response()->json(['success' => true, 'message' => 'Licencia revocada']);
+            }
+            return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
+        })->name('api.v1.license.revoke');
+
+        // Ruta para renovar licencia (desde panel admin)
+        Route::post('/license/renew', function (\Illuminate\Http\Request $request) {
+            $key = trim((string) $request->input('license_key', ''));
+            $newExpiry = $request->input('new_expiry_date');
+            if ($key === '' || ! is_string($newExpiry) || strtotime($newExpiry) === false) {
+                return response()->json(['success' => false, 'message' => 'La licencia y la nueva fecha de vencimiento son obligatorias.'], 422);
+            }
+            $service = new \App\Services\LicenseService();
+            if ($service->renewKey($key, $newExpiry)) {
+                return response()->json(['success' => true, 'new_expiry' => $newExpiry]);
+            }
+            return response()->json(['success' => false, 'message' => 'No se puede renovar'], 400);
+        })->name('api.v1.license.renew');
+
+    });
+
+    // ─── FICHA DE LICENCIA (lectura autenticada: SUPERADMIN y ADMIN_EMPRESA) ───
+    // Revocar/renovar siguen solo SUPERADMIN (grupo anterior); el detalle lo usa
+    // la vista /licencia del ADMIN_EMPRESA, así que se permite a ambos roles.
+    Route::middleware(['auth:sanctum', 'role:SUPERADMIN|ADMIN_EMPRESA', 'throttle:60,1'])->group(function () {
+        Route::get('/license/detail/{key}', function ($key) {
+            $license = \App\Models\License::where('license_key', trim($key))->first();
+            if (! $license) {
+                return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
+            }
+            return response()->json(['success' => true, 'data' => $license]);
+        })->name('api.v1.license.detail')->where('key', '.*');
+    });
+
     Route::get('/health', function () {
         return response()->json([
             'status' => 'ok',
@@ -918,4 +1194,9 @@ Route::prefix('v1')->group(function () {
             'time' => now()->toDateTimeString(),
         ]);
     });
+});
+
+// Compatibilidad: el formulario antiguo llamaba a /api/license/verify/{key} sin el v1.
+Route::get('/license/verify/{key}', function ($key) {
+    return redirect("/api/v1/license/verify/{$key}", 307);
 });

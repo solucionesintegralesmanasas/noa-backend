@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Fleet;
 
+use App\Exceptions\GeneralException;
+use App\Models\CapacityMovement;
 use App\Models\OperationCard;
 use App\Models\Vehicle;
 use App\Services\BaseService;
@@ -49,7 +51,8 @@ class OperationCardService extends BaseService
         int $page = 1,
         string $search = '',
         ?string $companyUuid = null,
-        ?string $thirdPartyUuid = null
+        ?string $thirdPartyUuid = null,
+        ?string $vehicleUuid = null
     ): LengthAwarePaginator {
         $query = $this->query()->with('vehicle');
 
@@ -61,6 +64,10 @@ class OperationCardService extends BaseService
             $query->whereHas('vehicle', function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid);
             });
+        }
+
+        if ($vehicleUuid) {
+            $query->where('vehicle_uuid', $vehicleUuid);
         }
 
         if (! empty($search)) {
@@ -121,7 +128,12 @@ class OperationCardService extends BaseService
      */
     public function createOperationCard(array $data): Model
     {
+        $this->asegurarQueElVehiculoRequiereTarjeta($data['vehicle_uuid'] ?? null);
+
         return $this->transaction(function () use ($data) {
+            $tipo = $this->resolverTipoTarjeta($data);
+            $movimientoCupo = $this->verificarCupoParaTarjeta($tipo, $data['vehicle_uuid'] ?? null, $data['company_uuid'] ?? null);
+
             $internalNumber = $data['internal_number'] ?? null;
             $vehicle = Vehicle::where('uuid', $data['vehicle_uuid'])->first();
             if ($vehicle) {
@@ -155,8 +167,15 @@ class OperationCardService extends BaseService
                 'issue_date' => $data['issue_date'],
                 'expiration_date' => $data['expiration_date'],
                 'operating_card_number' => $data['operating_card_number'],
+                'operation_card_type' => $tipo,
+                'runt_status' => 'ACTIVA',
+                'procedure_uuid' => $data['procedure_uuid'] ?? null,
                 'status' => $data['status'] ?? 1,
             ]);
+
+            if ($movimientoCupo) {
+                app(CapacityMovementService::class)->vincularTarjeta($movimientoCupo, $card->uuid);
+            }
 
             try {
                 app(\App\Services\Notifications\NotificationsService::class)->syncNotifications($card->company_uuid);
@@ -177,6 +196,10 @@ class OperationCardService extends BaseService
             $record = $this->findByUuid($uuid);
 
             $vehicleUuid = $data['vehicle_uuid'] ?? $record->vehicle_uuid;
+            // Solo si cambia de vehículo: la tarjeta histórica de un vehículo ya particular se puede editar.
+            if ($vehicleUuid !== $record->vehicle_uuid) {
+                $this->asegurarQueElVehiculoRequiereTarjeta($vehicleUuid);
+            }
             $vehicle = Vehicle::where('uuid', $vehicleUuid)->first();
             $internalNumber = $data['internal_number'] ?? null;
             if ($vehicle) {
@@ -200,6 +223,14 @@ class OperationCardService extends BaseService
                 }
             }
 
+            $tipoNuevo = ! empty($data['operation_card_type']) ? strtoupper((string) $data['operation_card_type']) : null;
+            if ($tipoNuevo !== null && $tipoNuevo !== $record->operation_card_type
+                && OperationCard::tipoConsumeCupo($tipoNuevo)
+                && $record->runt_status === 'ACTIVA'
+                && ! $record->capacityMovements()->exists()) {
+                $this->verificarCupoParaTarjeta($tipoNuevo, $vehicleUuid, $record->company_uuid);
+            }
+
             $record->update([
                 'vehicle_uuid' => $data['vehicle_uuid'] ?? $record->vehicle_uuid,
                 'affiliated_company' => $data['affiliated_company'] ?? $record->affiliated_company,
@@ -209,6 +240,9 @@ class OperationCardService extends BaseService
                 'issue_date' => $data['issue_date'] ?? $record->issue_date,
                 'expiration_date' => $data['expiration_date'] ?? $record->expiration_date,
                 'operating_card_number' => $data['operating_card_number'] ?? $record->operating_card_number,
+                'operation_card_type' => $data['operation_card_type'] ?? $record->operation_card_type,
+                'runt_status' => $data['runt_status'] ?? $record->runt_status,
+                'procedure_uuid' => $data['procedure_uuid'] ?? $record->procedure_uuid,
                 'status' => $data['status'] ?? $record->status,
             ]);
 
@@ -254,5 +288,114 @@ class OperationCardService extends BaseService
 
             return $record->fresh();
         });
+    }
+
+    /**
+     * Cancela (inhabilita) las tarjetas vigentes de un vehículo cuando sale de la
+     * empresa: desvinculación (mutuo o unilateral) o cambio de empresa de salida.
+     * Es el efecto directo de liberar el cupo.
+     *
+     * @return int Número de tarjetas canceladas.
+     */
+    public function cancelarPorSalida(?string $vehicleUuid, ?string $companyUuid = null, ?string $motivo = null): int
+    {
+        if (empty($vehicleUuid)) {
+            return 0;
+        }
+
+        $query = OperationCard::withoutGlobalScopes()
+            ->where('vehicle_uuid', $vehicleUuid)
+            ->where('runt_status', '!=', 'CANCELADA');
+
+        if ($companyUuid) {
+            $query->where('company_uuid', $companyUuid);
+        }
+
+        $canceladas = $query->update([
+            'status' => 0,
+            'runt_status' => 'CANCELADA',
+            'cancelled_at' => now(),
+            'cancellation_reason' => $motivo,
+            'updated_at' => now(),
+        ]);
+
+        if ($canceladas > 0) {
+            Logger::info("Tarjetas de operación canceladas por salida del vehículo {$vehicleUuid}: {$canceladas}.", [
+                'company_uuid' => $companyUuid,
+                'motivo' => $motivo,
+            ]);
+        }
+
+        return $canceladas;
+    }
+
+    /**
+     * Tipo de tarjeta: el declarado en la petición o, si no viene, inferido por el
+     * historial del vehículo (primera tarjeta = NUEVA; si ya tenía una vigente = RENOVACION).
+     */
+    private function resolverTipoTarjeta(array $data): string
+    {
+        if (! empty($data['operation_card_type'])) {
+            return strtoupper((string) $data['operation_card_type']);
+        }
+
+        $yaTenia = OperationCard::withoutGlobalScopes()
+            ->where('vehicle_uuid', $data['vehicle_uuid'] ?? null)
+            ->where('runt_status', '!=', 'CANCELADA')
+            ->exists();
+
+        return $yaTenia ? 'RENOVACION' : 'NUEVA';
+    }
+
+    /**
+     * Comprueba que un cupo esté descontado antes de emitir una tarjeta que lo
+     * consume (NUEVA o CAMBIO_DE_EMPRESA). En modo estricto
+     * (`capacity.enforce_on_new_operation_card`) rechaza; en modo auditoría deja
+     * constancia en el log y permite continuar.
+     *
+     * @return CapacityMovement|null Movimiento de descuento pendiente de vincular, si existe.
+     *
+     * @throws GeneralException
+     */
+    private function verificarCupoParaTarjeta(string $tipo, ?string $vehicleUuid, ?string $companyUuid): ?CapacityMovement
+    {
+        if (! OperationCard::tipoConsumeCupo($tipo) || empty($vehicleUuid)) {
+            return null;
+        }
+
+        $movimiento = app(CapacityMovementService::class)
+            ->descuentoPendienteDeVehiculo($vehicleUuid, $companyUuid);
+
+        if ($movimiento) {
+            return $movimiento;
+        }
+
+        $mensaje = "La tarjeta {$tipo} requiere un descuento de cupo previo (capacidad transportadora) que no existe.";
+        if ((bool) config('capacity.enforce_on_new_operation_card', false)) {
+            throw GeneralException::unprocessable($mensaje);
+        }
+
+        Logger::warning('Cupo no descontado antes de emitir la tarjeta de operación (modo auditoría).', null, [
+            'vehicle_uuid' => $vehicleUuid,
+            'company_uuid' => $companyUuid,
+            'operation_card_type' => $tipo,
+        ]);
+
+        return null;
+    }
+
+    /**
+     * Un vehículo particular no tiene tarjeta de operación. Defensa en el servicio por si se
+     * invoca fuera de un FormRequest.
+     *
+     * @throws GeneralException
+     */
+    private function asegurarQueElVehiculoRequiereTarjeta(?string $vehicleUuid): void
+    {
+        $vehiculo = $vehicleUuid ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first() : null;
+
+        if ($vehiculo && ! $vehiculo->requiereTarjetaOperacion()) {
+            throw GeneralException::unprocessable('Un vehículo particular no tiene tarjeta de operación.');
+        }
     }
 }

@@ -34,6 +34,31 @@ class DashboardController extends Controller
         return $this->successResponse($data, 'Métricas obtenidas exitosamente.');
     }
 
+    public function conductorSummary(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user) {
+            return $this->unauthorizedResponse('Usuario no autenticado.');
+        }
+
+        $hasConductorRole = method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
+        $isAdminOrSuper = method_exists($user, 'hasRole') && (
+            $user->hasRole('super-admin') ||
+            $user->hasRole('Super Admin') ||
+            $user->hasRole('ADMINISTRADOR') ||
+            $user->hasRole('admin')
+        );
+
+        if (! $hasConductorRole && ! $isAdminOrSuper) {
+            return $this->forbiddenResponse('Acceso denegado: este recurso es exclusivo para el rol CONDUCTOR.');
+        }
+
+        $days = (int) $request->query('days', 30);
+        $data = $this->dashboardService->getConductorSummary($days);
+
+        return $this->successResponse($data, 'Métricas del conductor obtenidas exitosamente.');
+    }
+
     public function recentActivity(): JsonResponse
     {
         $data = $this->dashboardService->getRecentActivity();
