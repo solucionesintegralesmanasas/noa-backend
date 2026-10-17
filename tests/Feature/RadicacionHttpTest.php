@@ -186,6 +186,80 @@ class RadicacionHttpTest extends TestCase
         $this->assertSame($this->empresa, DB::table('procedures')->where('uuid', $uuid)->value('company_uuid'));
     }
 
+    public function test_el_expediente_se_crea_sin_direccion_territorial(): void
+    {
+        $vehiculo = $this->insertar('vehicles', ['company_uuid' => $this->empresa]);
+        $ciudad = $this->insertar('cities', []);
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/radicacion/expediente', [
+                'link_type' => 'CAMBIO_DE_EMPRESA',
+                'vehicle_uuid' => $vehiculo,
+                'procedure_code' => 'EXP-SIN-DIR',
+                'date_of_creation' => '2026-10-16',
+                'city_uuid' => $ciudad,
+            ])
+            ->assertCreated();
+
+        $uuid = $respuesta->json('data.expediente.uuid');
+        $this->assertNull(DB::table('procedures')->where('uuid', $uuid)->value('territorial_director_uuid'));
+    }
+
+    public function test_el_expediente_guarda_la_direccion_territorial_en_texto(): void
+    {
+        $vehiculo = $this->insertar('vehicles', ['company_uuid' => $this->empresa]);
+        $ciudad = $this->insertar('cities', []);
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/radicacion/expediente', [
+                'link_type' => 'CAMBIO_DE_EMPRESA',
+                'vehicle_uuid' => $vehiculo,
+                'procedure_code' => 'EXP-TERRITORIAL',
+                'date_of_creation' => '2026-10-16',
+                'city_uuid' => $ciudad,
+                'territorial_director_name' => 'Ana María Pérez',
+                'territorial_name' => 'Cesar',
+            ])
+            ->assertCreated();
+
+        $uuid = $respuesta->json('data.expediente.uuid');
+        $fila = DB::table('procedures')->where('uuid', $uuid)->first();
+        $this->assertSame('Ana María Pérez', $fila->territorial_director_name);
+        $this->assertSame('Cesar', $fila->territorial_name);
+    }
+
+    public function test_el_codigo_de_tramite_se_genera_si_no_viene(): void
+    {
+        $vehiculo = $this->insertar('vehicles', ['company_uuid' => $this->empresa]);
+        $ciudad = $this->insertar('cities', []);
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/radicacion/expediente', [
+                'link_type' => 'CAMBIO_DE_EMPRESA',
+                'vehicle_uuid' => $vehiculo,
+                'date_of_creation' => '2026-10-16',
+                'city_uuid' => $ciudad,
+            ])
+            ->assertCreated();
+
+        $codigo = DB::table('procedures')->where('uuid', $respuesta->json('data.expediente.uuid'))->value('procedure_code');
+        $this->assertMatchesRegularExpression('/^\d{14}$/', (string) $codigo);
+    }
+
+    public function test_el_siguiente_codigo_tiene_catorce_digitos(): void
+    {
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson('/api/v1/procedure/radicacion/next-code')
+            ->assertOk();
+
+        $this->assertMatchesRegularExpression('/^\d{14}$/', (string) $respuesta->json('data.procedure_code'));
+    }
+
     public function test_el_documento_devuelve_pdf(): void
     {
         $vehiculo = $this->insertar('vehicles', ['company_uuid' => $this->empresa]);

@@ -60,6 +60,8 @@ class Procedure extends Model
         'city_uuid',
         'subject',
         'territorial_director_uuid',
+        'territorial_director_name',
+        'territorial_name',
         'status',
     ];
 
