@@ -43,19 +43,63 @@ class RadicacionService extends BaseService
         };
     }
 
+    /**
+     * Código de trámite autogenerado con formato YYYYMMDDHHmmss. Si ese segundo ya
+     * está usado en la empresa, avanza al siguiente hasta encontrar uno libre.
+     */
+    public function siguienteCodigo(?string $companyUuid = null): string
+    {
+        $momento = now();
+        $codigo = $momento->format('YmdHis');
+        $intentos = 0;
+
+        while ($this->codigoExiste($codigo, $companyUuid) && $intentos < 120) {
+            $momento = $momento->copy()->addSecond();
+            $codigo = $momento->format('YmdHis');
+            $intentos++;
+        }
+
+        return $codigo;
+    }
+
+    /** ¿Ya existe un expediente (padre) con ese código en la empresa? */
+    private function codigoExiste(string $codigo, ?string $companyUuid): bool
+    {
+        $query = Procedure::withoutGlobalScopes()
+            ->where('procedure_code', $codigo)
+            ->where(function ($w) {
+                $w->whereNull('parent_procedure_uuid')->orWhere('parent_procedure_uuid', '');
+            });
+
+        if ($companyUuid) {
+            $query->where('company_uuid', $companyUuid);
+        }
+
+        return $query->exists();
+    }
+
     public function crearExpediente(array $data): array
     {
         return $this->transaction(function () use ($data) {
+            // Código de trámite: si no viene, se genera automáticamente (YYYYMMDDHHmmss)
+            // garantizando que no se repita dentro de la empresa.
+            $codigo = $data['procedure_code'] ?? null;
+            if (empty($codigo)) {
+                $codigo = $this->siguienteCodigo($data['company_uuid'] ?? null);
+            }
+
             $base = [
                 'link_type' => $data['link_type'],
                 'company_uuid' => $data['company_uuid'] ?? null,
                 'third_party_uuid' => $data['third_party_uuid'] ?? null,
                 'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
-                'procedure_code' => $data['procedure_code'],
+                'procedure_code' => $codigo,
                 'date_of_creation' => $data['date_of_creation'],
                 'city_uuid' => $data['city_uuid'],
                 'subject' => $data['subject'] ?? null,
-                'territorial_director_uuid' => $data['territorial_director_uuid'],
+                'territorial_director_uuid' => $data['territorial_director_uuid'] ?? null,
+                'territorial_director_name' => $data['territorial_director_name'] ?? null,
+                'territorial_name' => $data['territorial_name'] ?? null,
                 'status' => 'EN_PROCESO',
             ];
             $ruta = $this->rutaPara($data['link_type']);
@@ -69,7 +113,7 @@ class RadicacionService extends BaseService
                 $hijos[] = Procedure::create($base + [
                     'parent_procedure_uuid' => $padre->uuid,
                     'procedure_type' => $paso,
-                    'procedure_code' => $data['procedure_code'].'-'.substr($paso, 0, 3),
+                    'procedure_code' => $codigo.'-'.substr($paso, 0, 3),
                     'status' => $paso === $ruta[0] ? 'EN_PROCESO' : 'RECIBIDO',
                 ]);
             }

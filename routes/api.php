@@ -965,6 +965,7 @@ Route::prefix('v1')->group(function () {
             // Radicación TO: ruta, validación, firma por enlace y TXT RUNT
             Route::prefix('radicacion')->group(function () {
                 Route::get('/expedientes', [RadicacionController::class, 'expedientes'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.expedientes');
+                Route::get('/next-code', [RadicacionController::class, 'siguienteCodigo'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.next-code');
                 Route::post('/expediente', [RadicacionController::class, 'crearExpediente'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.expediente');
                 Route::get('/{uuid}/detalle', [RadicacionController::class, 'detalle'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.detalle');
                 Route::post('/{uuid}/avanzar', [RadicacionController::class, 'avanzar'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.avanzar');
