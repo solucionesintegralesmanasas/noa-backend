@@ -415,21 +415,28 @@ class RadicacionDocumentoService
      * A quién va dirigida la carta: el Ministerio, a través de la dirección
      * territorial del expediente.
      *
-     * Nota: `territorial_directors.name` guarda el departamento y
-     * `territorial_director` la denominación completa de la dependencia. La
-     * plataforma no almacena el nombre personal del director, así que la carta
-     * se dirige a la dependencia y no a una persona.
+     * La dirección territorial del expediente se captura como texto en el
+     * formulario de radicación (`territorial_name` y `territorial_director_name`).
+     * Si no viene, se cae al catálogo `territorial_directors` por compatibilidad.
      *
      * @return array<string, mixed>
      */
     private function datosDestinatario(Procedure $padre): array
     {
+        $territorial = $padre->territorial_name ?: $padre->territorialDirector?->name;
+
         $dependencia = $padre->territorialDirector?->territorial_director;
+        if ($territorial) {
+            $dependencia = stripos($territorial, 'dirección territorial') === 0
+                ? $territorial
+                : 'Dirección Territorial '.$territorial;
+        }
 
         return [
             'entidad' => 'Ministerio de Transporte',
             'dependencia' => $dependencia,
-            'departamento' => $padre->territorialDirector?->name,
+            'departamento' => $territorial,
+            'director' => $padre->territorial_director_name,
         ];
     }
 
