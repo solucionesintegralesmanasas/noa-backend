@@ -307,10 +307,11 @@ trait HasFiles
         // se reporta por ítem y se continúa en vez de romper la serialización.
         foreach ($this->media as $mediaItem) {
             try {
-                $url = $mediaItem->getUrl();
+                $exists = file_exists($mediaItem->getPath());
+                $url = $exists ? $mediaItem->getUrl() : null;
             } catch (\Throwable $e) {
                 report($e);
-                $url = '';
+                $url = null;
             }
             $type = $mediaItem->collection_name;
 
