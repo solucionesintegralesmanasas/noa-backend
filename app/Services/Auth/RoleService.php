@@ -7,6 +7,7 @@ namespace App\Services\Auth;
 use App\Models\Role;
 use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -81,8 +82,12 @@ class RoleService extends BaseService
         return $this->filtrosDeVisibilidad(Role::query()->with('permissions'))->get();
     }
 
-    /** Aplica los roles no visibles para el actor a la consulta. */
-    private function filtrosDeVisibilidad($query)
+    /** Aplica los roles no visibles para el actor a la consulta.
+     *
+     * @param  Builder $query
+     * @return Builder
+     */
+    private function filtrosDeVisibilidad(Builder $query): Builder
     {
         $noVisibles = $this->rolesNoVisibles();
 
@@ -131,8 +136,9 @@ class RoleService extends BaseService
                 throw new \RuntimeException('Rol no encontrado.');
             }
 
-            // Salvaguardas de escalada (ver ProtegeRolesPrivilegiados): ni se toca SUPERADMIN ni se
-            // renombra a él, y solo se conceden permisos propios (los que ya tiene el rol no cuentan).
+            // Salvaguardas de escalada (ver ProtegeRolesPrivilegiados): no se toca
+            // ninguno de los roles reservados (SUPERADMIN, ADMIN_EMPRESA) y solo
+            // se conceden permisos propios (los que ya tiene el rol no cuentan).
             $this->asegurarRolNoPrivilegiado($record);
             $this->asegurarNombreDeRolPermitido($data['name'] ?? null);
             if (isset($data['permissions'])) {
