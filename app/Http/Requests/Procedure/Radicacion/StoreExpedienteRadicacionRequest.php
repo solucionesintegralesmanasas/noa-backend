@@ -42,7 +42,7 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
             'vehicle_uuid' => 'required|uuid|exists:vehicles,uuid',
             'procedure_code' => [
-                'required', 'string', 'max:50',
+                'nullable', 'string', 'max:50',
                 // Sin índice único en BD a propósito: hay códigos repetidos históricos
                 // (ver SPEC-007) que hay que depurar antes; la unicidad se exige aquí.
                 Rule::unique('procedures', 'procedure_code')
@@ -52,7 +52,10 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'date_of_creation' => 'required|date',
             'city_uuid' => 'required|uuid|exists:cities,uuid',
             'subject' => 'nullable|string|max:255',
-            'territorial_director_uuid' => 'required|uuid|exists:territorial_directors,uuid',
+            // La Dirección territorial ya no se usa en la radicación: se admite sin ella.
+            'territorial_director_uuid' => 'nullable|uuid|exists:territorial_directors,uuid',
+            'territorial_director_name' => 'nullable|string|max:200',
+            'territorial_name' => 'nullable|string|max:150',
         ];
     }
 
@@ -69,7 +72,6 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'date_of_creation.required' => 'La fecha de radicación es obligatoria.',
             'city_uuid.required' => 'La ciudad es obligatoria.',
             'city_uuid.exists' => 'La ciudad no existe.',
-            'territorial_director_uuid.required' => 'El director territorial es obligatorio.',
             'territorial_director_uuid.exists' => 'El director territorial no existe.',
         ];
     }
@@ -86,6 +88,8 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'city_uuid' => 'Ciudad',
             'subject' => 'Asunto',
             'territorial_director_uuid' => 'Director territorial',
+            'territorial_director_name' => 'Nombre de la directora o director',
+            'territorial_name' => 'Dirección territorial',
         ];
     }
 

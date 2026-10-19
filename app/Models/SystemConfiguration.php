@@ -68,6 +68,7 @@ class SystemConfiguration extends Model implements HasMedia
         'corporate_rce_expiration',
         'default_territorial_director_uuid',
         'default_territorial_director_name',
+        'territorial_name',
         'rcc_insurer_company',
         'rce_insurer_company',
         'rcc_policy_number',

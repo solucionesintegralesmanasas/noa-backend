@@ -6,13 +6,16 @@ namespace App\Services\ThirdParties;
 
 use App\Models\ThirdParty;
 use App\Models\User;
+use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use App\Services\Fleet\DriverLicenseService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de Tercero.
@@ -31,6 +34,8 @@ use Illuminate\Support\Facades\Hash;
  */
 class ThirdPartyService extends BaseService
 {
+    use ProtegeRolesPrivilegiados;
+
     /**
      * @var array<string>
      */
@@ -302,7 +307,7 @@ class ThirdPartyService extends BaseService
     /**
      * Roles de acceso gestionados automáticamente por los flags del tercero.
      * Solo estos roles se reemplazan de forma exacta al actualizar; los demás
-     * (p. ej. ADMIN_EMPRESA, SUPERADMIN) se preservan.
+     * (p. ej. ADMIN_EMPRESA, SUPERADMIN o el rol de coordinador de sede) se preservan.
      */
     private const MANAGED_ACCESS_ROLES = ['EMPLEADO', 'AFILIADO', 'CONDUCTOR'];
 
@@ -404,9 +409,9 @@ class ThirdPartyService extends BaseService
             return;
         }
 
-        // Determinar si es empleado: para empleado se sincroniza EXACTAMENTE el único rol (sin preservar otros)
-        $flagEmp = $data['is_employee'] ?? $thirdParty->is_employee ?? false;
-        $isEmployee = $flagEmp === true || $flagEmp === 1 || $flagEmp === '1' || $flagEmp === 'true';
+        // Desde el 2026-10-19 un tercero puede combinar tipos (p. ej. empleado y afiliado)
+        // y llevar varios roles de acceso (un empleado también puede ser coordinador de sede).
+        // Siempre se sincroniza con preservación de roles no gestionados, en ambos ramos.
 
         // Si existe usuario vinculado por pivote, actualizar su email y user_name si cambiaron
         if ($linkedUser) {
@@ -423,11 +428,7 @@ class ThirdPartyService extends BaseService
                     'is_active' => true,
                 ],
             ]);
-            if ($isEmployee) {
-                $linkedUser->syncRoles($rolesToAssign);
-            } else {
-                $this->syncLinkedUserRoles($linkedUser, $rolesToAssign);
-            }
+            $this->syncLinkedUserRoles($linkedUser, $rolesToAssign);
 
             return;
         }
@@ -460,17 +461,13 @@ class ThirdPartyService extends BaseService
             ],
         ]);
 
-        if ($isEmployee) {
-            $user->syncRoles($rolesToAssign);
-        } else {
-            $this->syncLinkedUserRoles($user, $rolesToAssign);
-        }
+        $this->syncLinkedUserRoles($user, $rolesToAssign);
     }
 
     /**
-     * Resuelve la lista de roles RBAC a asignar al tercero, combinando los roles
-     * solicitados de forma explícita (campo `roles`) con los derivados de los
-     * flags de acceso del tercero (is_employee, is_affiliate, is_driver).
+     * Resuelve la lista de roles RBAC a asignar al tercero con los roles
+     * solicitados de forma explícita (campo `roles`); los roles reservados
+     * SUPERADMIN y ADMIN_EMPRESA se retiran salvo para un actor SUPERADMIN.
      *
      * Si se proporciona $thirdParty, los flags que no vengan en $data se toman
      * del modelo ya actualizado, para no perder roles cuando el frontend solo
@@ -485,7 +482,24 @@ class ThirdPartyService extends BaseService
         // No se deriva automáticamente EMPLEADO/AFILIADO/CONDUCTOR desde los flags is_*.
         // El frontend envía `roles` explícitamente desde el MultiSelect "Roles de Acceso".
         // Si `roles` no viene, se considera vacío para permitir quitar.
-        return array_values(array_unique(array_filter((array) ($data['roles'] ?? []))));
+        $solicitados = array_values(array_unique(array_filter((array) ($data['roles'] ?? []))));
+
+        // Salvaguarda de escalada (hallazgo de revisión 2026-10-19): los roles reservados
+        // SUPERADMIN y ADMIN_EMPRESA no se pueden asignar por el flujo de terceros más que
+        // a un SUPERADMIN; a los demás se les retiran de la petición en silencio. El rol
+        // reservado que el usuario vinculado ya tenga se conserva igualmente (ver
+        // syncLinkedUserRoles), así que ni se pierde ni se puede escalar desde aquí.
+        $permitidos = array_values(array_filter($solicitados, fn ($rol): bool => $this->actorEsSuperadmin() || ! $this->esRolSoloSuperadmin($rol)));
+
+        if (count($solicitados) !== count($permitidos)) {
+            Log::warning('Intento de asignar rol reservado por el flujo de terceros, se ignora.', [
+                'actor' => Auth::id(),
+                'roles_solicitados' => $solicitados,
+                'roles_permitidos' => $permitidos,
+            ]);
+        }
+
+        return $permitidos;
     }
 
     /**

@@ -36,6 +36,23 @@ class RadicacionController extends Controller
         }
     }
 
+    /**
+     * Código de trámite autogenerado (YYYYMMDDHHmmss) libre para la empresa.
+     */
+    public function siguienteCodigo(Request $request): JsonResponse
+    {
+        try {
+            $companyUuid = $request->query('company_uuid') ?: $request->attributes->get('current_company_uuid');
+
+            return $this->successResponse(
+                ['procedure_code' => $this->radicacion->siguienteCodigo($companyUuid)],
+                'Código de trámite disponible.'
+            );
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     public function validar(string $uuid): JsonResponse
     {
         try {

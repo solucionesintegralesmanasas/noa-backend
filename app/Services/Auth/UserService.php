@@ -160,7 +160,7 @@ class UserService extends BaseService
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid, ['*'], ['roles']);
-            $this->asegurarPuedeGestionar($record, (array) ($data['roles'] ?? []));
+            $this->asegurarPuedeGestionar($record, (array) ($data['roles'] ?? []), true);
 
             $payload = [
                 'name' => $data['name'] ?? $record->name,
@@ -229,24 +229,44 @@ class UserService extends BaseService
     }
 
     /**
-     * Solo un SUPERADMIN puede modificar, desactivar o eliminar a otro SUPERADMIN, y solo
-     * un SUPERADMIN puede conceder ese rol. Evita que un ADMIN_EMPRESA se eleve a sí mismo
-     * (o a un tercero) a SUPERADMIN a través de la edición de usuarios.
+     * Solo un SUPERADMIN puede asignar los roles reservados (SUPERADMIN, ADMIN_EMPRESA) y
+     * modificar, desactivar o eliminar a un usuario que los tenga. Evita que un ADMIN_EMPRESA
+     * se eleve (o eleve a un tercero) o interfiera con otro administrador de empresa.
+     * Los datos propios sí pueden actualizarse mientras no se añada un rol reservado.
      *
      * @param  array<int, string>  $rolesSolicitados
+     * @param  bool  $esEdicion  true en la actualización de datos (permite actuar sobre el propio actor)
      *
      * @throws GeneralException
      */
-    private function asegurarPuedeGestionar(User $objetivo, array $rolesSolicitados = []): void
+    private function asegurarPuedeGestionar(User $objetivo, array $rolesSolicitados = [], bool $esEdicion = false): void
     {
         $actor = Auth::user();
 
-        if ($actor && $actor->hasRole('SUPERADMIN')) {
+        if ($actor && $this->actorEsSuperadmin()) {
             return;
         }
 
-        if ($objetivo->hasRole('SUPERADMIN') || in_array('SUPERADMIN', $rolesSolicitados, true)) {
-            throw GeneralException::forbidden('Solo un SUPERADMIN puede gestionar usuarios SUPERADMIN.');
+        $nuevos = array_values(array_diff($rolesSolicitados, $objetivo->getRoleNames()->all()));
+        foreach ($nuevos as $nuevo) {
+            if ($this->esRolSoloSuperadmin($nuevo)) {
+                throw GeneralException::forbidden(
+                    'Los roles SUPERADMIN y ADMIN_EMPRESA solo los asigna un SUPERADMIN.'
+                );
+            }
+        }
+
+        $reservadosActuales = array_values(array_filter(
+            $objetivo->getRoleNames()->all(),
+            fn ($nombre) => $this->esRolSoloSuperadmin($nombre)
+        ));
+        if ($reservadosActuales !== []) {
+            if ($esEdicion && $actor && $objetivo->is($actor)) {
+                return;
+            }
+            throw GeneralException::forbidden(
+                'Solo un SUPERADMIN puede gestionar usuarios con rol SUPERADMIN o ADMIN_EMPRESA.'
+            );
         }
     }
 }

@@ -117,7 +117,8 @@ class RoleController extends Controller
     {
         try {
             $record = $this->roleService->getRoleById($id);
-            if (! $record) {
+            // Un rol reservado no se revela (404) a quien no es SUPERADMIN.
+            if (! $record || ! $this->roleService->esRolVisible($record->name)) {
                 return $this->errorResponse('Rol no encontrado.', 404);
             }
 

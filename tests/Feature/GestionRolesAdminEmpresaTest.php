@@ -188,4 +188,111 @@ class GestionRolesAdminEmpresaTest extends TestCase
 
         $this->postJson('/api/v1/auth/roles', ['name' => 'X', 'guard_name' => 'api'], ['X-Company-UUID' => $this->empresa()])->assertForbidden();
     }
+
+    public function test_los_roles_reservados_no_aparecen_en_los_listados_para_admin_empresa(): void
+    {
+        $cab = $this->comoAdmin();
+
+        $catalogo = $this->getJson('/api/v1/auth/roles/list', $cab)->assertSuccessful()->json('data');
+        $nombres = collect($catalogo)->pluck('name')->all();
+        $this->assertContains('EMPLEADO', $nombres);
+        $this->assertNotContains('SUPERADMIN', $nombres);
+        $this->assertNotContains('ADMIN_EMPRESA', $nombres);
+
+        $paginado = $this->getJson('/api/v1/auth/roles', $cab)->assertSuccessful()->json('data.data');
+        $nombresPaginado = collect($paginado)->pluck('name')->all();
+        $this->assertNotContains('SUPERADMIN', $nombresPaginado);
+        $this->assertNotContains('ADMIN_EMPRESA', $nombresPaginado);
+    }
+
+    public function test_el_superadmin_ve_los_roles_reservados_en_los_listados(): void
+    {
+        Sanctum::actingAs($this->usuario('SUPERADMIN'), ['*']);
+        $cab = ['X-Company-UUID' => $this->empresa()];
+
+        $nombres = collect($this->getJson('/api/v1/auth/roles/list', $cab)->assertSuccessful()->json('data'))->pluck('name')->all();
+        $this->assertContains('SUPERADMIN', $nombres);
+        $this->assertContains('ADMIN_EMPRESA', $nombres);
+
+        $nombresPaginado = collect($this->getJson('/api/v1/auth/roles', $cab)->assertSuccessful()->json('data.data'))->pluck('name')->all();
+        $this->assertContains('SUPERADMIN', $nombresPaginado);
+        $this->assertContains('ADMIN_EMPRESA', $nombresPaginado);
+    }
+
+    public function test_el_detalle_de_un_rol_reservado_da_404_para_admin_empresa(): void
+    {
+        $cab = $this->comoAdmin();
+        $reservado = Role::findByName('ADMIN_EMPRESA', 'api');
+
+        $this->getJson('/api/v1/auth/roles/'.$reservado->id, $cab)->assertNotFound();
+        // El SUPERADMIN sí lo ve.
+        Sanctum::actingAs($this->usuario('SUPERADMIN'), ['*']);
+        $this->getJson('/api/v1/auth/roles/'.$reservado->id, $cab)->assertSuccessful();
+    }
+
+    public function test_no_asigna_un_rol_reservado_por_actualizacion_de_usuario(): void
+    {
+        $cab = $this->comoAdmin();
+        $objetivo = $this->usuario('CONDUCTOR');
+        $reservado = Role::findByName('ADMIN_EMPRESA', 'api');
+        $tipo = User::class;
+
+        $this->putJson('/api/v1/auth/users/'.$objetivo->uuid, ['roles' => ['ADMIN_EMPRESA']], $cab)->assertForbidden();
+        $this->postJson('/api/v1/auth/model-has-roles', ['role_id' => $reservado->id, 'model_id' => $objetivo->id, 'model_type' => $tipo], $cab)->assertForbidden();
+        $this->assertFalse($objetivo->fresh()->hasRole('ADMIN_EMPRESA'));
+    }
+
+    public function test_no_puede_gestionar_a_un_usuario_con_rol_reservado(): void
+    {
+        $cab = $this->comoAdmin();
+        $otroAdmin = $this->usuario('ADMIN_EMPRESA');
+
+        $this->putJson('/api/v1/auth/users/'.$otroAdmin->uuid, ['name' => 'Cambiado'], $cab)->assertForbidden();
+        $this->deleteJson('/api/v1/auth/users/'.$otroAdmin->uuid, [], $cab)->assertForbidden();
+        $this->patchJson('/api/v1/auth/users/'.$otroAdmin->uuid.'/toggle-status', [], $cab)->assertForbidden();
+    }
+
+    public function test_el_admin_puede_editar_sus_datos_pero_no_asignarse_rol_reservado_nuevo(): void
+    {
+        $actor = $this->usuario('ADMIN_EMPRESA');
+        Sanctum::actingAs($actor, ['*']);
+        $cab = ['X-Company-UUID' => $this->empresa()];
+
+        $this->putJson('/api/v1/auth/users/'.$actor->uuid, ['name' => 'Yo Mismo'], $cab)->assertSuccessful();
+        $this->putJson('/api/v1/auth/users/'.$actor->uuid, ['roles' => ['ADMIN_EMPRESA']], $cab)->assertSuccessful();
+        $this->putJson('/api/v1/auth/users/'.$actor->uuid, ['roles' => ['SUPERADMIN']], $cab)->assertForbidden();
+        $this->assertFalse($actor->fresh()->hasRole('SUPERADMIN'));
+    }
+
+    public function test_no_puede_tocar_el_rol_admin_empresa(): void
+    {
+        $cab = $this->comoAdmin();
+        $reservado = Role::findByName('ADMIN_EMPRESA', 'api');
+        $propio = Permission::findByName('vehicles.index', 'api');
+
+        $this->putJson('/api/v1/auth/roles/'.$reservado->id, ['name' => 'ADMIN_EMPRESA'], $cab)->assertForbidden();
+        $this->postJson('/api/v1/auth/role-has-permissions', ['permission_id' => $propio->id, 'role_id' => $reservado->id], $cab)->assertForbidden();
+
+        // Renombrar un rol propio a ADMIN_EMPRESA queda bloqueado (el nombre ya existe: unicidad).
+        $libre = Role::create(['name' => 'TEMP_AE', 'guard_name' => 'api']);
+        $this->putJson('/api/v1/auth/roles/'.$libre->id, ['name' => 'ADMIN_EMPRESA'], $cab)->assertStatus(422);
+        $this->assertSame('TEMP_AE', $libre->fresh()->name);
+    }
+
+    public function test_el_superadmin_asigna_y_gestiona_los_reservados(): void
+    {
+        Sanctum::actingAs($this->usuario('SUPERADMIN'), ['*']);
+        $cab = ['X-Company-UUID' => $this->empresa()];
+        $reservado = Role::findByName('ADMIN_EMPRESA', 'api');
+        $objetivo = $this->usuario('CONDUCTOR');
+        $tipo = User::class;
+
+        $this->postJson('/api/v1/auth/model-has-roles', ['role_id' => $reservado->id, 'model_id' => $objetivo->id, 'model_type' => $tipo], $cab)->assertSuccessful();
+        $this->assertTrue($objetivo->fresh()->hasRole('ADMIN_EMPRESA'));
+
+        $this->putJson('/api/v1/auth/roles/'.$reservado->id, ['name' => 'ADMIN_EMPRESA', 'permissions' => ['vehicles.index']], $cab)->assertSuccessful();
+
+        $nuevo = Role::create(['name' => 'TEMP_SUP', 'guard_name' => 'api']);
+        $this->putJson('/api/v1/auth/roles/'.$nuevo->id, ['name' => 'TEMP_SUP_RENOMBRADO'], $cab)->assertSuccessful();
+    }
 }

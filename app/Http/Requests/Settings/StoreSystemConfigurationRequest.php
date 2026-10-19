@@ -62,6 +62,7 @@ class StoreSystemConfigurationRequest extends FormRequest
             'corporate_rce_expiration' => 'nullable|date_format:Y-m-d',
             'default_territorial_director_uuid' => 'nullable|uuid|exists:territorial_directors,uuid',
             'default_territorial_director_name' => 'nullable|string|max:200',
+            'territorial_name' => 'nullable|string|max:150',
             'rcc_insurer_company' => 'nullable|string|max:150',
             'rce_insurer_company' => 'nullable|string|max:150',
             'rcc_policy_number' => 'nullable|string|max:100',
