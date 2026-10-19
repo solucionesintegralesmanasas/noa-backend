@@ -87,34 +87,6 @@ class UpdateThirdPartyRequest extends FormRequest
     }
 
     /**
-     * Validación adicional: un tercero empleado solo puede tener un único tipo y un único rol.
-     * Tipo y rol son independientes.
-     */
-    public function withValidator(Validator $validator): void
-    {
-        $validator->after(function (Validator $v) {
-            $isEmployee = filter_var($this->input('is_employee'), FILTER_VALIDATE_BOOLEAN) || $this->input('is_employee') === '1' || $this->input('is_employee') === 1;
-            if ($isEmployee) {
-                $otherFlags = ['is_customer', 'is_supplier', 'is_affiliate', 'is_driver', 'is_others'];
-                foreach ($otherFlags as $flag) {
-                    if ($this->has($flag)) {
-                        $val = $this->input($flag);
-                        if (filter_var($val, FILTER_VALIDATE_BOOLEAN) || $val === '1' || $val === 1) {
-                            $v->errors()->add($flag, 'Un empleado solo puede tener el tipo Empleado. Desmarque los demás tipos.');
-                        }
-                    }
-                }
-                if ($this->has('roles')) {
-                    $roles = array_values(array_filter((array) $this->input('roles', [])));
-                    if (count($roles) > 1) {
-                        $v->errors()->add('roles', 'Un empleado solo puede tener un único rol de acceso.');
-                    }
-                }
-            }
-        });
-    }
-
-    /**
      * Maneja un intento de validación fallido.
      */
     public function failedValidation(Validator $validator): never
