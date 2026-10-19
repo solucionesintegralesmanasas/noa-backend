@@ -49,6 +49,7 @@ class RoleService extends BaseService
 
     /**
      * Método getAllRolesWithPagination.
+     * Los roles reservados (SUPERADMIN y ADMIN_EMPRESA) solo aparecen para un SUPERADMIN.
      */
     public function getAllRolesWithPagination(
         int $perPage = 15,
@@ -56,15 +57,36 @@ class RoleService extends BaseService
         string $search = '',
         ?string $companyUuid = null
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid);
+        $query = $this->filtrosDeVisibilidad($this->query());
+
+        if (! empty($search) && ! empty($this->searchableFields)) {
+            $query->where(function ($q) use ($search) {
+                foreach ($this->searchableFields as $index => $field) {
+                    $index === 0
+                        ? $q->where($field, 'like', "%{$search}%")
+                        : $q->orWhere($field, 'like', "%{$search}%");
+                }
+            });
+        }
+
+        return $query->paginate($perPage, ['*'], 'page', $page);
     }
 
     /**
      * Método getAllRoles.
+     * Los roles reservados (SUPERADMIN y ADMIN_EMPRESA) solo aparecen para un SUPERADMIN.
      */
     public function getAllRoles(): Collection
     {
-        return Role::with('permissions')->get();
+        return $this->filtrosDeVisibilidad(Role::query()->with('permissions'))->get();
+    }
+
+    /** Aplica los roles no visibles para el actor a la consulta. */
+    private function filtrosDeVisibilidad($query)
+    {
+        $noVisibles = $this->rolesNoVisibles();
+
+        return $noVisibles === [] ? $query : $query->whereNotIn('name', $noVisibles);
     }
 
     /**

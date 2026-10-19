@@ -13,7 +13,8 @@ use Spatie\Permission\Models\Role;
  * Salvaguardas para que un ADMIN_EMPRESA pueda gestionar roles y permisos sin escalar privilegios.
  * SUPERADMIN queda exento de todas.
  *
- *  - El rol SUPERADMIN es intocable: no se crea, edita, borra, asigna ni se le cambian permisos.
+ *  - Los roles SUPERADMIN y ADMIN_EMPRESA solo los ve, asigna y gestiona un SUPERADMIN
+ *    (no aparecen en los catálogos para el resto de roles).
  *  - Los roles del sistema (SUPERADMIN, ADMIN_EMPRESA, EMPLEADO, AFILIADO, CONDUCTOR) no se eliminan.
  *  - Solo se concede un permiso que el propio actor ya tiene (también al asignar un rol a un usuario:
  *    todos los permisos del rol deben ser suyos). Quitar permisos sí se permite.
@@ -21,6 +22,9 @@ use Spatie\Permission\Models\Role;
 trait ProtegeRolesPrivilegiados
 {
     private const ROL_PRIVILEGIADO = 'SUPERADMIN';
+
+    /** Roles que solo puede ver y asignar un SUPERADMIN. */
+    private const ROLES_SOLO_SUPERADMIN = ['SUPERADMIN', 'ADMIN_EMPRESA'];
 
     private const ROLES_DEL_SISTEMA = ['SUPERADMIN', 'ADMIN_EMPRESA', 'EMPLEADO', 'AFILIADO', 'CONDUCTOR'];
 
@@ -31,20 +35,36 @@ trait ProtegeRolesPrivilegiados
         return $actor && $actor->hasRole(self::ROL_PRIVILEGIADO);
     }
 
-    private function esRolPrivilegiado(?string $nombre): bool
+    private function esRolSoloSuperadmin(?string $nombre): bool
     {
-        return strtoupper((string) $nombre) === self::ROL_PRIVILEGIADO;
+        return in_array(strtoupper((string) $nombre), self::ROLES_SOLO_SUPERADMIN, true);
+    }
+
+    /**
+     * Nombres de rol que el actor no debe ver ni listar (vacío para SUPERADMIN).
+     *
+     * @return array<int, string>
+     */
+    protected function rolesNoVisibles(): array
+    {
+        return $this->actorEsSuperadmin() ? [] : self::ROLES_SOLO_SUPERADMIN;
+    }
+
+    /** Un rol reservado solo es visible para un SUPERADMIN. */
+    public function esRolVisible(?string $nombre): bool
+    {
+        return $this->actorEsSuperadmin() || ! $this->esRolSoloSuperadmin($nombre);
     }
 
     /** @throws GeneralException */
     protected function asegurarNombreDeRolPermitido(?string $nombre): void
     {
-        if (! $this->actorEsSuperadmin() && $this->esRolPrivilegiado($nombre)) {
-            throw GeneralException::forbidden('El rol SUPERADMIN solo lo gestiona un SUPERADMIN.');
+        if (! $this->actorEsSuperadmin() && $this->esRolSoloSuperadmin($nombre)) {
+            throw GeneralException::forbidden('Los roles SUPERADMIN y ADMIN_EMPRESA solo los gestiona un SUPERADMIN.');
         }
     }
 
-    /** El rol SUPERADMIN no se toca (editar, asignar, quitar, cambiarle permisos). @throws GeneralException */
+    /** Los roles reservados no se tocan (editar, asignar, quitar, cambiarles permisos). @throws GeneralException */
     protected function asegurarRolNoPrivilegiado(Role|int|null $rol): void
     {
         $rol = is_int($rol) ? Role::query()->find($rol) : $rol;
@@ -90,7 +110,7 @@ trait ProtegeRolesPrivilegiados
         }
     }
 
-    /** Un rol se puede asignar a un usuario si no es SUPERADMIN y todos sus permisos son del actor. @throws GeneralException */
+    /** Un rol se puede asignar a un usuario si no es reservado y todos sus permisos son del actor. @throws GeneralException */
     protected function asegurarRolAsignable(Role|int|string|null $rol): void
     {
         $modelo = match (true) {
