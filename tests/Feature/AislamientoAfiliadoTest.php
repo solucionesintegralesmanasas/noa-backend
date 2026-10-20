@@ -212,6 +212,41 @@ class AislamientoAfiliadoTest extends TestCase
         $this->assertNotContains($this->datos['B']['vehiculo'], $ajeno, 'Con el third_party_uuid de otro afiliado no debe ver lo ajeno');
     }
 
+    public function test_el_afiliado_con_rol_de_conductor_no_ve_la_flota_por_la_rama_de_conductor(): void
+    {
+        // Regresión del humo por roles (2026-10-20): el combinado AFILIADO+CONDUCTOR veía los
+        // 119 vehículos de la empresa porque la rama del conductor se evaluaba primero y
+        // anulaba el aislamiento del afiliado en VehicleService.
+        setPermissionsTeamId(null);
+        $this->afiliadoA->assignRole(Role::findOrCreate('CONDUCTOR', 'api'));
+        $this->afiliadoA = $this->afiliadoA->fresh();
+
+        $paginado = $this->uuids($this->como($this->afiliadoA, $this->empresaE)->getJson(self::BASE.'/vehicles?company_uuid='.$this->empresaE));
+        $this->assertContains($this->datos['A']['vehiculo'], $paginado, 'Debe ver su propio vehículo');
+        $this->assertNotContains($this->datos['B']['vehiculo'], $paginado, 'La rama del conductor no debe mostrar la flota ajena');
+
+        $catalogo = $this->uuids($this->getJson(self::BASE.'/vehicles/list?company_uuid='.$this->empresaE));
+        $this->assertContains($this->datos['A']['vehiculo'], $catalogo);
+        $this->assertNotContains($this->datos['B']['vehiculo'], $catalogo, 'También el catálogo /list queda aislado');
+    }
+
+    public function test_el_conductor_puro_sin_asignaciones_ve_la_flota_de_su_empresa(): void
+    {
+        // Diseño vigente: un conductor puro con tercero vinculado pero sin asignaciones
+        // (owners_drivers) ve la flota de su empresa para poder registrar inspecciones.
+        $terceroConductor = $this->insertar('third_parties', [
+            'company_uuid' => $this->empresaE, 'first_name' => 'Conductor', 'last_name' => 'Puro', 'is_driver' => 1, 'is_active' => 1,
+        ]);
+        setPermissionsTeamId(null);
+        $conductor = $this->usuario('CONDUCTOR', $this->empresaE, $terceroConductor);
+
+        $uuids = $this->uuids($this->como($conductor, $this->empresaE)->getJson(self::BASE.'/vehicles?company_uuid='.$this->empresaE));
+
+        $this->assertContains($this->datos['A']['vehiculo'], $uuids);
+        $this->assertContains($this->datos['B']['vehiculo'], $uuids);
+        $this->assertNotContains($this->datos['F']['vehiculo'], $uuids, 'Solo la flota de su empresa');
+    }
+
     public function test_el_afiliado_solo_lista_sus_documentos_y_tarjetas(): void
     {
         $this->como($this->afiliadoA, $this->empresaE);

@@ -88,12 +88,28 @@ class VehicleService extends BaseService
             'branch:branches.uuid,branches.name',
         ]);
 
-        if ($companyUuid) {
-            $this->applyCompanyFilter($query, $companyUuid);
+        // SPEC-005: si la persona es AFILIADO el aislamiento prima aunque también sea CONDUCTOR;
+        // la rama del conductor (asignaciones) aplica solo al conductor puro.
+        // Empresa efectiva: parámetro > cabecera de contexto (SetCompanyContext) > primera empresa del usuario.
+        $user = Auth::user();
+        $esAfiliado = $user && method_exists($user, 'hasRole') && $user->hasRole('AFILIADO');
+        $esConductor = $user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
+
+        $companyEfectiva = $companyUuid
+            ?? request()->attributes->get('current_company_uuid')
+            ?? ($user ? $user->companies()->first()?->uuid : null);
+        if ($companyEfectiva && $esAfiliado) {
+            // SPEC-005: para el AFILIADO (puro o combinado) el aislamiento estricto de BaseService
+            // (applyCompanyFilter -> aplicarFiltroAfiliado) es el que manda.
+            $this->applyCompanyFilter($query, $companyEfectiva);
+        } elseif ($companyEfectiva) {
+            // Admin y conductor puro: solo el filtro de empresa. El aislamiento estricto de BaseService
+            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar el título de diseño
+            // "sin asignaciones ve la flota de su empresa" de la rama de abajo.
+            $query->where('vehicles.company_uuid', $companyEfectiva);
         }
 
-        $user = Auth::user();
-        if ($user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR')) {
+        if ($esConductor && ! $esAfiliado) {
             $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
                 ?? $user->companies()->first()?->pivot?->third_party_uuid
                 ?? $user->third_party_uuid;
@@ -108,7 +124,7 @@ class VehicleService extends BaseService
             } else {
                 $query->whereRaw('1 = 0');
             }
-        } elseif ($thirdPartyUuid) {
+        } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -172,16 +188,25 @@ class VehicleService extends BaseService
 
         $user = Auth::user();
 
-        // Fallback de empresa si no viene especificada pero el usuario pertenece a una
-        if (! $companyUuid && $user) {
-            $companyUuid = $user->companies()->first()?->uuid;
+        // SPEC-005: si la persona es AFILIADO el aislamiento prima aunque también sea CONDUCTOR;
+        // la rama del conductor (asignaciones) aplica solo al conductor puro.
+        $esAfiliado = $user && method_exists($user, 'hasRole') && $user->hasRole('AFILIADO');
+        $esConductor = $user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
+
+        // Fallback de empresa si no viene especificada pero el usuario pertenece a una,
+        $companyEfectiva = $companyUuid ?? ($user ? $user->companies()->first()?->uuid : null);
+        if ($companyEfectiva && $esAfiliado) {
+            // SPEC-005: para el AFILIADO (puro o combinado) el aislamiento estricto de BaseService
+            // (applyCompanyFilter -> aplicarFiltroAfiliado) es el que manda.
+            $this->applyCompanyFilter($query, $companyEfectiva);
+        } elseif ($companyEfectiva) {
+            // Admin y conductor puro: solo el filtro de empresa. El aislamiento estricto de BaseService
+            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar el diseño
+            // "sin asignaciones ve la flota de su empresa" de la rama de abajo.
+            $query->where('vehicles.company_uuid', $companyEfectiva);
         }
 
-        if ($companyUuid) {
-            $this->applyCompanyFilter($query, $companyUuid);
-        }
-
-        if ($user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR')) {
+        if ($esConductor && ! $esAfiliado) {
             $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
                 ?? $user->companies()->first()?->pivot?->third_party_uuid
                 ?? $user->third_party_uuid;
@@ -198,7 +223,7 @@ class VehicleService extends BaseService
             } else {
                 $query->whereRaw('1 = 0');
             }
-        } elseif ($thirdPartyUuid) {
+        } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
