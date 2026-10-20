@@ -18,6 +18,7 @@ use App\Services\Fleet\OperationCardService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class RadicacionService extends BaseService
 {
@@ -26,6 +27,9 @@ class RadicacionService extends BaseService
     public const RUTA_RENOVACION = ['RENOVACION_TARJETA'];
     public const RUTA_DESVINCULACION_MUTUO = ['DESVINCULACION_MUTUO'];
     public const RUTA_DESVINCULACION_UNILATERAL = ['DESVINCULACION_UNILATERAL'];
+
+    /** Segundos consecutivos que se prueban antes de fallar por falta de código libre. */
+    public const INTENTOS_CODIGO = 120;
 
     protected function getModelInstance(): Model
     {
@@ -46,6 +50,8 @@ class RadicacionService extends BaseService
     /**
      * Código de trámite autogenerado con formato YYYYMMDDHHmmss. Si ese segundo ya
      * está usado en la empresa, avanza al siguiente hasta encontrar uno libre.
+     *
+     * @throws ValidationException Si no hay ningún segundo libre en el margen probado.
      */
     public function siguienteCodigo(?string $companyUuid = null): string
     {
@@ -53,10 +59,16 @@ class RadicacionService extends BaseService
         $codigo = $momento->format('YmdHis');
         $intentos = 0;
 
-        while ($this->codigoExiste($codigo, $companyUuid) && $intentos < 120) {
+        while ($this->codigoExiste($codigo, $companyUuid)) {
+            if (++$intentos > self::INTENTOS_CODIGO) {
+                // Nunca se devuelve un código que ya existe: la unicidad se exige
+                // en el formulario y aquí no hay margen para inventar otro formato.
+                throw ValidationException::withMessages([
+                    'procedure_code' => 'No fue posible generar un código de trámite libre para la empresa. Intente de nuevo.',
+                ]);
+            }
             $momento = $momento->copy()->addSecond();
             $codigo = $momento->format('YmdHis');
-            $intentos++;
         }
 
         return $codigo;

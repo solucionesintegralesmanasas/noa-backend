@@ -236,6 +236,32 @@ class DigestVencimientosTest extends TestCase
         $this->assertSame(['AAA111'], $this->placasEnviadas());
     }
 
+    public function test_no_incluye_tarjetas_de_operacion_canceladas(): void
+    {
+        $empresa = $this->empresaConCorreo();
+
+        // Cancelada por salida del vehículo: su vencimiento ya no aplica.
+        $cancelada = $this->vehiculo($empresa, 'CAN000', self::EMPRESA);
+        DB::table('operation_cards')->where('uuid', $cancelada['tarjeta'])->update([
+            'expiration_date' => '2026-10-02',
+            'runt_status' => 'CANCELADA',
+            'status' => 0,
+        ]);
+
+        // Vehículo que sigue operando: su tarjeta sí se reporta.
+        $vigente = $this->vehiculo($empresa, 'VIG111', self::EMPRESA);
+        DB::table('operation_cards')->where('uuid', $vigente['tarjeta'])->update(['expiration_date' => '2026-10-02']);
+
+        $this->ejecutar();
+
+        $this->assertSame(['VIG111'], $this->placasEnviadas());
+        Mail::assertSent(VehicleExpiryDigestMail::class, function (VehicleExpiryDigestMail $m) {
+            $documentos = collect($m->items)->pluck('documento')->implode('|');
+
+            return ! str_contains($documentos, 'TO-CAN000');
+        });
+    }
+
     public function test_no_envia_si_el_correo_esta_deshabilitado_o_sin_destinatario(): void
     {
         $sinCorreo = $this->empresaConCorreo(['notify_by_email' => false]);

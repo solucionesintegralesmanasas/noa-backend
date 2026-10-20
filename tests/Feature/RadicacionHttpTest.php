@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Services\Procedure\RadicacionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
@@ -258,6 +260,36 @@ class RadicacionHttpTest extends TestCase
             ->assertOk();
 
         $this->assertMatchesRegularExpression('/^\d{14}$/', (string) $respuesta->json('data.procedure_code'));
+    }
+
+    public function test_el_siguiente_codigo_rechaza_la_empresa_de_otra_cuenta(): void
+    {
+        $ajena = $this->insertar('companies', ['business_name' => 'Ajena', 'is_active' => true]);
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson('/api/v1/procedure/radicacion/next-code?company_uuid='.$ajena)
+            ->assertStatus(422)
+            ->assertJsonFragment(['field' => 'company_uuid']);
+    }
+
+    public function test_el_codigo_de_tramite_falla_si_no_hay_ninguno_libre(): void
+    {
+        // Falla cerrado: nunca devuelve un código que ya existe en la empresa.
+        $this->travelTo(Carbon::parse('2026-10-20 10:00:00'));
+        $inicio = now();
+        for ($i = 0; $i <= RadicacionService::INTENTOS_CODIGO; $i++) {
+            $this->insertar('procedures', [
+                'company_uuid' => $this->empresa,
+                'procedure_code' => $inicio->copy()->addSeconds($i)->format('YmdHis'),
+            ]);
+        }
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson('/api/v1/procedure/radicacion/next-code')
+            ->assertStatus(422)
+            ->assertJsonFragment(['field' => 'procedure_code']);
     }
 
     public function test_el_documento_devuelve_pdf(): void

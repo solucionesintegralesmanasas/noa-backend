@@ -188,11 +188,6 @@ class EmailLogService extends BaseService
                         if (strtoupper((string) ($document->status ?? '')) === 'INACTIVA') {
                             continue;
                         }
-                        // Los reemplazados quedan INACTIVA al crear el nuevo;
-                        // avisar por ellos sería revivir historial superado.
-                        if (strtoupper((string) ($document->status ?? '')) === 'INACTIVA') {
-                            continue;
-                        }
                         $items[] = $this->armarItem(
                             (string) $vehicle->vehicle_license_plate,
                             (string) ($document->document_type ?? 'Documento'),
@@ -203,8 +198,12 @@ class EmailLogService extends BaseService
                         );
                     }
 
+                    // Las tarjetas CANCELADA corresponden a un vehículo que salió de la
+                    // empresa: su vencimiento ya no aplica y no debe revivir en el correo.
                     $tarjetas = $vehicle->operationCards
-                        ->filter(fn (OperationCard $t) => $vehicle->requiereTarjetaOperacion() && $t->expiration_date !== null)
+                        ->filter(fn (OperationCard $t) => $vehicle->requiereTarjetaOperacion()
+                            && $t->expiration_date !== null
+                            && strtoupper((string) $t->runt_status) !== 'CANCELADA')
                         ->sortByDesc(fn (OperationCard $t) => (string) $t->expiration_date)
                         ->values();
 

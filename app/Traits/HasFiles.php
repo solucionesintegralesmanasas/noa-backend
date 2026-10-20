@@ -308,10 +308,11 @@ trait HasFiles
         foreach ($this->media as $mediaItem) {
             try {
                 $exists = file_exists($mediaItem->getPath());
-                $url = $exists ? $mediaItem->getUrl() : null;
+                // Contrato SPEC-006: un archivo faltante degrada a URL vacía, nunca a null.
+                $url = $exists ? $mediaItem->getUrl() : '';
             } catch (\Throwable $e) {
                 report($e);
-                $url = null;
+                $url = '';
             }
             $type = $mediaItem->collection_name;
 
