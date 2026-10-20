@@ -144,6 +144,9 @@ class ProjectService extends BaseService
     /**
      * Obtiene un proyecto por su UUID con sus asignaciones
      * conductor → vehículo (relación 1:1) para el detalle.
+     *
+     * Ordena por ingreso: la última asignación creada queda al final para que
+     * el detalle muestre qué vehículo entró de último al proyecto.
      */
     public function getProjectByUuid(string $uuid): ?Model
     {
@@ -172,7 +175,7 @@ class ProjectService extends BaseService
                     'is_active'
                 ),
             ])
-            ->orderByRaw('is_active DESC, id ASC')
+            ->orderBy('id')
             ->get();
 
         $assignedValuer = fn (ProjectDriverVehicle $assignment) => [

@@ -236,4 +236,36 @@ class ProyectosAsignacionesTest extends TestCase
             'vehicle_uuid' => $v0,
         ]);
     }
+
+    public function test_el_detalle_ordena_las_asignaciones_por_ingreso(): void
+    {
+        $d1 = $this->conductor('900000041');
+        $v1 = $this->vehiculo('EEE001');
+        $d2 = $this->conductor('900000042');
+        $v2 = $this->vehiculo('EEE002');
+        $d3 = $this->conductor('900000043');
+        $v3 = $this->vehiculo('EEE003');
+
+        $this->asignar($d1, $v1);
+        $this->asignar($d2, $v2);
+
+        // Retirar la primera no debe moverla al final: conserva su lugar temporal.
+        DB::table('project_driver_vehicles')
+            ->where('project_uuid', $this->proyecto)
+            ->where('third_party_uuid', $d1)
+            ->update(['is_active' => false]);
+
+        // Alta nueva: el servicio la crea al final del historial.
+        $this->actualizarAsignaciones([
+            ['third_party_uuid' => $d2, 'vehicle_uuid' => $v2, 'is_active' => true],
+            ['third_party_uuid' => $d3, 'vehicle_uuid' => $v3, 'is_active' => true],
+        ])->assertOk();
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson("/api/v1/projects/{$this->proyecto}")
+            ->assertOk();
+
+        $orden = collect($respuesta->json('data.assignments'))->pluck('third_party_uuid')->all();
+        $this->assertSame([$d1, $d2, $d3], $orden);
+    }
 }
