@@ -104,26 +104,19 @@ class VehicleService extends BaseService
             $this->applyCompanyFilter($query, $companyEfectiva);
         } elseif ($companyEfectiva) {
             // Admin y conductor puro: solo el filtro de empresa. El aislamiento estricto de BaseService
-            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar el título de diseño
-            // "sin asignaciones ve la flota de su empresa" de la rama de abajo.
+            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar la regla del listado.
             $query->where('vehicles.company_uuid', $companyEfectiva);
         }
 
         if ($esConductor && ! $esAfiliado) {
+            // Regla estricta (decisión 2026-10-20): el conductor ve SOLO los vehículos asignados
+            // a él (proyectos y FUEC); sin asignaciones ve la lista vacía, no la flota de la empresa.
             $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
                 ?? $user->companies()->first()?->pivot?->third_party_uuid
                 ?? $user->third_party_uuid;
 
-            if ($driverThirdPartyUuid) {
-                $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
-                // Si el conductor tiene asignaciones, mostrar solo esas.
-                // Si no tiene ninguna, mostrar todos los vehículos activos de la empresa.
-                if (! empty($allowedUuids)) {
-                    $query->whereIn('uuid', $allowedUuids);
-                }
-            } else {
-                $query->whereRaw('1 = 0');
-            }
+            $allowedUuids = $driverThirdPartyUuid ? $this->getVehicleUuidsForConductor($driverThirdPartyUuid) : [];
+            $query->whereIn('uuid', $allowedUuids); // vacío -> `0=1` -> lista vacía
         } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
@@ -207,22 +200,14 @@ class VehicleService extends BaseService
         }
 
         if ($esConductor && ! $esAfiliado) {
+            // Regla estricta (decisión 2026-10-20): el conductor ve SOLO los vehículos asignados
+            // a él (proyectos y FUEC); sin asignaciones ve la lista vacía, no la flota de la empresa.
             $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
                 ?? $user->companies()->first()?->pivot?->third_party_uuid
                 ?? $user->third_party_uuid;
 
-            if ($driverThirdPartyUuid) {
-                $allowedUuids = $this->getVehicleUuidsForConductor($driverThirdPartyUuid);
-                // Si el conductor tiene asignaciones, mostrar solo esas.
-                // Si no tiene ninguna, mostrar todos los vehículos activos de la empresa
-                // para que pueda registrar inspecciones sin bloqueo.
-                if (! empty($allowedUuids)) {
-                    $query->whereIn('uuid', $allowedUuids);
-                }
-                // else: no se aplica filtro adicional -> devuelve todos los de la empresa
-            } else {
-                $query->whereRaw('1 = 0');
-            }
+            $allowedUuids = $driverThirdPartyUuid ? $this->getVehicleUuidsForConductor($driverThirdPartyUuid) : [];
+            $query->whereIn('uuid', $allowedUuids); // vacío -> `0=1` -> lista vacía
         } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
