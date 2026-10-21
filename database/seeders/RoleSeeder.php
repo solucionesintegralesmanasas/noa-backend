@@ -193,6 +193,12 @@ class RoleSeeder extends Seeder
             'fuel_logs.update',
             'fuel_logs.delete',
 
+            'fuel_requests.index',
+            'fuel_requests.create',
+            'fuel_requests.approve',
+            'fuel_requests.reject',
+            'fuel_requests.cancel',
+
             'vehicle_inspections.index',
             'vehicle_inspections.create',
             'vehicle_inspections.update',
@@ -411,6 +417,10 @@ class RoleSeeder extends Seeder
 
             'fuel_logs.index',
             'fuel_logs.create',
+
+            'fuel_requests.index',
+            'fuel_requests.create',
+            'fuel_requests.cancel',
 
             'fuec.index',
             'fuec.profile',

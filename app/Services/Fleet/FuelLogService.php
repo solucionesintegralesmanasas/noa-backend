@@ -407,6 +407,9 @@ class FuelLogService extends BaseService
             // Recalcula la cadena completa (por si se insertó en una fecha intermedia).
             $this->recalcularFlujo($vehicleUuid);
 
+            // Si había una solicitud de tanqueo aprobada y vigente, queda usada.
+            app(FuelRequestService::class)->marcarUsada($vehicleUuid, (string) $registro->uuid);
+
             return $registro->fresh()->load(['vehicle', 'driver']);
         });
     }

@@ -208,6 +208,11 @@ class PermissionSeeder extends Seeder
             'fuel_logs.create' => ['module' => 'Combustible', 'description' => 'Registrar un surtimiento de combustible'],
             'fuel_logs.update' => ['module' => 'Combustible', 'description' => 'Actualizar un registro de combustible'],
             'fuel_logs.delete' => ['module' => 'Combustible', 'description' => 'Eliminar un registro de combustible'],
+            'fuel_requests.index' => ['module' => 'Combustible', 'description' => 'Listar solicitudes de tanqueo'],
+            'fuel_requests.create' => ['module' => 'Combustible', 'description' => 'Crear una solicitud de tanqueo'],
+            'fuel_requests.approve' => ['module' => 'Combustible', 'description' => 'Aprobar solicitudes de tanqueo'],
+            'fuel_requests.reject' => ['module' => 'Combustible', 'description' => 'Rechazar solicitudes de tanqueo'],
+            'fuel_requests.cancel' => ['module' => 'Combustible', 'description' => 'Anular solicitudes de tanqueo'],
 
             // --- Inspecciones de Vehículos ---
             'vehicle_inspections.index'  => ['module' => 'Inspecciones de Vehículos', 'description' => 'Listar todas las inspecciones de vehículos'],

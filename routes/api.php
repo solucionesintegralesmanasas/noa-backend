@@ -57,6 +57,7 @@ use App\Http\Controllers\Api\V1\Fleet\BusinessCollaborationAgreementController;
 use App\Http\Controllers\Api\V1\Fleet\ControlSheetController;
 use App\Http\Controllers\Api\V1\Fleet\DriverLicenseController;
 use App\Http\Controllers\Api\V1\Fleet\FuelLogController;
+use App\Http\Controllers\Api\V1\Fleet\FuelRequestController;
 use App\Http\Controllers\Api\V1\Fleet\InspectionResultController;
 use App\Http\Controllers\Api\V1\Fleet\MaintenanceController;
 use App\Http\Controllers\Api\V1\Fleet\MaintenancePartController;
@@ -127,6 +128,9 @@ Route::prefix('v1')->group(function () {
     Route::prefix('public')->group(function () {
         Route::get('/fuecs/{code}', [FuecController::class, 'validatePublic'])
             ->name('api.v1.public.fuecs.validate');
+
+        Route::get('/fuel-requests/{token}', [FuelRequestController::class, 'publicShow'])
+            ->name('api.v1.public.fuel-requests.show');
 
         // Endpoint para Web Cron (cPanel / Hostings Compartidos)
         Route::get('/cron/trigger-notifications', function (EmailLogService $service) {
@@ -744,6 +748,23 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [FuelLogController::class, 'show'])->name('api.v1.fleet.fuel-logs.show');
                 Route::put('/{uuid}', [FuelLogController::class, 'update'])->name('api.v1.fleet.fuel-logs.update');
                 Route::delete('/{uuid}', [FuelLogController::class, 'destroy'])->name('api.v1.fleet.fuel-logs.destroy');
+            });
+
+            // Solicitudes de Tanqueo
+            Route::prefix('fuel-requests')->group(function () {
+                Route::get('/', [FuelRequestController::class, 'index'])->name('api.v1.fleet.fuel-requests.index');
+                Route::post('/', [FuelRequestController::class, 'store'])->name('api.v1.fleet.fuel-requests.store');
+                Route::get('/{uuid}', [FuelRequestController::class, 'show'])->name('api.v1.fleet.fuel-requests.show');
+                Route::get('/{uuid}/qr', [FuelRequestController::class, 'qr'])->name('api.v1.fleet.fuel-requests.qr');
+                Route::post('/{uuid}/approve', [FuelRequestController::class, 'approve'])
+                    ->middleware('permission:fuel_requests.approve')
+                    ->name('api.v1.fleet.fuel-requests.approve');
+                Route::post('/{uuid}/reject', [FuelRequestController::class, 'reject'])
+                    ->middleware('permission:fuel_requests.reject')
+                    ->name('api.v1.fleet.fuel-requests.reject');
+                Route::post('/{uuid}/cancel', [FuelRequestController::class, 'cancel'])
+                    ->middleware('permission:fuel_requests.cancel')
+                    ->name('api.v1.fleet.fuel-requests.cancel');
             });
 
             // Repuestos de Mantenimiento
