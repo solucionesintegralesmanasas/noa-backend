@@ -75,6 +75,9 @@ return [
         'owner-drivers' => 'vehicles',
         'vehicles-branches' => 'vehicles',
         'fuec-passengers' => 'fuec',
+        // La configuración de ApiDian se protege con los permisos del proveedor;
+        // sin este mapeo las 9 rutas quedaban SIN EVALUAR en authz:report.
+        'configuracion' => 'billing_providers',
     ],
 
     /*

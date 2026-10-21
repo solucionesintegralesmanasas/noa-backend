@@ -615,16 +615,18 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/{uuid}', [BillingProviderController::class, 'destroy'])->name('api.v1.billing.billing-providers.destroy');
 
                 // Módulo 01 - Configuraciones Básicas de ApiDian (por proveedor).
+                // Permisos explícitos: la configuración vive en ApiDian y no
+                // puede quedar solo en la auditoría de `authz` (estaba SIN EVALUAR).
                 Route::prefix('{uuid}/configuracion')->group(function () {
-                    Route::get('/', [BillingProviderConfigController::class, 'show'])->name('api.v1.billing.billing-providers.configuracion.show');
-                    Route::post('/', [BillingProviderConfigController::class, 'guardarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.guardar');
-                    Route::put('/software', [BillingProviderConfigController::class, 'software'])->name('api.v1.billing.billing-providers.configuracion.software');
-                    Route::put('/software-nomina', [BillingProviderConfigController::class, 'softwareNomina'])->name('api.v1.billing.billing-providers.configuracion.software-nomina');
-                    Route::put('/certificado', [BillingProviderConfigController::class, 'certificado'])->name('api.v1.billing.billing-providers.configuracion.certificado');
-                    Route::post('/resoluciones', [BillingProviderConfigController::class, 'resoluciones'])->name('api.v1.billing.billing-providers.configuracion.resoluciones');
-                    Route::put('/ambiente', [BillingProviderConfigController::class, 'ambiente'])->name('api.v1.billing.billing-providers.configuracion.ambiente');
-                    Route::put('/webhook', [BillingProviderConfigController::class, 'webhook'])->name('api.v1.billing.billing-providers.configuracion.webhook');
-                    Route::delete('/empresa', [BillingProviderConfigController::class, 'eliminarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.empresa-eliminar');
+                    Route::get('/', [BillingProviderConfigController::class, 'show'])->name('api.v1.billing.billing-providers.configuracion.show')->middleware('permission:billing_providers.index');
+                    Route::post('/', [BillingProviderConfigController::class, 'guardarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.guardar')->middleware('permission:billing_providers.create');
+                    Route::put('/software', [BillingProviderConfigController::class, 'software'])->name('api.v1.billing.billing-providers.configuracion.software')->middleware('permission:billing_providers.update');
+                    Route::put('/software-nomina', [BillingProviderConfigController::class, 'softwareNomina'])->name('api.v1.billing.billing-providers.configuracion.software-nomina')->middleware('permission:billing_providers.update');
+                    Route::put('/certificado', [BillingProviderConfigController::class, 'certificado'])->name('api.v1.billing.billing-providers.configuracion.certificado')->middleware('permission:billing_providers.update');
+                    Route::post('/resoluciones', [BillingProviderConfigController::class, 'resoluciones'])->name('api.v1.billing.billing-providers.configuracion.resoluciones')->middleware('permission:billing_providers.create');
+                    Route::put('/ambiente', [BillingProviderConfigController::class, 'ambiente'])->name('api.v1.billing.billing-providers.configuracion.ambiente')->middleware('permission:billing_providers.update');
+                    Route::put('/webhook', [BillingProviderConfigController::class, 'webhook'])->name('api.v1.billing.billing-providers.configuracion.webhook')->middleware('permission:billing_providers.update');
+                    Route::delete('/empresa', [BillingProviderConfigController::class, 'eliminarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.empresa-eliminar')->middleware('permission:billing_providers.delete');
                 });
             });
 
@@ -668,13 +670,13 @@ Route::prefix('v1')->group(function () {
             });
 
             Route::prefix('electronic-documents')->group(function () {
-                Route::get('/', [ElectronicDocumentController::class, 'index'])->name('api.v1.billing.electronic-documents.index');
-                Route::post('/', [ElectronicDocumentController::class, 'store'])->name('api.v1.billing.electronic-documents.store');
-                Route::get('/{uuid}', [ElectronicDocumentController::class, 'show'])->name('api.v1.billing.electronic-documents.show');
-                Route::put('/{uuid}', [ElectronicDocumentController::class, 'update'])->name('api.v1.billing.electronic-documents.update');
-                Route::post('/{uuid}/emitir', [ElectronicDocumentController::class, 'emitir'])->name('api.v1.billing.electronic-documents.emitir');
-                Route::get('/{uuid}/estado', [ElectronicDocumentController::class, 'estado'])->name('api.v1.billing.electronic-documents.estado');
-                Route::delete('/{uuid}', [ElectronicDocumentController::class, 'destroy'])->name('api.v1.billing.electronic-documents.destroy');
+                Route::get('/', [ElectronicDocumentController::class, 'index'])->name('api.v1.billing.electronic-documents.index')->middleware('permission:electronic_documents.index');
+                Route::post('/', [ElectronicDocumentController::class, 'store'])->name('api.v1.billing.electronic-documents.store')->middleware('permission:electronic_documents.create');
+                Route::get('/{uuid}', [ElectronicDocumentController::class, 'show'])->name('api.v1.billing.electronic-documents.show')->middleware('permission:electronic_documents.profile');
+                Route::put('/{uuid}', [ElectronicDocumentController::class, 'update'])->name('api.v1.billing.electronic-documents.update')->middleware('permission:electronic_documents.update');
+                Route::post('/{uuid}/emitir', [ElectronicDocumentController::class, 'emitir'])->name('api.v1.billing.electronic-documents.emitir')->middleware('permission:electronic_documents.update');
+                Route::get('/{uuid}/estado', [ElectronicDocumentController::class, 'estado'])->name('api.v1.billing.electronic-documents.estado')->middleware('permission:electronic_documents.profile');
+                Route::delete('/{uuid}', [ElectronicDocumentController::class, 'destroy'])->name('api.v1.billing.electronic-documents.destroy')->middleware('permission:electronic_documents.delete');
             });
         });
 
@@ -741,13 +743,13 @@ Route::prefix('v1')->group(function () {
 
             // Control de Combustible, Kilometraje y Saldos
             Route::prefix('fuel-logs')->group(function () {
-                Route::get('/', [FuelLogController::class, 'index'])->name('api.v1.fleet.fuel-logs.index');
-                Route::get('/context', [FuelLogController::class, 'context'])->name('api.v1.fleet.fuel-logs.context');
+                Route::get('/', [FuelLogController::class, 'index'])->name('api.v1.fleet.fuel-logs.index')->middleware('permission:fuel_logs.index');
+                Route::get('/context', [FuelLogController::class, 'context'])->name('api.v1.fleet.fuel-logs.context')->middleware('permission:fuel_logs.index');
                 Route::get('/status', [FuelLogController::class, 'status'])->name('api.v1.fleet.fuel-logs.status');
-                Route::post('/', [FuelLogController::class, 'store'])->name('api.v1.fleet.fuel-logs.store');
-                Route::get('/{uuid}', [FuelLogController::class, 'show'])->name('api.v1.fleet.fuel-logs.show');
-                Route::put('/{uuid}', [FuelLogController::class, 'update'])->name('api.v1.fleet.fuel-logs.update');
-                Route::delete('/{uuid}', [FuelLogController::class, 'destroy'])->name('api.v1.fleet.fuel-logs.destroy');
+                Route::post('/', [FuelLogController::class, 'store'])->name('api.v1.fleet.fuel-logs.store')->middleware('permission:fuel_logs.create');
+                Route::get('/{uuid}', [FuelLogController::class, 'show'])->name('api.v1.fleet.fuel-logs.show')->middleware('permission:fuel_logs.index');
+                Route::put('/{uuid}', [FuelLogController::class, 'update'])->name('api.v1.fleet.fuel-logs.update')->middleware('permission:fuel_logs.update');
+                Route::delete('/{uuid}', [FuelLogController::class, 'destroy'])->name('api.v1.fleet.fuel-logs.destroy')->middleware('permission:fuel_logs.delete');
             });
 
             // Solicitudes de Tanqueo
