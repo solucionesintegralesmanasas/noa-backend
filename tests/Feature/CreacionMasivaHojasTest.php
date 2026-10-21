@@ -402,6 +402,120 @@ class CreacionMasivaHojasTest extends TestCase
     }
 
     /**
+     * Retiro del coche del proyecto (SPEC-009): al desactivarse la asignación,
+     * las hojas ya creadas de ese coche se marcan con `retirada_de_proyecto`,
+     * salen del listado (paginado y /list) y se conservan como histórico.
+     */
+    public function test_al_retirar_el_coche_del_proyecto_sus_hojas_salen_del_listado(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1))
+            ->assertCreated();
+
+        // El formulario del proyecto devolvió solo los coches 1 y 3: la
+        // asignación del coche 2 queda inactiva y sus hojas se retiran.
+        $this->retirarCoche(2);
+
+        // Retiradas: el padre y los dos hijos del coche 2.
+        $this->assertSame(1, $this->hojasDe(2)->whereNull('parent_uuid')->where('retirada_de_proyecto', 1)->count());
+        $this->assertSame(2, $this->hojasDe(2)->whereNotNull('parent_uuid')->where('retirada_de_proyecto', 1)->count());
+        // Los coches que siguen en el proyecto no tienen ninguna retirada.
+        $this->assertSame(0, $this->hojasDe(1)->where('retirada_de_proyecto', 1)->count());
+        $this->assertSame(0, $this->hojasDe(3)->where('retirada_de_proyecto', 1)->count());
+
+        // El listado paginado ya no trae las hojas del coche retirado...
+        $filas = $this->comoAdminA()
+            ->getJson('/api/v1/control-sheets/service-delivery-control-sheets')
+            ->assertOk()
+            ->json('data.data');
+        $this->assertSame(['MASA01', 'MASA03'], collect($filas)
+            ->pluck('vehicle_license_plate')->unique()->sort()->values()->all());
+
+        // ...ni el catálogo /list.
+        $catalogo = $this->comoAdminA()
+            ->getJson('/api/v1/control-sheets/service-delivery-control-sheets/list')
+            ->assertOk()
+            ->json('data');
+        $this->assertSame(['MASA01', 'MASA03'], collect($catalogo)
+            ->pluck('vehicle_license_plate')->unique()->sort()->values()->all());
+    }
+
+    /**
+     * Reactivación del coche (SPEC-009): sus hojas desmarcan
+     * `retirada_de_proyecto` y vuelven al listado respetando el `is_active`
+     * de cierre que ya tuviesen.
+     */
+    public function test_al_reactivar_el_coche_sus_hojas_vuelven_respectando_el_cierre(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1))
+            ->assertCreated();
+
+        // Un día del coche 2 ya se cerró (congelamiento, SPEC-002 §7.2).
+        DB::table('service_delivery_control_sheet')
+            ->whereNotNull('parent_uuid')
+            ->whereIn('uuid', fn ($q) => $q->select('service_delivery_control_sheet_uuid')
+                ->from('service_internal_controls')
+                ->where('vehicle_uuid', $this->vehiculos[2]))
+            ->limit(1)
+            ->update(['is_active' => 0]);
+
+        $this->retirarCoche(2);
+        $this->assertSame(3, $this->hojasDe(2)->where('retirada_de_proyecto', 1)->count());
+
+        // El formulario vuelve a incluir el coche 2 con asignación activa.
+        $this->comoAdminA()
+            ->putJson("/api/v1/projects/{$this->proyectoA1}", ['assignments' => [
+                ['third_party_uuid' => $this->conductores[1], 'vehicle_uuid' => $this->vehiculos[1], 'is_active' => true],
+                ['third_party_uuid' => $this->conductores[2], 'vehicle_uuid' => $this->vehiculos[2], 'is_active' => true],
+                ['third_party_uuid' => $this->conductores[3], 'vehicle_uuid' => $this->vehiculos[3], 'is_active' => true],
+            ]])
+            ->assertOk();
+
+        // Desmarcadas todas (padre e hijos) y el cierre del día intacto.
+        $this->assertSame(3, $this->hojasDe(2)->where('retirada_de_proyecto', 0)->count());
+        $this->assertSame(0, $this->hojasDe(2)->where('retirada_de_proyecto', 1)->count());
+        $this->assertSame(1, $this->hojasDe(2)->whereNull('parent_uuid')->where('is_active', 1)->count());
+        $this->assertSame(1, $this->hojasDe(2)->whereNotNull('parent_uuid')->where('is_active', 0)->count());
+
+        // Reaparecen en el listado paginado.
+        $filas = $this->comoAdminA()
+            ->getJson('/api/v1/control-sheets/service-delivery-control-sheets')
+            ->assertOk()
+            ->json('data.data');
+        $this->assertSame(['MASA01', 'MASA02', 'MASA03'], collect($filas)
+            ->pluck('vehicle_license_plate')->unique()->sort()->values()->all());
+    }
+
+    /** Filas (padres e hijos) cuyo control interno pertenece al coche dado. */
+    private function hojasDe(int $i)
+    {
+        return DB::table('service_delivery_control_sheet')
+            ->whereIn('uuid', fn ($q) => $q->select('service_delivery_control_sheet_uuid')
+                ->from('service_internal_controls')
+                ->where('vehicle_uuid', $this->vehiculos[$i]));
+    }
+
+    /** Devuelve el PUT del formulario del proyecto sin el coche dado. */
+    private function retirarCoche(int $i): void
+    {
+        $assignments = [];
+        foreach ($this->conductores as $j => $conductor) {
+            if ($j !== $i) {
+                $assignments[] = [
+                    'third_party_uuid' => $conductor,
+                    'vehicle_uuid' => $this->vehiculos[$j],
+                    'is_active' => true,
+                ];
+            }
+        }
+
+        $this->comoAdminA()
+            ->putJson("/api/v1/projects/{$this->proyectoA1}", ['assignments' => $assignments])
+            ->assertOk();
+    }
+
+    /**
      * El proyecto más grande local (14 coches) × 30 días: 14 hojas, 420
      * planillas diarias, 434 controles internos. La primera medición local dio
      * 3,33 s (2026-10-21): el tope deja margen ×10 ajustado al medido; el
@@ -409,8 +523,7 @@ class CreacionMasivaHojasTest extends TestCase
      */
     #[Group('perf')]
     public function test_presupuesto_de_tiempo_del_bulk_de_14_coches_por_30_dias(): void
-    {
-        // Amplía el proyecto de 3 a 14 asignaciones activas.
+    {        // Amplía el proyecto de 3 a 14 asignaciones activas.
         for ($i = 4; $i <= 14; $i++) {
             $conductor = $this->crearTercero($this->empresaA, '9100002'.$i, 'T'.$i, $this->sedeA1);
             $vehiculo = $this->crearVehiculo($this->empresaA, $conductor, 'MASA'.str_pad((string) $i, 2, '0', STR_PAD_LEFT), $this->sedeA1);

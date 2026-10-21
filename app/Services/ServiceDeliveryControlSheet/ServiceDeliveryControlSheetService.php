@@ -70,6 +70,11 @@ class ServiceDeliveryControlSheetService extends BaseService
                 $q->where('is_active', true);
             }]);
 
+        // SPEC-009: las hojas cuyo coche fue retirado del proyecto se conservan
+        // como histórico pero ya no se listan; el módulo refleja la asignación
+        // vigente.
+        $query->where('retirada_de_proyecto', false);
+
         if ($soloCerradas) {
             // Solo fechas cerradas que imprimen PDF:
             // - Un día: padre sin hijos y con is_active=false.
@@ -127,8 +132,10 @@ class ServiceDeliveryControlSheetService extends BaseService
 
     public function getAllServiceDeliveryControlSheets(): Collection
     {
+        // SPEC-009: igual que el listado paginado, excluye las retiradas.
         return $this->query()
             ->whereNull('parent_uuid')
+            ->where('retirada_de_proyecto', false)
             ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl'])
             ->get();
     }

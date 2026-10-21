@@ -20,6 +20,7 @@
 5. **La fuente de verdad es el proyecto:** el backend resuelve las asignaciones activas y no confía en los pares conductor↔vehículo que envíe el frontend. El frontend solo indica qué coches incluir.
 6. **La edición sigue siendo individual:** una hoja se edita con su vehículo y conductor; si el vehículo ya no está en el proyecto, sigue apareciendo para no romper el histórico.
 7. **El bloque directo no lleva FUEC** (ya retirado en `719b0ff`); el payload directo no envía `fuec_uuid` y el backend conserva el valor histórico.
+8. **Retiro del coche del proyecto (2026-10-21):** al desactivarse la asignación del coche, sus hojas ya creadas quedan marcadas con `retirada_de_proyecto` y salen del listado (paginado, `/list` y el resumen del proyecto), conservándose como histórico. **`is_active` queda reservado para el cierre** (SPEC-002 §7.2) y nunca se usa para el retiro. Reactivar la asignación desmarca las hojas y las devuelve al listado respetando su `is_active` de cierre. Sin relleno previo: solo aplica a los retiros hechos desde esta versión.
 
 ## Problem Statement
 
@@ -111,6 +112,14 @@ Reglas comunes replicadas de `StoreServiceDeliveryControlSheetRequest` (fechas, 
 - Hoy al elegir proyecto el formulario autorrellena `start_date`/`end_date` con **toda la vigencia** del proyecto. Con bulk, proyecto de 14 coches y 30 días ⇒ 14 hojas y 420 planillas hijas de una vez.
 - Antes de crear, fase de confirmación (SweetAlert2 vía `utils/toast.js`/`Swal`) mostrando el conteo exacto. Sin límite duro de días; se medirá el costo real (ver pruebas) y si el hosting no aguanta se define tope.
 
+## Retiro del coche del proyecto (2026-10-21)
+
+El retiro ocurre cuando la sincronización de asignaciones del proyecto (`ProjectService::syncProjectAssignments`, dentro del PUT de `updateProject`) desactiva al coche: fuera del payload, marcado `is_active` = false, o porque su conductor pasó a otro coche.
+
+- **Columna:** `retirada_de_proyecto` BOOLEAN (default false) en `service_delivery_control_sheet` (migración `2026_10_21_000007`).
+- **Marcado (estado final, idempotente):** al terminar el sync, `sincronizarHojasRetiradas` calcula coches con asignación activa y coches retirados, y marca/desmarca sus hojas — padres e hijos, identificados por `whereHas('internalControl', whereIn vehicle_uuid)` + `project_uuid`. Cubre los tres caminos sin mirar el diff del payload.
+- **Listados:** `getAllServiceDeliveryControlSheetsWithPagination`, `getAllServiceDeliveryControlSheets` y `PcpEvidence::resumenProyecto` excluyen `retirada_de_proyecto` (el módulo refleja la asignación vigente). Los flujos internos (cierres, rutas, GPS) no se tocan.
+
 ## Pruebas
 
 ### Backend (`CreacionMasivaHojasTest`, `tests/Feature`)
@@ -123,6 +132,8 @@ Reglas comunes replicadas de `StoreServiceDeliveryControlSheetRequest` (fechas, 
 6. Tipo externo en el bulk ⇒ 422.
 7. Permiso: usuario sin `service_delivery_control_sheets.create` ⇒ 403.
 8. Rollback a mitad: fallo forzado en la segunda hoja ⇒ ninguna hoja persistente (transacción única).
+9. Retiro vía `PUT /api/v1/projects/{uuid}` (coches 1 y 3 quedan) ⇒ hojas del coche 2 (padre + 2 hijos) con `retirada_de_proyecto` = 1 y fuera del listado paginado y `/list`; coche 1 y 3 visibles.
+10. Reactivación ⇒ desmarcadas las 3, un hijo cerrado conserva `is_active` = 0 y las hojas reaparecen en el listado.
 
 ### Frontend
 
@@ -143,6 +154,6 @@ Reglas comunes replicadas de `StoreServiceDeliveryControlSheetRequest` (fechas, 
 
 ## Despliegue
 
-1. `php artisan migrate:status` (no hay migraciones nuevas en este spec).
+1. **Migración:** `php artisan migrate:status` debe mostrar pendientes la `2026_10_21_000007` (columna `retirada_de_proyecto`); correr `php artisan migrate --force`. Sin relleno de datos: las hojas viejas no cambian de estado.
 2. Rutas y permisos: el permiso `service_delivery_control_sheets.create` ya existe; no correr seeders en producción.
 3. Subir backend y frontend juntos; el frontend nuevo llama por defecto a `/bulk` solo en creación directa.
