@@ -62,9 +62,10 @@ class NotificacionesConsultasTest extends TestCase
         $this->conductorConLicencia('Dos');
 
         // El sync escribe: se mide una sola vez sobre datos frescos.
-        // Medido: 22 consultas constantes con 3 vehículos y 2 licencias (lectores +
-        // precarga del estado + upsert en bloque; ya no crece con la flota).
-        $this->assertPresupuesto(22, fn () => app(NotificationsService::class)->syncNotifications($this->empresa), 'Sincronización de notificaciones');
+        // Medido: 26 consultas constantes con 3 vehículos y 2 licencias (lectores +
+        // precarga del estado + upsert en bloque + nivel de combustible; ya no
+        // crece con la flota).
+        $this->assertPresupuesto(26, fn () => app(NotificationsService::class)->syncNotifications($this->empresa), 'Sincronización de notificaciones');
     }
 
     /** Consultas de un sync sobre datos frescos de una empresa nueva con $vehiculos vehículos. */

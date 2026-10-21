@@ -58,6 +58,7 @@ class NotificationsService extends BaseService
         'AFFILIATE_CHARGE',
         'VEHICLE_INSPECTION_PENDING',
         'VEHICLE_MAINTENANCE_ALERT',
+        'VEHICLE_FUEL_ALERT',
     ];
 
     /**
@@ -158,6 +159,7 @@ class NotificationsService extends BaseService
             case 'AFFILIATE_CHARGE':
             case 'VEHICLE_INSPECTION_PENDING':
             case 'VEHICLE_MAINTENANCE_ALERT':
+            case 'VEHICLE_FUEL_ALERT':
                 $vUuid = $alert['vehicle_uuid'] ?? null;
                 $placa = (string) ($alert['vehicle_license_plate'] ?? $alert['license_plate'] ?? '');
                 if (! $vUuid || $placa === '') {
@@ -349,6 +351,15 @@ class NotificationsService extends BaseService
                     'permission' => 'maintenance.create',
                 ];
                 break;
+
+            case 'VEHICLE_FUEL_ALERT':
+                $acciones[] = [
+                    'key' => 'registrar_tanqueo',
+                    'label' => 'Registrar tanqueo',
+                    'path' => '/flota/combustible/crear',
+                    'permission' => 'fuel_logs.create',
+                ];
+                break;
         }
 
         return $acciones;
@@ -368,6 +379,7 @@ class NotificationsService extends BaseService
             $affiliateCharges = $this->notificationsForAffiliateCharges($companyUuid, $thirdPartyUuid);
             $pendingInspections = $this->notificationsForPendingInspections($companyUuid, $thirdPartyUuid);
             $preventativeMaintenance = $this->notificationsForPreventativeMaintenance($companyUuid, $thirdPartyUuid);
+            $fuelLevels = $this->notificationsForFuelLevel($companyUuid, $thirdPartyUuid);
             $socialSecurity = $this->notificationsForSocialSecurity($companyUuid, $thirdPartyUuid);
 
             // Una sola consulta para clasificar prioridades (evita N+1).
@@ -380,6 +392,7 @@ class NotificationsService extends BaseService
                 $affiliateCharges,
                 $pendingInspections,
                 $preventativeMaintenance,
+                $fuelLevels,
                 $socialSecurity,
             ]);
 
@@ -629,7 +642,51 @@ class NotificationsService extends BaseService
                 ];
             }
 
-            // 9. Seguridad Social (Aportes en Mora)
+            // 9. Nivel de Combustible (Kilometraje desde el último tanqueo)
+            foreach ($fuelLevels as $alert) {
+                $vUuid = $alert['vehicle_uuid'] ?? null;
+                $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
+                if (! $cUuid) {
+                    continue;
+                }
+
+                $hash = md5('FUEL_'.$vUuid.'_'.($alert['refuel_uuid'] ?? ''));
+                $deterministicUuid = sprintf(
+                    '%08s-%04s-%04s-%04s-%12s',
+                    substr($hash, 0, 8),
+                    substr($hash, 8, 4),
+                    substr($hash, 12, 4),
+                    substr($hash, 16, 4),
+                    substr($hash, 20, 12)
+                );
+
+                $activeAlerts[] = [
+                    'company_uuid' => $cUuid,
+                    'type' => 'VEHICLE_FUEL_ALERT',
+                    'title' => $alert['title'],
+                    'message' => $alert['message'],
+                    'priority' => $this->prioridadVehiculo($vUuid, $cUuid),
+                    'entity_uuid' => $deterministicUuid,
+                    'entity_type' => Vehicle::class,
+                    'days_left' => $alert['km_remaining'],
+                    'expiry_date' => Carbon::today(),
+                    'extra_data' => [
+                        'vehicle_uuid' => $vUuid,
+                        'vehicle_license_plate' => $alert['vehicle_license_plate'] ?? null,
+                        'refuel_uuid' => $alert['refuel_uuid'] ?? null,
+                        'refuel_date' => $alert['refuel_date'] ?? null,
+                        'km_since_refuel' => $alert['km_since_refuel'] ?? null,
+                        'estimated_range_km' => $alert['estimated_range_km'] ?? null,
+                        'km_remaining' => $alert['km_remaining'] ?? null,
+                        'percentage' => $alert['percentage'] ?? null,
+                        'status' => $alert['status'] ?? null,
+                        'action' => $this->construirAction('VEHICLE_FUEL_ALERT', $alert),
+                        'actions' => $this->construirAcciones('VEHICLE_FUEL_ALERT', $alert),
+                    ],
+                ];
+            }
+
+            // 10. Seguridad Social (Aportes en Mora)
             foreach ($socialSecurity['mora'] as $alert) {
                 $tpUuid = $alert['third_party_uuid'] ?? null;
                 $cUuid = $companyUuid ?? $alert['company_uuid'] ?? null;
@@ -1878,6 +1935,136 @@ class NotificationsService extends BaseService
             return $alerts;
         } catch (\Exception $e) {
             Logger::error('NotificationsService@notificationsForPreventativeMaintenance: '.$e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Detecta vehículos cuyo kilometraje recorrido desde el último tanqueo
+     * alcanzó el alcance estimado (o está por agotarlo).
+     *
+     * Fuente del kilometraje actual: el preoperacional diario
+     * (vehicle_inspections.mileage) y el kilometraje final de la planilla de
+     * control (service_delivery_control_sheet.ending_kilometer). Se toma el
+     * mayor de los dos, igual que el pronóstico de mantenimiento.
+     *
+     * La línea de base es el odómetro final del último tanqueo con alcance
+     * calculable; sin odómetro en el tanqueo no hay control posible. El aviso
+     * se reinicia con cada tanqueo nuevo (la entidad cambia de uuid).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function notificationsForFuelLevel(?string $companyUuid = null, ?string $thirdPartyUuid = null): array
+    {
+        try {
+            $vehiculosQuery = Vehicle::query()
+                ->where('vehicles.is_active', true)
+                ->select(['uuid', 'company_uuid', 'vehicle_license_plate']);
+
+            if ($companyUuid) {
+                $vehiculosQuery->where('company_uuid', $companyUuid);
+            }
+
+            if ($thirdPartyUuid) {
+                $vehiculosQuery->where('third_party_uuid', $thirdPartyUuid);
+            }
+
+            $porcentajeAviso = (float) config('fuel.notification_warning_percent', 85);
+            $reservaKm = (float) config('fuel.notification_reserve_km', 50);
+            $alerts = [];
+
+            $vehiculosQuery->chunk(100, function ($vehiculos) use (&$alerts, $porcentajeAviso, $reservaKm) {
+                $uuids = $vehiculos->pluck('uuid')->all();
+
+                // Último tanqueo por vehículo. El orden ascendente + keyBy deja la
+                // fila más reciente. Si ese tanqueo no tiene odómetro ni alcance no
+                // hay línea de base: no se usa uno más viejo (el tanque ya se llenó).
+                $ultimosTanqueos = DB::table('fuel_logs')
+                    ->whereIn('vehicle_uuid', $uuids)
+                    ->orderBy('date')
+                    ->orderBy('id')
+                    ->get(['vehicle_uuid', 'uuid', 'date', 'final_odometer', 'estimated_range_km'])
+                    ->keyBy('vehicle_uuid');
+
+                // Kilometraje actual: preoperacional y planilla, en dos consultas.
+                $kmInspecciones = DB::table('vehicle_inspections')
+                    ->whereIn('vehicle_uuid', $uuids)
+                    ->whereNotNull('mileage')
+                    ->groupBy('vehicle_uuid')
+                    ->selectRaw('vehicle_uuid, max(mileage) as km')
+                    ->pluck('km', 'vehicle_uuid');
+
+                $kmPlanillas = DB::table('service_delivery_control_sheet as sdcs')
+                    ->join('service_internal_controls as sic', 'sic.service_delivery_control_sheet_uuid', '=', 'sdcs.uuid')
+                    ->whereIn('sic.vehicle_uuid', $uuids)
+                    ->whereNotNull('sdcs.ending_kilometer')
+                    ->groupBy('sic.vehicle_uuid')
+                    ->selectRaw('sic.vehicle_uuid as vehicle_uuid, max(cast(sdcs.ending_kilometer as unsigned)) as km')
+                    ->pluck('km', 'vehicle_uuid');
+
+                foreach ($vehiculos as $vehiculo) {
+                    $tanqueo = $ultimosTanqueos->get($vehiculo->uuid);
+                    if (! $tanqueo || $tanqueo->final_odometer === null || $tanqueo->estimated_range_km === null) {
+                        continue;
+                    }
+
+                    $alcance = (float) $tanqueo->estimated_range_km;
+                    if ($alcance <= 0) {
+                        continue;
+                    }
+
+                    $kmActual = max(
+                        (int) ($kmInspecciones[$vehiculo->uuid] ?? 0),
+                        (int) ($kmPlanillas[$vehiculo->uuid] ?? 0)
+                    );
+                    $kmBase = (int) $tanqueo->final_odometer;
+
+                    if ($kmActual <= 0 || $kmActual <= $kmBase) {
+                        continue;
+                    }
+
+                    $recorrido = $kmActual - $kmBase;
+                    $restante = (int) round($alcance - $recorrido);
+                    $porcentaje = round(($recorrido / $alcance) * 100, 1);
+
+                    $agotado = $restante <= 0;
+                    $porAgotarse = $restante <= $reservaKm || $porcentaje >= $porcentajeAviso;
+
+                    if (! $agotado && ! $porAgotarse) {
+                        continue;
+                    }
+
+                    $fecha = $tanqueo->date ? Carbon::parse($tanqueo->date)->format('Y-m-d') : 'sin fecha';
+                    $placa = $vehiculo->vehicle_license_plate;
+
+                    if ($agotado) {
+                        $title = "Combustible: tanquear {$placa}";
+                        $message = "El vehículo {$placa} recorrió {$recorrido} km desde el tanqueo del {$fecha}, superando el alcance estimado de ".round($alcance).' km. Registre un nuevo tanqueo para restablecer el control de combustible.';
+                    } else {
+                        $title = "Combustible próximo a agotarse - {$placa}";
+                        $message = "El vehículo {$placa} ha recorrido {$recorrido} km de los ".round($alcance)." km estimados con el tanqueo del {$fecha}. Restan {$restante} km para el alcance estimado; programe el tanqueo.";
+                    }
+
+                    $alerts[] = [
+                        'vehicle_uuid' => $vehiculo->uuid,
+                        'vehicle_license_plate' => $placa,
+                        'company_uuid' => $vehiculo->company_uuid,
+                        'refuel_uuid' => $tanqueo->uuid,
+                        'refuel_date' => $fecha,
+                        'km_since_refuel' => $recorrido,
+                        'estimated_range_km' => round($alcance, 2),
+                        'km_remaining' => $restante,
+                        'percentage' => $porcentaje,
+                        'status' => $agotado ? 'VENCIDO' : 'PROXIMO',
+                        'title' => $title,
+                        'message' => $message,
+                    ];
+                }
+            });
+
+            return $alerts;
+        } catch (\Exception $e) {
+            Logger::error('NotificationsService@notificationsForFuelLevel: '.$e->getMessage());
             throw $e;
         }
     }

@@ -26,4 +26,15 @@ return [
         'ELECTRICIDAD' => 0.0,
         'OTRO' => 0.50,
     ],
+
+    /*
+     * Aviso de combustible por kilometraje.
+     *
+     * Se genera una notificación cuando los kilómetros recorridos desde el
+     * último tanqueo (según el preoperacional/PCP) alcanzan el porcentaje
+     * indicado del alcance estimado, o cuando restan estos kilómetros,
+     * lo que ocurra primero. El aviso se reinicia con cada tanqueo.
+     */
+    'notification_warning_percent' => (float) env('FUEL_NOTIFICATION_WARNING_PERCENT', 85),
+    'notification_reserve_km' => (float) env('FUEL_NOTIFICATION_RESERVE_KM', 50),
 ];
