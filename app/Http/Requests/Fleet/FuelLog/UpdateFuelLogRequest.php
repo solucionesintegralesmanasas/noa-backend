@@ -11,7 +11,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 
 class UpdateFuelLogRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaPertenenciaCombustible;
 
     public function authorize(): bool
     {
@@ -21,9 +21,10 @@ class UpdateFuelLogRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'company_uuid' => 'sometimes|nullable|uuid|exists:companies,uuid',
-            'vehicle_uuid' => 'sometimes|required|uuid|exists:vehicles,uuid',
-            'driver_uuid' => 'sometimes|nullable|uuid|exists:third_parties,uuid',
+            // La empresa del registro no se cambia desde el cuerpo: el servicio
+            // conserva la del registro y el contexto solo acota qué se puede tocar.
+            'vehicle_uuid' => ['sometimes', 'required', 'uuid', $this->reglaVehiculoDelContexto()],
+            'driver_uuid' => ['sometimes', 'nullable', 'uuid', $this->reglaConductorDelContexto()],
             'date' => 'sometimes|required|date',
             'initial_odometer' => 'sometimes|nullable|integer|min:0',
             'final_odometer' => 'sometimes|nullable|integer|min:0',

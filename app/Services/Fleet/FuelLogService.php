@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services\Fleet;
 
 use App\Models\FuelLog;
+use App\Models\ThirdParty;
+use App\Models\Vehicle;
 use App\Services\BaseService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -12,6 +14,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Control de Combustible, Kilometraje y Saldos.
@@ -41,7 +44,16 @@ class FuelLogService extends BaseService
 
     public function query(): Builder
     {
-        return parent::query()->with(['vehicle', 'driver']);
+        $query = parent::query()->with(['vehicle', 'driver']);
+
+        // El registro no tiene sede propia: se hereda la del vehículo. Con el
+        // rol SUCURSAL, `whereHas('vehicle')` aplica el scope de sede del modelo
+        // Vehicle y deja fuera los registros de otras sedes.
+        if (request()->attributes->get('branch_restricted', false)) {
+            $query->whereHas('vehicle');
+        }
+
+        return $query;
     }
 
     // ─── Listados ──────────────────────────────────────────────────────────
@@ -93,6 +105,15 @@ class FuelLogService extends BaseService
      */
     public function getContext(string $vehicleUuid, ?string $date = null): array
     {
+        // Falla cerrado si el vehículo es de otra empresa o sede: sin esto el
+        // endpoint /context devolvía cilindraje y rendimiento de un vehículo
+        // ajeno (resolverConsumoVehiculo consultaba sin scopes).
+        if (! Vehicle::query()->where('uuid', $vehicleUuid)->exists()) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'El vehículo no pertenece a la empresa o sede activa.',
+            ]);
+        }
+
         $query = $this->query()->where('vehicle_uuid', $vehicleUuid);
 
         if ($date) {
@@ -130,7 +151,8 @@ class FuelLogService extends BaseService
         $fuelType = 'OTRO';
 
         if ($vehicleUuid) {
-            $vehiculo = \App\Models\Vehicle::withoutGlobalScopes()
+            // Con scopes: un vehículo de otra empresa/sede no aporta datos.
+            $vehiculo = Vehicle::query()
                 ->where('uuid', $vehicleUuid)
                 ->first(['engine_displacement', 'fuel_type']);
 
@@ -283,7 +305,7 @@ class FuelLogService extends BaseService
                 return ['valor' => $this->redondear((float) $promedio), 'origen' => 'historico'];
             }
 
-            $cilindraje = \App\Models\Vehicle::withoutGlobalScopes()
+            $cilindraje = Vehicle::query()
                 ->where('uuid', $vehicleUuid)
                 ->value('engine_displacement');
             $tabla = $this->rendimientoPorCilindraje($cilindraje);
@@ -365,6 +387,20 @@ class FuelLogService extends BaseService
             $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
             $vehicleUuid = $data['vehicle_uuid'];
 
+            // Defensa en profundidad: el request ya acota el vehículo y el
+            // conductor a la empresa/sede, pero el servicio también puede
+            // invocarse desde otros flujos.
+            if (! Vehicle::query()->where('uuid', $vehicleUuid)->exists()) {
+                throw ValidationException::withMessages([
+                    'vehicle_uuid' => 'El vehículo no pertenece a la empresa o sede activa.',
+                ]);
+            }
+            if (! empty($data['driver_uuid']) && ! ThirdParty::query()->where('uuid', $data['driver_uuid'])->exists()) {
+                throw ValidationException::withMessages([
+                    'driver_uuid' => 'El conductor no pertenece a la empresa o sede activa.',
+                ]);
+            }
+
             // Datos del vehículo para el consumo estimado por ralentí.
             $vehiculo = $this->resolverConsumoVehiculo($vehicleUuid);
             $idleHours = max(0.0, (float) ($data['idle_hours'] ?? 0));
@@ -405,7 +441,7 @@ class FuelLogService extends BaseService
             ]));
 
             // Recalcula la cadena completa (por si se insertó en una fecha intermedia).
-            $this->recalcularFlujo($vehicleUuid);
+            $this->recalcularFlujo($vehicleUuid, $companyUuid);
 
             // Si había una solicitud de tanqueo aprobada y vigente, queda usada.
             app(FuelRequestService::class)->marcarUsada($vehicleUuid, (string) $registro->uuid);
@@ -422,7 +458,22 @@ class FuelLogService extends BaseService
                 throw new \RuntimeException('El registro de combustible no existe.');
             }
 
+            $vehicleAnterior = $registro->vehicle_uuid;
             $vehicleUuid = $data['vehicle_uuid'] ?? $registro->vehicle_uuid;
+
+            // El registro no cambia de empresa; el vehículo/conductor nuevos
+            // deben ser visibles en el contexto (empresa y sede) del usuario.
+            if (! Vehicle::query()->where('uuid', $vehicleUuid)->exists()) {
+                throw ValidationException::withMessages([
+                    'vehicle_uuid' => 'El vehículo no pertenece a la empresa o sede activa.',
+                ]);
+            }
+            if (! empty($data['driver_uuid']) && ! ThirdParty::query()->where('uuid', $data['driver_uuid'])->exists()) {
+                throw ValidationException::withMessages([
+                    'driver_uuid' => 'El conductor no pertenece a la empresa o sede activa.',
+                ]);
+            }
+
             $vehiculo = $this->resolverConsumoVehiculo($vehicleUuid);
             $idleHours = array_key_exists('idle_hours', $data)
                 ? max(0.0, (float) $data['idle_hours'])
@@ -443,7 +494,7 @@ class FuelLogService extends BaseService
             ]);
 
             $cambios = array_merge($calculados, [
-                'company_uuid' => $data['company_uuid'] ?? $registro->company_uuid,
+                'company_uuid' => $registro->company_uuid,
                 'vehicle_uuid' => $vehicleUuid,
                 'driver_uuid' => array_key_exists('driver_uuid', $data) ? $data['driver_uuid'] : $registro->driver_uuid,
                 'engine_displacement' => $vehiculo['engine_displacement'],
@@ -468,7 +519,12 @@ class FuelLogService extends BaseService
 
             $registro->update($cambios);
 
-            $this->recalcularFlujo($vehicleUuid);
+            // Si el registro cambió de vehículo, la cadena del vehículo anterior
+            // también queda descuadrada y hay que recalcularla.
+            if ($vehicleAnterior !== $vehicleUuid) {
+                $this->recalcularFlujo($vehicleAnterior, $registro->company_uuid);
+            }
+            $this->recalcularFlujo($vehicleUuid, $registro->company_uuid);
 
             return $registro->fresh()->load(['vehicle', 'driver']);
         });
@@ -483,10 +539,11 @@ class FuelLogService extends BaseService
             }
 
             $vehicleUuid = $registro->vehicle_uuid;
+            $companyUuid = $registro->company_uuid;
             $registro->delete();
 
             // Al borrar un registro antiguo, la cadena posterior se recalcula.
-            $this->recalcularFlujo($vehicleUuid);
+            $this->recalcularFlujo($vehicleUuid, $companyUuid);
         });
     }
 
@@ -494,10 +551,17 @@ class FuelLogService extends BaseService
      * Recalcula en orden cronológico los saldos y métricas de todos los registros
      * de un vehículo. Cada initial_balance se hereda del final_balance anterior.
      */
-    public function recalcularFlujo(string $vehicleUuid): void
+    public function recalcularFlujo(string $vehicleUuid, ?string $companyUuid = null): void
     {
-        $registros = FuelLog::withoutGlobalScopes()
-            ->where('vehicle_uuid', $vehicleUuid)
+        // Con el scope de empresa (y el de sede del listado) no se tocan
+        // registros de otra empresa; `companyUuid` cierra el caso de llamadas
+        // internas sin contexto de petición.
+        $base = $this->query()->where('vehicle_uuid', $vehicleUuid);
+        if ($companyUuid) {
+            $base->where('company_uuid', $companyUuid);
+        }
+
+        $registros = (clone $base)
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -507,8 +571,7 @@ class FuelLogService extends BaseService
 
         // Promedio histórico del vehículo (una sola consulta para todo el flujo).
         // Incluye el km/gal medido y, cuando no hay medición, el rendimiento manual.
-        $promedioHistorico = FuelLog::withoutGlobalScopes()
-            ->where('vehicle_uuid', $vehicleUuid)
+        $promedioHistorico = (clone $base)
             ->selectRaw("AVG(CASE WHEN km_per_gallon > 0 THEN km_per_gallon WHEN performance_source = 'manual' THEN average_performance END) as promedio")
             ->value('promedio');
         $promedioHistorico = ($promedioHistorico !== null && $promedioHistorico > 0)
@@ -604,13 +667,16 @@ class FuelLogService extends BaseService
      */
     private function resolverEmpresa(?string $companyUuid): ?string
     {
-        if ($companyUuid) {
-            return $companyUuid;
-        }
-
+        // El contexto manda: `SetCompanyContext` ya validó la pertenencia del
+        // header o del cuerpo. El valor recibido solo se usa en flujos internos
+        // sin petición (consola, importaciones).
         $contexto = request()->attributes->get('current_company_uuid');
         if ($contexto) {
             return $contexto;
+        }
+
+        if ($companyUuid) {
+            return $companyUuid;
         }
 
         return Auth::user()?->companies()->first()?->uuid;
