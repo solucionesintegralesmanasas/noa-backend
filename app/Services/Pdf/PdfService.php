@@ -157,7 +157,7 @@ class PdfService
         $driverData = $thirdPartyService->technicalSheet($companyUuid, $thirdPartyUuid, $vehicleUuid);
 
         $company = $driverData->company;
-        $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+        $logoModel = self::logoParaMarca($company);
         $photoModel = $driverData->getFirstMedia('FOTO_PERFIL');
 
         $base64Images = $this->getBase64Parallel([
@@ -165,10 +165,12 @@ class PdfService
             'photo' => $photoModel,
         ]);
 
-        // Preparamos los datos para la vista
+        // Preparamos los datos para la vista (mismo contrato que la ficha del
+        // vehículo: `data['logo']` para el encabezado y `logo_fondo` para la marca de agua).
         $data = [
+            'title' => 'Ficha Técnica del Conductor',
             'driver' => $driverData,
-            'images' => [
+            'data' => [
                 'logo' => $base64Images['logo'],
                 'photo' => $base64Images['photo'],
             ],
@@ -207,7 +209,7 @@ class PdfService
             $operationCard = $agreement->vehicle->operationCards()->latest('expiration_date')->first();
         }
 
-        $logoModel = $agreement->company ? ($agreement->company->getFirstMedia('logos') ?? $agreement->company->logo ?? null) : null;
+        $logoModel = self::logoParaMarca($agreement->company);
         $signatureModel = $agreement->company ? ($agreement->company->getFirstMedia('signatures') ?? $agreement->company->signature ?? null) : null;
 
         $base64Images = $this->getBase64Parallel([
@@ -411,8 +413,8 @@ class PdfService
                 $media = $config?->getFirstMedia('LETTERHEAD');
             }
 
-            if (! $media && is_object($company) && method_exists($company, 'getFirstMedia')) {
-                $media = $company->getFirstMedia('logos');
+            if (! $media) {
+                $media = self::logoParaMarca($company);
             }
 
             if (! is_object($media) || ! method_exists($media, 'getPath')) {
@@ -536,7 +538,16 @@ class PdfService
      */
     public static function logoParaMarca(mixed $company): mixed
     {
-        return $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+        if (! is_object($company) || ! method_exists($company, 'getFirstMedia')) {
+            return null;
+        }
+
+        // La colección real que registra `HasFiles` es `LOGO`. Se mantiene
+        // `logos` como respaldo para archivos cargados con el nombre anterior.
+        return $company->getFirstMedia('LOGO')
+            ?? $company->getFirstMedia('logos')
+            ?? $company->logo
+            ?? null;
     }
 
     /**
@@ -654,11 +665,24 @@ class PdfService
                 Logger::warning('No se pudo cargar archivo local: '.$e->getMessage());
             }
 
-            if (isset($fileModel->url)) {
-                $pendingHttp[$key] = $fileModel->url;
-            } else {
-                $results[$key] = null;
+            // Spatie Media expone `getUrl()`, no un atributo `url`: sin este
+            // camino la imagen se descartaba en silencio cuando faltaba el
+            // archivo local (p. ej. el PDF salía sin logo y nadie sabía por qué).
+            if (is_object($fileModel) && method_exists($fileModel, 'getUrl')) {
+                try {
+                    $url = $fileModel->getUrl();
+                    if ($url) {
+                        $pendingHttp[$key] = $url;
+
+                        continue;
+                    }
+                } catch (\Throwable $e) {
+                    Logger::warning('No se pudo obtener la URL del archivo: '.$e->getMessage());
+                }
             }
+
+            $results[$key] = null;
+            Logger::warning("No se pudo cargar la imagen '{$key}': el archivo no existe o no tiene URL");
         }
 
         if (! empty($pendingHttp)) {
@@ -683,7 +707,24 @@ class PdfService
 
             foreach ($handles as $key => $ch) {
                 $content = curl_multi_getcontent($ch);
-                $results[$key] = $content ? base64_encode($this->optimizeBinaryImage($content)) : null;
+                $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $tipo = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+
+                // Una respuesta 403/404 del servidor también trae cuerpo (HTML):
+                // sin validar el tipo se incrustaría una página de error como si
+                // fuera una imagen y el PDF saldría sin logo, sin rastro del fallo.
+                $esImagen = $content
+                    && $status >= 200 && $status < 300
+                    && (str_starts_with($tipo, 'image/') || @getimagesizefromstring($content) !== false);
+
+                if ($esImagen) {
+                    $results[$key] = base64_encode($this->optimizeBinaryImage($content));
+                } else {
+                    $results[$key] = null;
+                    // Sin archivo local ni descarga válida el PDF se genera sin imagen:
+                    // se deja rastro para distinguir "no hay logo" de "el logo no cargó".
+                    Logger::warning("No se pudo cargar la imagen '{$key}' desde {$pendingHttp[$key]} (HTTP {$status}, tipo '{$tipo}')");
+                }
                 curl_multi_remove_handle($multi, $ch);
                 curl_close($ch);
             }
@@ -711,7 +752,7 @@ class PdfService
             $company = $history['company'] ?? null;
             $fullCompany = $company && isset($company->uuid) ? $this->companyService->getCompanyByUuid($company->uuid) : $company;
 
-            $logoModel = $fullCompany ? ($fullCompany->getFirstMedia('logos') ?? $fullCompany->logo ?? null) : null;
+            $logoModel = self::logoParaMarca($fullCompany);
             $signatureModel = $fullCompany ? ($fullCompany->getFirstMedia('signatures') ?? $fullCompany->signature ?? null) : null;
 
             $base64Images = $this->getBase64Parallel([
@@ -781,7 +822,7 @@ class PdfService
                 $company = $this->companyService->getCompanyByUuid($vehicle->company_uuid);
                 if ($company) {
                     $webPage = $company->web_page ?? 'falcon-fuec.com';
-                    $logoModel = $company->getFirstMedia('logos') ?? $company->logo ?? null;
+                    $logoModel = self::logoParaMarca($company);
                     $signatureModel = $company->getFirstMedia('signatures') ?? $company->signature ?? null;
                 }
             }
@@ -853,7 +894,7 @@ class PdfService
                 $companyModel = $this->companyService->getCompanyByUuid($dataVehicle['company_uuid']);
             }
             if ($companyModel) {
-                $logoModel = $companyModel->getFirstMedia('logos') ?? $companyModel->logo ?? null;
+                $logoModel = self::logoParaMarca($companyModel);
                 $signatureModel = $companyModel->getFirstMedia('signatures') ?? $companyModel->signature ?? null;
             }
 
@@ -902,7 +943,7 @@ class PdfService
             abort(404, 'El registro de Administración no existe.');
         }
 
-        $logoModel = $charge->company ? ($charge->company->getFirstMedia('logos') ?? $charge->company->logo ?? null) : null;
+        $logoModel = self::logoParaMarca($charge->company);
         $signatureModel = $charge->company ? ($charge->company->getFirstMedia('signatures') ?? $charge->company->signature ?? null) : null;
 
         $base64Images = $this->getBase64Parallel([
@@ -986,7 +1027,7 @@ class PdfService
                 },
             ]);
 
-            $logoModel = $vehicle->company ? ($vehicle->company->getFirstMedia('logos') ?? $vehicle->company->logo ?? null) : null;
+            $logoModel = self::logoParaMarca($vehicle->company);
 
             $base64Images = $this->getBase64Parallel([
                 'logo' => $logoModel,
@@ -1036,7 +1077,7 @@ class PdfService
 
             // Obtener datos del vehículo, conductor, contratista y empresa de transporte
             $company = $sheet->company;
-            $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+            $logoModel = self::logoParaMarca($company);
             $empresaTransportadora = $company?->business_name ?? 'TRANSPORTES SIN BARRERAS S.A.S.';
 
             $placa = $sheet->vehicle_license_plate;
@@ -1321,7 +1362,7 @@ class PdfService
         try {
             $vehicle = Vehicle::where('uuid', $vehicleUuid)->firstOrFail();
             $company = $vehicle->company;
-            $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+            $logoModel = self::logoParaMarca($company);
             $empresaTransportadora = $company?->business_name ?? 'TRANSPORTES SIN BARRERAS S.A.S.';
 
             // Solo días finalizados (cerrados): is_active = false tras el cierre.
@@ -1689,7 +1730,7 @@ class PdfService
             $truncado = $totalPlanillas > 500;
 
             $company = $sheets->first()->company;
-            $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+            $logoModel = self::logoParaMarca($company);
             $empresaTransportadora = $company?->business_name ?? 'TRANSPORTES SIN BARRERAS S.A.S.';
             $base64Logo = $this->getBase64Parallel(['logo' => $logoModel]);
             $logoData = $this->resolveLogoWithMime($logoModel, $base64Logo['logo'] ?? null);
@@ -1831,7 +1872,7 @@ class PdfService
         // El render tiene presupuesto de 0 consultas (ReporteVehiculosConsultasTest):
         // solo se usa la empresa si ya viene cargada en los filtros, nunca se consulta aquí.
         $reportCompany = ($filtros['company'] ?? null) instanceof object ? $filtros['company'] : null;
-        $reportLogoModel = $reportCompany ? ($reportCompany->getFirstMedia('logos') ?? $reportCompany->logo ?? null) : null;
+        $reportLogoModel = self::logoParaMarca($reportCompany);
 
         $pdf = Pdf::loadView('pdf.fleet.vehicle-report', $this->conMarca([
             'filas' => $filas,
