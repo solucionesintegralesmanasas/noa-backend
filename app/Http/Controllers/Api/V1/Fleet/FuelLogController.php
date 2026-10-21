@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Fleet\FuelLog\StoreFuelLogRequest;
 use App\Http\Requests\Fleet\FuelLog\UpdateFuelLogRequest;
 use App\Services\Fleet\FuelLogService;
+use App\Services\Fleet\FuelStatusService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -18,7 +19,8 @@ use OpenApi\Attributes as OA;
 class FuelLogController extends Controller
 {
     public function __construct(
-        private readonly FuelLogService $fuelLogService
+        private readonly FuelLogService $fuelLogService,
+        private readonly FuelStatusService $fuelStatusService
     ) {}
 
     #[OA\Get(
@@ -66,6 +68,33 @@ class FuelLogController extends Controller
             $contexto = $this->fuelLogService->getContext($vehicleUuid, $date ? (string) $date : null);
 
             return $this->successResponse($contexto, 'Contexto de combustible recuperado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/fleet-management/fuel-logs/status',
+        summary: 'Estado de combustible por vehículo: km recorridos, tope estimado y km restantes',
+        operationId: 'getFuelLogStatus',
+        tags: ['Combustible'],
+        security: [['bearerAuth' => []]],
+        responses: [new OA\Response(response: 200, description: 'Estado recuperado.')]
+    )]
+    public function status(Request $request): JsonResponse
+    {
+        try {
+            $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
+            $thirdPartyUuid = $request->query('third_party_uuid') ?? $request->input('filter.third_party_uuid');
+            $limit = max(1, min(1000, (int) $request->query('limit', '500')));
+
+            $data = $this->fuelStatusService->fleetStatus(
+                $companyUuid ? (string) $companyUuid : null,
+                $thirdPartyUuid ? (string) $thirdPartyUuid : null,
+                $limit
+            );
+
+            return $this->successResponse($data, 'Estado de combustible recuperado con éxito.');
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

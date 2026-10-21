@@ -739,6 +739,7 @@ Route::prefix('v1')->group(function () {
             Route::prefix('fuel-logs')->group(function () {
                 Route::get('/', [FuelLogController::class, 'index'])->name('api.v1.fleet.fuel-logs.index');
                 Route::get('/context', [FuelLogController::class, 'context'])->name('api.v1.fleet.fuel-logs.context');
+                Route::get('/status', [FuelLogController::class, 'status'])->name('api.v1.fleet.fuel-logs.status');
                 Route::post('/', [FuelLogController::class, 'store'])->name('api.v1.fleet.fuel-logs.store');
                 Route::get('/{uuid}', [FuelLogController::class, 'show'])->name('api.v1.fleet.fuel-logs.show');
                 Route::put('/{uuid}', [FuelLogController::class, 'update'])->name('api.v1.fleet.fuel-logs.update');
