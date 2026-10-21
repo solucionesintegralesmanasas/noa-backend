@@ -49,3 +49,9 @@ Thumbs.db
 
 # Respaldos locales de base de datos (nunca versionar)
 /backups/
+
+# Residuos de depuración manual (respuestas de curl, scripts de prueba)
+# Un archivo oculto .algo.json en la raíz es salida de una llamada a la API.
+/.*.json
+/.scratch/
+/.scr*.txt
