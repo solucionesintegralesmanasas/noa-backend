@@ -264,6 +264,79 @@ class AislamientoSucursalTest extends TestCase
         );
     }
 
+    public function test_un_usuario_sucursal_puede_crear_sin_enviar_la_sede_y_queda_en_la_suya(): void
+    {
+        $tipoDocumento = $this->insertar('type_of_documents', ['name' => 'CC']);
+        $ciudad = $this->insertar('cities', ['name' => 'Cali']);
+        $responsabilidad = $this->insertar('tax_responsibilities', ['code' => 'R-98-PN']);
+
+        $datos = [
+            'company_uuid' => $this->empresa,
+            'person_type' => 'NATURAL',
+            'document_type_uuid' => $tipoDocumento,
+            'document_number' => '70000098',
+            'first_name' => 'SIN',
+            'last_name' => 'SEDE ENVIADA',
+            'email' => 'sin.sede.enviada@test.local',
+            'municipality_uuid' => $ciudad,
+            'tax_regime' => '48',
+            'tax_responsibility_uuid' => $responsabilidad,
+            'is_active' => true,
+        ];
+
+        $this->comoSucursal()->postJson('/api/v1/third-parties', $datos)->assertCreated();
+
+        $this->assertSame(
+            $this->sucursalA,
+            ThirdParty::withoutGlobalScopes()->where('document_number', '70000098')->value('branch_uuid')
+        );
+    }
+
+    public function test_el_administrador_no_puede_asignar_una_sede_de_otra_empresa(): void
+    {
+        $otraEmpresa = $this->crearEmpresa();
+        $ciudadAjena = $this->insertar('cities', ['name' => 'Ciudad Ajena']);
+        $sedeAjena = $this->insertar('branches', [
+            'company_uuid' => $otraEmpresa,
+            'name' => 'Sede Ajena',
+            'address' => 'Calle Ajena',
+            'municipality_uuid' => $ciudadAjena,
+            'status' => 1,
+        ]);
+
+        $tipoDocumento = $this->insertar('type_of_documents', ['name' => 'CC']);
+        $ciudad = $this->insertar('cities', ['name' => 'Cali']);
+        $responsabilidad = $this->insertar('tax_responsibilities', ['code' => 'R-97-PN']);
+
+        $datos = [
+            'company_uuid' => $this->empresa,
+            'person_type' => 'NATURAL',
+            'document_type_uuid' => $tipoDocumento,
+            'document_number' => '70000097',
+            'first_name' => 'SEDE',
+            'last_name' => 'AJENA',
+            'email' => 'sede.ajena@test.local',
+            'municipality_uuid' => $ciudad,
+            'branch_uuid' => $sedeAjena,
+            'tax_regime' => '48',
+            'tax_responsibility_uuid' => $responsabilidad,
+            'is_active' => true,
+        ];
+
+        Sanctum::actingAs($this->comoAdmin(), ['*']);
+
+        $respuesta = $this->withHeaders(['X-Company-UUID' => $this->empresa])
+            ->postJson('/api/v1/third-parties', $datos)
+            ->assertStatus(422);
+
+        $campos = collect($respuesta->json('error.details'))->pluck('field');
+        $this->assertContains('branch_uuid', $campos);
+
+        $this->assertNull(
+            ThirdParty::withoutGlobalScopes()->where('document_number', '70000097')->first()
+        );
+    }
+
     public function test_el_administrador_sigue_viendo_todas_las_sedes(): void
     {
         Sanctum::actingAs($this->comoAdmin(), ['*']);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\ThirdParties\ThirdParty;
 
+use App\Http\Requests\Procedure\Radicacion\ValidaEmpresaDelContexto;
 use App\Traits\HandlesApiResponse;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Contracts\Validation\Validator;
@@ -16,7 +17,7 @@ use Illuminate\Validation\Rule;
  */
 class StoreThirdPartyRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaEmpresaDelContexto;
 
     /**
      * Determina si el usuario está autorizado para realizar esta solicitud.
@@ -27,14 +28,28 @@ class StoreThirdPartyRequest extends FormRequest
     }
 
     /**
+     * Si el formulario no envía empresa, se usa la del contexto de la petición.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (! $this->input('company_uuid')) {
+            $this->merge(['company_uuid' => $this->attributes->get('current_company_uuid')]);
+        }
+    }
+
+    /**
      * Obtiene las reglas de validación que se aplican a la solicitud.
      *
      * @return array<string, ValidationRule|array<mixed>|string>
      */
     public function rules(): array
     {
+        // Un usuario restringido a sede no elige la sucursal: el servicio la
+        // fuerza a la suya, así que la regla no puede exigirla de antemano.
+        $sucursalRestringida = (bool) $this->attributes->get('branch_restricted', false);
+
         return [
-            'company_uuid' => ['required', 'uuid', 'exists:companies,uuid'],
+            'company_uuid' => ['required', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'person_type' => ['required', 'string', 'in:NATURAL,JURIDICA'],
             'document_type_uuid' => ['required', 'uuid', 'exists:type_of_documents,uuid'],
             'document_number' => [
@@ -55,13 +70,15 @@ class StoreThirdPartyRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:20'],
             'address' => ['nullable', 'string', 'max:200'],
             'municipality_uuid' => ['required', 'uuid', 'exists:cities,uuid'],
-            'branch_uuid' => [
-                'required',
-                'uuid',
-                Rule::exists('branches', 'uuid')->where(function ($query) {
-                    return $query->where('company_uuid', $this->input('company_uuid'));
-                }),
-            ],
+            'branch_uuid' => $sucursalRestringida
+                ? ['nullable', 'uuid']
+                : [
+                    'required',
+                    'uuid',
+                    Rule::exists('branches', 'uuid')->where(function ($query) {
+                        return $query->where('company_uuid', $this->input('company_uuid'));
+                    }),
+                ],
             'tax_regime' => ['required', 'string', 'in:48,49,47,05,42'],
             'tax_responsibility_uuid' => ['required', 'uuid', 'exists:tax_responsibilities,uuid'],
             'bank_account_number' => ['nullable', 'string', 'max:50'],

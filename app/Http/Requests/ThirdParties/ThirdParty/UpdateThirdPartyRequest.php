@@ -37,6 +37,10 @@ class UpdateThirdPartyRequest extends FormRequest
         $uuid = $this->route('uuid');
         $companyUuid = DB::table('third_parties')->where('uuid', $uuid)->value('company_uuid');
 
+        // Un usuario restringido a sede no elige la sucursal: el servicio la
+        // fuerza a la suya, así que la regla no puede exigirla de antemano.
+        $sucursalRestringida = (bool) $this->attributes->get('branch_restricted', false);
+
         return [
             'person_type' => ['sometimes', 'required', 'string', 'in:NATURAL,JURIDICA'],
             'document_type_uuid' => ['sometimes', 'required', 'uuid', 'exists:type_of_documents,uuid'],
@@ -62,7 +66,7 @@ class UpdateThirdPartyRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:20'],
             'address' => ['nullable', 'string', 'max:200'],
             'municipality_uuid' => ['sometimes', 'required', 'uuid', 'exists:cities,uuid'],
-            'branch_uuid' => $companyUuid
+            'branch_uuid' => $companyUuid && ! $sucursalRestringida
                 ? [
                     'required',
                     'uuid',
