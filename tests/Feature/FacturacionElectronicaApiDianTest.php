@@ -282,6 +282,7 @@ class FacturacionElectronicaApiDianTest extends TestCase
             self::BASE.'/api/ubl2.1/invoice/set123' => Http::sequence()
                 ->push(['message' => 'Unauthenticated.'], 401)
                 ->push(['success' => true, 'data' => ['cufe' => 'cufe-renovado', 'IsValid' => true]], 200),
+            self::BASE.'/api/auth/refresh' => Http::response(['message' => 'No autenticado.'], 401),
             self::BASE.'/api/auth/login' => Http::response([
                 'success' => true,
                 'access_token' => 'jwt_nuevo',
@@ -322,6 +323,66 @@ class FacturacionElectronicaApiDianTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('No se pudo renovar el token de ApiDian');
         $this->puertoFacturas()->emitir($factura);
+    }
+
+    public function test_refresca_el_jwt_sin_volver_a_loguear(): void
+    {
+        $uuidProveedor = $this->proveedor();
+        $factura = $this->factura();
+
+        Http::fake([
+            self::BASE.'/api/ubl2.1/invoice/set123' => Http::sequence()
+                ->push(['message' => 'Unauthenticated.'], 401)
+                ->push(['success' => true, 'data' => ['cufe' => 'cufe-refrescado', 'IsValid' => true]], 200),
+            self::BASE.'/api/auth/refresh' => Http::response([
+                'success' => true,
+                'access_token' => 'jwt_refrescado',
+                'token_type' => 'bearer',
+                'expires_in' => 3600,
+            ], 200),
+        ]);
+
+        $respuesta = $this->puertoFacturas()->emitir($factura);
+
+        $this->assertSame('VALIDADA_SIN_ENVIO', $respuesta['estado']);
+        $this->assertSame('cufe-refrescado', $respuesta['cufe']);
+
+        // Refresh JWT viaja con el token anterior y no se llama al login.
+        Http::assertSent(fn ($peticion) => $peticion->url() === self::BASE.'/api/auth/refresh'
+            && $peticion->hasHeader('Authorization', 'Bearer token_de_prueba'));
+        Http::assertNotSent(fn ($peticion) => $peticion->url() === self::BASE.'/api/auth/login');
+
+        // El token renovado queda guardado y se usa en el reintento.
+        Http::assertSent(fn ($peticion) => str_contains($peticion->url(), '/api/ubl2.1/invoice/set123')
+            && $peticion->hasHeader('Authorization', 'Bearer jwt_refrescado'));
+        $this->assertSame('jwt_refrescado', BillingProvider::where('uuid', $uuidProveedor)->firstOrFail()->client_secret);
+    }
+
+    public function test_jwt_vencido_se_refresca_antes_de_enviar_sin_401(): void
+    {
+        $jwtVencido = 'eyJhbGciOiJIUzI1NiJ9.' . rtrim(strtr(base64_encode(json_encode(['exp' => time() - 60])), '+/', '-_'), '=') . '.firma';
+
+        $this->proveedor([
+            'client_secret' => \Illuminate\Support\Facades\Crypt::encryptString($jwtVencido),
+        ]);
+        $factura = $this->factura();
+
+        Http::fake([
+            self::BASE.'/api/auth/refresh' => Http::response(['access_token' => 'jwt_vigente'], 200),
+            self::BASE.'/api/ubl2.1/invoice/set123' => Http::response([
+                'success' => true,
+                'data' => ['cufe' => 'cufe-proactivo', 'IsValid' => true],
+            ], 200),
+        ]);
+
+        $respuesta = $this->puertoFacturas()->emitir($factura);
+
+        $this->assertSame('VALIDADA_SIN_ENVIO', $respuesta['estado']);
+
+        // Se refresca antes de la primera petición: un solo envío, ya con el token nuevo.
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($peticion) => str_contains($peticion->url(), '/api/ubl2.1/invoice/set123')
+            && $peticion->hasHeader('Authorization', 'Bearer jwt_vigente'));
     }
 
     public function test_sin_proveedor_activo_usa_el_driver_nulo(): void
