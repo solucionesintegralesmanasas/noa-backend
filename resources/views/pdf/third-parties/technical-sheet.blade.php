@@ -1,108 +1,68 @@
-<!DOCTYPE html>
-<html lang="es">
+@extends('pdf.layouts.base')
 
-<head>
-    <meta charset="UTF-8">
-    <title>Ficha Técnica del Conductor</title>
-    <style>
-        @page {
-            size: letter;
-            margin: 0cm 0cm;
-        }
+@php
+    // Se resuelve antes de las secciones: `@section('header')` se ejecuta
+    // antes que `@section('content')` y ambas usan la empresa.
+    $company = $driver->company;
+@endphp
 
-        /**
-        * Define los márgenes reales del contenido de tu PDF
-        * Aquí arreglarás los márgenes del encabezado y pie de página
-        * De tu imagen de fondo.
-        **/
-        body {
-            margin-top: 1cm;
-            margin-bottom: 1cm;
-            margin-left: 1cm;
-            margin-right: 1cm;
-            font-family: Arial, sans-serif;
-            font-size: 10px;
-            padding: 0;
-            color: #000;
-            background-color: #fff;
-        }
+{{-- Ficha técnica del conductor. Sigue el mismo estándar que
+     `pdf.fleet.technical-sheet-vehicles`: layout base (encabezado, membrete y
+     marca de agua compartidos), logo desde `$data['logo']` y sin CSS duplicado. --}}
 
-        #watermark {
-            position: fixed;
-            top: 25%;
-            left: 15%;
-            width: 70%;
-            height: auto;
-            z-index: -1000;
-        }
+@push('styles')
+    body {
+        margin-top: 0.6cm;
+        margin-bottom: 0.6cm;
+        margin-left: 0.6cm;
+        margin-right: 0.6cm;
+        font-size: 9px;
+    }
 
-        #watermark img {
-            width: 100%;
-            height: auto;
-            opacity: 0.15;
-        }
+    /* La base aplica borde y padding a todas las celdas; esta ficha usa
+       bordes solo en las tablas de datos (.table-solid) y líneas de campo. */
+    table {
+        table-layout: auto;
+    }
 
-        @page {
-            margin: 0.6cm;
-            size: letter portrait;
-        }
+    td,
+    th {
+        border: none;
+        padding: 0;
+        vertical-align: middle;
+    }
 
-        body {
-            font-size: 9px;
-        }
+    .table-solid {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 5px;
+    }
 
-        .table-solid {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 5px;
-        }
+    .table-solid td,
+    .table-solid th {
+        border: 1px solid #000;
+        padding: 2px 3px;
+    }
 
-        .table-solid td,
-        .table-solid th {
-            border: 1px solid #000;
-            padding: 2px 3px;
-        }
+    .text-center {
+        text-align: center;
+    }
 
-        .text-center {
-            text-align: center;
-        }
+    .font-bold {
+        font-weight: bold;
+    }
 
-        .font-bold {
-            font-weight: bold;
-        }
+    .uppercase {
+        text-transform: uppercase;
+    }
+@endpush
 
-        .uppercase {
-            text-transform: uppercase;
-        }
-    </style>
-</head>
-
-<body>
-    @php
-        $company = $driver->company;
-        $hasLogo = isset($images) && isset($images['logo']) && !empty($images['logo']);
-    @endphp
-
-    @if (!empty($letterhead ?? null))
-        <div style="text-align:center;margin-bottom:6px;">
-            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
-        </div>
-    @endif
-    @php
-        $fondo_tp = (!empty($ocultar_marca ?? false) || !empty($letterhead ?? null)) ? null : ($logo_fondo ?? ($hasLogo ? $images['logo'] : null));
-    @endphp
-    @if (!empty($fondo_tp))
-        <div id="watermark">
-            <img src="data:image/png;base64,{{ $fondo_tp }}" />
-        </div>
-    @endif
-
-    <!-- HEADER BLOCK -->
+@section('header')
     <table style="width: 100%; margin-bottom: 6px; border-collapse: collapse;">
         <tr>
             <td style="width: 25%; text-align: center; vertical-align: middle;">
-                @if ($hasLogo)
-                    <img src="data:image/png;base64, {{ $images['logo'] }}"
+                @if (!empty($data['logo']))
+                    <img src="data:image/png;base64,{{ $data['logo'] }}" alt="Logo"
                         style="max-height: 60px; max-width: 100%;">
                 @else
                     <div style="font-weight: bold; font-size: 14px;">
@@ -143,6 +103,21 @@
             </td>
         </tr>
     </table>
+@endsection
+
+@section('content')
+    @php
+        $license = $driver->licenciaActual();
+        $contract = $driver->currentEmploymentContract();
+        $contractTypeName = $contract ? str_replace('_', ' ', strtolower($contract->contract_type)) : 'N/A';
+
+        $latestContribution = $driver->socialSecurityContributions->sortByDesc('created_at')->first();
+
+        $epsName = $latestContribution && $latestContribution->eps_name ? $latestContribution->eps_name : ($latestContribution && $latestContribution->health_paid ? 'ACTIVA' : 'N/A');
+        $riskName = $latestContribution && $latestContribution->risk_labor_name ? $latestContribution->risk_labor_name : ($latestContribution && $latestContribution->risk_labor_paid ? 'ACTIVA' : 'N/A');
+        $pensionName = $latestContribution && $latestContribution->pension_name ? $latestContribution->pension_name : ($latestContribution && $latestContribution->pension_paid ? 'ACTIVA' : 'N/A');
+        $compensationName = $latestContribution && $latestContribution->compensation_fund_name ? $latestContribution->compensation_fund_name : ($latestContribution && $latestContribution->compensation_fund_paid ? 'ACTIVA' : 'N/A');
+    @endphp
 
     <!-- PERSONAL DATA -->
     <table style="width: 100%; border-collapse: collapse; margin-bottom: 6px;">
@@ -151,8 +126,7 @@
                 <table style="width: 100%; border-collapse: collapse;">
                     <tr>
                         <td class="font-bold" style="padding: 2px 0; border-bottom: 1px solid #000; width: 35%;">
-                            CEDULA
-                            DE CIUDADANIA:</td>
+                            CEDULA DE CIUDADANIA:</td>
                         <td style="padding: 2px 0; border-bottom: 1px solid #000;" class="uppercase">
                             {{ $driver->document_number }}</td>
                     </tr>
@@ -164,8 +138,7 @@
                     </tr>
                     <tr>
                         <td class="font-bold" style="padding: 2px 0; border-bottom: 1px solid #000;">FECHA Y LUGAR
-                            DE
-                            NACIMIENTO:</td>
+                            DE NACIMIENTO:</td>
                         <td style="padding: 2px 0; border-bottom: 1px solid #000;" class="uppercase">
                             {{ optional(optional($driver->municipality)->department)->name ? optional($driver->municipality)->name . ', ' . $driver->municipality->department->name : 'N/A' }}
                         </td>
@@ -198,11 +171,7 @@
                         <td class="font-bold" style="padding: 2px 0; border-bottom: 1px solid #000;">CORREO
                             ELECTRONICO:</td>
                         <td style="padding: 2px 0; border-bottom: 1px solid #000;" class="uppercase">
-                            @if ($driver->email)
-                                {{ $driver->email }}
-                            @else
-                                NO TIENE
-                            @endif
+                            {{ $driver->email ?: 'NO TIENE' }}
                         </td>
                     </tr>
                 </table>
@@ -210,8 +179,9 @@
             <td style="width: 25%; text-align: center; vertical-align: top;">
                 <div style="border: 1px solid #000; height: 110px; width: 100%; display: table;">
                     <div style="display: table-cell; vertical-align: middle; color: #000;">
-                        @if (isset($images) && isset($images['photo']) && !empty($images['photo']))
-                            <img src="data:image/png;base64,{{ $images['photo'] }}" style="max-height: 105px; max-width: 100%;" />
+                        @if (!empty($data['photo']))
+                            <img src="data:image/png;base64,{{ $data['photo'] }}" alt="Foto"
+                                style="max-height: 105px; max-width: 100%;" />
                         @else
                             FOTO
                         @endif
@@ -239,9 +209,6 @@
 
     <!-- DRIVER LICENSE -->
     <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 6px;">LICENCIA(S) DE CONDUCCIÓN</div>
-    @php
-        $license = $driver->licenciaActual();
-    @endphp
     <table class="table-solid text-center">
         <tr>
             <td class="font-bold" style="width: 20%;">NRO. LICENCIA</td>
@@ -263,10 +230,6 @@
 
     <!-- CONTRACT -->
     <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 6px;">INFORMACIÓN DEL CONTRATO</div>
-    @php
-        $contract = $driver->currentEmploymentContract();
-        $contractTypeName = $contract ? str_replace('_', ' ', strtolower($contract->contract_type)) : 'N/A';
-    @endphp
     <table class="table-solid text-center">
         <tr>
             <td class="font-bold" style="width: 17%;">TIPO DE CONTRATO</td>
@@ -291,14 +254,6 @@
     <!-- SOCIAL SECURITY -->
     <div class="text-center font-bold" style="margin-bottom: 4px; margin-top: 6px;">INFORMACION DE AFILIACIONES A
         SEGURIDAD SOCIAL</div>
-    @php
-        $latestContribution = $driver->socialSecurityContributions->sortByDesc('created_at')->first();
-        
-        $epsName = $latestContribution && $latestContribution->eps_name ? $latestContribution->eps_name : ($latestContribution && $latestContribution->health_paid ? 'ACTIVA' : 'N/A');
-        $riskName = $latestContribution && $latestContribution->risk_labor_name ? $latestContribution->risk_labor_name : ($latestContribution && $latestContribution->risk_labor_paid ? 'ACTIVA' : 'N/A');
-        $pensionName = $latestContribution && $latestContribution->pension_name ? $latestContribution->pension_name : ($latestContribution && $latestContribution->pension_paid ? 'ACTIVA' : 'N/A');
-        $compensationName = $latestContribution && $latestContribution->compensation_fund_name ? $latestContribution->compensation_fund_name : ($latestContribution && $latestContribution->compensation_fund_paid ? 'ACTIVA' : 'N/A');
-    @endphp
 
     <table class="table-solid text-center" style="margin-bottom: 6px;">
         <tr>
@@ -349,29 +304,4 @@
             <td style="width: 20%;">{{ $latestContribution && $latestContribution->compensation_fund_affiliation_date ? \Carbon\Carbon::parse($latestContribution->compensation_fund_affiliation_date)->format('d/m/Y') : 'N/A' }}</td>
         </tr>
     </table>
-
-    <!-- VEHICLES -->
-    {{-- <table class="table-solid text-center" style="margin-top: 6px;">
-        <tr>
-            <td colspan="6" class="font-bold">VEHÍCULOS ASIGNADOS</td>
-        </tr>
-        <tr>
-            <td class="font-bold" style="vertical-align: middle;">PLACA</td>
-            <td style="vertical-align: middle;">
-                @if (isset($driver->vehicles) && $driver->vehicles->count() > 0)
-                    @foreach ($driver->vehicles as $v)
-                        <div>{{ $v->vehicle_license_plate }}</div>
-                    @endforeach
-                @else
-                    <div style="padding: 20px 0;">N/A</div>
-                @endif
-            </td>
-            <td style="vertical-align: middle;">No MOVIL</td>
-            <td style="vertical-align: middle;">{{ $driver->phone ?? 'N/A' }}</td>
-            <td style="vertical-align: middle;">FECHA DE ENTREGA</td>
-            <td style="vertical-align: middle;">{{ date('d/m/Y') }}</td>
-        </tr>
-    </table> --}}
-</body>
-
-</html>
+@endsection

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\ServiceDeliveryControlSheet;
 
+use App\Http\Requests\Procedure\Radicacion\ValidaEmpresaDelContexto;
 use App\Traits\HandlesApiResponse;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -11,17 +12,25 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 
 class StoreServiceDeliveryControlSheetRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaEmpresaDelContexto, ValidaPertenenciaPcp;
 
     public function authorize(): bool
     {
         return true;
     }
 
+    /**
+     * Si el formulario no envía empresa, se usa la del contexto de la petición.
+     */
+    protected function prepareForValidation(): void
+    {
+        $this->prepararEmpresaDelContexto();
+    }
+
     public function rules(): array
     {
         return [
-            'company_uuid' => ['required', 'uuid', 'exists:companies,uuid'],
+            'company_uuid' => ['required', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'official_name_and_surname' => ['nullable', 'string', 'max:255'],
             'service_date' => ['required', 'date'],
             'start_date' => ['nullable', 'date'],
@@ -36,14 +45,14 @@ class StoreServiceDeliveryControlSheetRequest extends FormRequest
             'total_toll_value' => ['nullable', 'numeric', 'min:0'],
             'type_of_control_sheet' => ['nullable', 'in:DIRECTO_CON_LA_EMPRESA,SUBCONTRATADO,CON_VEHICULO_CONTRATADO,EXTERNO_PLATAFORMA'],
             'is_active' => ['nullable', 'boolean'],
-            'vehicle_uuid' => ['nullable', 'uuid', 'exists:vehicles,uuid'],
-            'third_party_uuid' => ['nullable', 'uuid', 'exists:third_parties,uuid'],
-            'fuec_uuid' => ['nullable', 'uuid', 'exists:fuecs,uuid'],
+            'vehicle_uuid' => ['nullable', 'uuid', $this->reglaVehiculoDelContexto()],
+            'third_party_uuid' => ['nullable', 'uuid', $this->reglaTerceroDelContexto()],
+            'fuec_uuid' => ['nullable', 'uuid', $this->reglaFuecDelContexto()],
             'vehicle_class_uuid' => ['nullable', 'uuid', 'exists:vehicle_class,uuid'],
             'vehicle_license_plate' => ['nullable', 'string', 'max:20'],
             'driver_name_and_surname' => ['nullable', 'string', 'max:255'],
             'driver_license_number' => ['nullable', 'string', 'max:20'],
-            'project_uuid' => ['nullable', 'uuid', 'exists:projects,uuid'],
+            'project_uuid' => ['nullable', 'uuid', $this->reglaProyectoDelContexto()],
             'routes' => ['nullable', 'array'],
             'routes.*.uuid' => ['sometimes', 'nullable', 'string'],
             'routes.*.order_index' => ['sometimes', 'nullable', 'integer'],

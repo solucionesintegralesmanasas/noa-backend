@@ -23,11 +23,13 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
+use App\Http\Controllers\Api\V1\Billing\BillingProviderConfigController;
 use App\Http\Controllers\Api\V1\Billing\BillingProviderController;
 use App\Http\Controllers\Api\V1\Billing\BillingResolutionController;
 use App\Http\Controllers\Api\V1\Billing\CommercialInvoiceController;
 use App\Http\Controllers\Api\V1\Billing\CreditNoteController;
 use App\Http\Controllers\Api\V1\Billing\DebitNoteController;
+use App\Http\Controllers\Api\V1\Billing\ElectronicDocumentController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -54,6 +56,8 @@ use App\Http\Controllers\Api\V1\Fleet\AffiliateAdminChargeController;
 use App\Http\Controllers\Api\V1\Fleet\BusinessCollaborationAgreementController;
 use App\Http\Controllers\Api\V1\Fleet\ControlSheetController;
 use App\Http\Controllers\Api\V1\Fleet\DriverLicenseController;
+use App\Http\Controllers\Api\V1\Fleet\FuelLogController;
+use App\Http\Controllers\Api\V1\Fleet\FuelRequestController;
 use App\Http\Controllers\Api\V1\Fleet\InspectionResultController;
 use App\Http\Controllers\Api\V1\Fleet\MaintenanceController;
 use App\Http\Controllers\Api\V1\Fleet\MaintenancePartController;
@@ -124,6 +128,9 @@ Route::prefix('v1')->group(function () {
     Route::prefix('public')->group(function () {
         Route::get('/fuecs/{code}', [FuecController::class, 'validatePublic'])
             ->name('api.v1.public.fuecs.validate');
+
+        Route::get('/fuel-requests/{token}', [FuelRequestController::class, 'publicShow'])
+            ->name('api.v1.public.fuel-requests.show');
 
         // Endpoint para Web Cron (cPanel / Hostings Compartidos)
         Route::get('/cron/trigger-notifications', function (EmailLogService $service) {
@@ -606,6 +613,21 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [BillingProviderController::class, 'show'])->name('api.v1.billing.billing-providers.show');
                 Route::put('/{uuid}', [BillingProviderController::class, 'update'])->name('api.v1.billing.billing-providers.update');
                 Route::delete('/{uuid}', [BillingProviderController::class, 'destroy'])->name('api.v1.billing.billing-providers.destroy');
+
+                // Módulo 01 - Configuraciones Básicas de ApiDian (por proveedor).
+                // Permisos explícitos: la configuración vive en ApiDian y no
+                // puede quedar solo en la auditoría de `authz` (estaba SIN EVALUAR).
+                Route::prefix('{uuid}/configuracion')->group(function () {
+                    Route::get('/', [BillingProviderConfigController::class, 'show'])->name('api.v1.billing.billing-providers.configuracion.show')->middleware('permission:billing_providers.index');
+                    Route::post('/', [BillingProviderConfigController::class, 'guardarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.guardar')->middleware('permission:billing_providers.create');
+                    Route::put('/software', [BillingProviderConfigController::class, 'software'])->name('api.v1.billing.billing-providers.configuracion.software')->middleware('permission:billing_providers.update');
+                    Route::put('/software-nomina', [BillingProviderConfigController::class, 'softwareNomina'])->name('api.v1.billing.billing-providers.configuracion.software-nomina')->middleware('permission:billing_providers.update');
+                    Route::put('/certificado', [BillingProviderConfigController::class, 'certificado'])->name('api.v1.billing.billing-providers.configuracion.certificado')->middleware('permission:billing_providers.update');
+                    Route::post('/resoluciones', [BillingProviderConfigController::class, 'resoluciones'])->name('api.v1.billing.billing-providers.configuracion.resoluciones')->middleware('permission:billing_providers.create');
+                    Route::put('/ambiente', [BillingProviderConfigController::class, 'ambiente'])->name('api.v1.billing.billing-providers.configuracion.ambiente')->middleware('permission:billing_providers.update');
+                    Route::put('/webhook', [BillingProviderConfigController::class, 'webhook'])->name('api.v1.billing.billing-providers.configuracion.webhook')->middleware('permission:billing_providers.update');
+                    Route::delete('/empresa', [BillingProviderConfigController::class, 'eliminarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.empresa-eliminar')->middleware('permission:billing_providers.delete');
+                });
             });
 
             Route::prefix('billing-resolutions')->group(function () {
@@ -645,6 +667,16 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [DebitNoteController::class, 'show'])->name('api.v1.billing.debit-notes.show');
                 Route::post('/{uuid}/emitir', [DebitNoteController::class, 'emitir'])->name('api.v1.billing.debit-notes.emitir');
                 Route::post('/{uuid}/anular', [DebitNoteController::class, 'anular'])->name('api.v1.billing.debit-notes.anular');
+            });
+
+            Route::prefix('electronic-documents')->group(function () {
+                Route::get('/', [ElectronicDocumentController::class, 'index'])->name('api.v1.billing.electronic-documents.index')->middleware('permission:electronic_documents.index');
+                Route::post('/', [ElectronicDocumentController::class, 'store'])->name('api.v1.billing.electronic-documents.store')->middleware('permission:electronic_documents.create');
+                Route::get('/{uuid}', [ElectronicDocumentController::class, 'show'])->name('api.v1.billing.electronic-documents.show')->middleware('permission:electronic_documents.profile');
+                Route::put('/{uuid}', [ElectronicDocumentController::class, 'update'])->name('api.v1.billing.electronic-documents.update')->middleware('permission:electronic_documents.update');
+                Route::post('/{uuid}/emitir', [ElectronicDocumentController::class, 'emitir'])->name('api.v1.billing.electronic-documents.emitir')->middleware('permission:electronic_documents.update');
+                Route::get('/{uuid}/estado', [ElectronicDocumentController::class, 'estado'])->name('api.v1.billing.electronic-documents.estado')->middleware('permission:electronic_documents.profile');
+                Route::delete('/{uuid}', [ElectronicDocumentController::class, 'destroy'])->name('api.v1.billing.electronic-documents.destroy')->middleware('permission:electronic_documents.delete');
             });
         });
 
@@ -707,6 +739,34 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [MaintenanceController::class, 'show'])->name('api.v1.fleet.maintenances.show');
                 Route::put('/{uuid}', [MaintenanceController::class, 'update'])->name('api.v1.fleet.maintenances.update');
                 Route::delete('/{uuid}', [MaintenanceController::class, 'destroy'])->name('api.v1.fleet.maintenances.destroy');
+            });
+
+            // Control de Combustible, Kilometraje y Saldos
+            Route::prefix('fuel-logs')->group(function () {
+                Route::get('/', [FuelLogController::class, 'index'])->name('api.v1.fleet.fuel-logs.index')->middleware('permission:fuel_logs.index');
+                Route::get('/context', [FuelLogController::class, 'context'])->name('api.v1.fleet.fuel-logs.context')->middleware('permission:fuel_logs.index');
+                Route::get('/status', [FuelLogController::class, 'status'])->name('api.v1.fleet.fuel-logs.status');
+                Route::post('/', [FuelLogController::class, 'store'])->name('api.v1.fleet.fuel-logs.store')->middleware('permission:fuel_logs.create');
+                Route::get('/{uuid}', [FuelLogController::class, 'show'])->name('api.v1.fleet.fuel-logs.show')->middleware('permission:fuel_logs.index');
+                Route::put('/{uuid}', [FuelLogController::class, 'update'])->name('api.v1.fleet.fuel-logs.update')->middleware('permission:fuel_logs.update');
+                Route::delete('/{uuid}', [FuelLogController::class, 'destroy'])->name('api.v1.fleet.fuel-logs.destroy')->middleware('permission:fuel_logs.delete');
+            });
+
+            // Solicitudes de Tanqueo
+            Route::prefix('fuel-requests')->group(function () {
+                Route::get('/', [FuelRequestController::class, 'index'])->name('api.v1.fleet.fuel-requests.index');
+                Route::post('/', [FuelRequestController::class, 'store'])->name('api.v1.fleet.fuel-requests.store');
+                Route::get('/{uuid}', [FuelRequestController::class, 'show'])->name('api.v1.fleet.fuel-requests.show');
+                Route::get('/{uuid}/qr', [FuelRequestController::class, 'qr'])->name('api.v1.fleet.fuel-requests.qr');
+                Route::post('/{uuid}/approve', [FuelRequestController::class, 'approve'])
+                    ->middleware('permission:fuel_requests.approve')
+                    ->name('api.v1.fleet.fuel-requests.approve');
+                Route::post('/{uuid}/reject', [FuelRequestController::class, 'reject'])
+                    ->middleware('permission:fuel_requests.reject')
+                    ->name('api.v1.fleet.fuel-requests.reject');
+                Route::post('/{uuid}/cancel', [FuelRequestController::class, 'cancel'])
+                    ->middleware('permission:fuel_requests.cancel')
+                    ->name('api.v1.fleet.fuel-requests.cancel');
             });
 
             // Repuestos de Mantenimiento
@@ -891,6 +951,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('/project-summary', [ServiceDeliveryControlSheetController::class, 'projectSummary'])->name('api.v1.fleet.service-delivery-control-sheets.project-summary');
                 Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
                 Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
+                // SPEC-009: creación masiva por proyecto (una hoja por coche),
+                // antes de `/{uuid}` para que el wildcard no la capture.
+                Route::post('/bulk', [ServiceDeliveryControlSheetController::class, 'storeBulk'])->middleware('permission:service_delivery_control_sheets.create')->name('api.v1.fleet.service-delivery-control-sheets.bulk');
                 Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
                 Route::get('/reports/{tipo}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadReportPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.pdf');
                 Route::get('/reports/{tipo}/excel', [ServiceDeliveryControlSheetController::class, 'downloadReportExcel'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.excel');

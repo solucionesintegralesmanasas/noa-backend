@@ -9,11 +9,11 @@ return [
     | Driver de facturación electrónica
     |--------------------------------------------------------------------------
     |
-    | nulo: genera y guarda el UBL 2.1 sin transmitir (fases 1 y 2).
-    | La fase del proveedor tecnológico agrega su driver aquí y cambia
-    | FACTURACION_DRIVER en el .env, sin tocar el resto del módulo.
+    | El driver se resuelve POR EMPRESA desde billing_providers.driver
+    | ('apidian' con credenciales de cada empresa; 'nulo' en su defecto).
+    | Los valores aquí solo configuran el transporte HTTP hacia el proveedor.
     |
     */
-    'driver' => env('FACTURACION_DRIVER', 'nulo'),
+    'timeout' => env('APIDIAN_TIMEOUT', 30),
 
 ];

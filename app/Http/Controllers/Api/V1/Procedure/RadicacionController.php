@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1\Procedure;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Procedure\Radicacion\GenerarTxtRequest;
+use App\Http\Requests\Procedure\Radicacion\SiguienteCodigoRadicacionRequest;
 use App\Http\Requests\Procedure\Radicacion\StoreEnlaceFirmaRequest;
 use App\Http\Requests\Procedure\Radicacion\StoreExpedienteRadicacionRequest;
 use App\Services\Procedure\ContractSignatureService;
@@ -37,12 +38,13 @@ class RadicacionController extends Controller
     }
 
     /**
-     * Código de trámite autogenerado (YYYYMMDDHHmmss) libre para la empresa.
+     * Código de trámite autogenerado (YYYYMMDDHHmmss) libre para la empresa del contexto.
      */
-    public function siguienteCodigo(Request $request): JsonResponse
+    public function siguienteCodigo(SiguienteCodigoRadicacionRequest $request): JsonResponse
     {
         try {
-            $companyUuid = $request->query('company_uuid') ?: $request->attributes->get('current_company_uuid');
+            $companyUuid = $request->validated()['company_uuid']
+                ?? $request->attributes->get('current_company_uuid');
 
             return $this->successResponse(
                 ['procedure_code' => $this->radicacion->siguienteCodigo($companyUuid)],

@@ -232,6 +232,9 @@ final class PcpEvidence
         $query = ServiceDeliveryControlSheet::query()
             ->whereNull('parent_uuid')
             ->where('project_uuid', $projectUuid)
+            // SPEC-009: el resumen refleja la asignación vigente del proyecto,
+            // igual que el listado; las hojas retiradas no cuentan.
+            ->where('retirada_de_proyecto', false)
             ->with(['routes', 'children.routes'])
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => fn ($q) => $q->where('is_active', true)]);

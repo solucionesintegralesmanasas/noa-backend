@@ -35,6 +35,11 @@ class UpdateThirdPartyRequest extends FormRequest
     public function rules(): array
     {
         $uuid = $this->route('uuid');
+        $companyUuid = DB::table('third_parties')->where('uuid', $uuid)->value('company_uuid');
+
+        // Un usuario restringido a sede no elige la sucursal: el servicio la
+        // fuerza a la suya, así que la regla no puede exigirla de antemano.
+        $sucursalRestringida = (bool) $this->attributes->get('branch_restricted', false);
 
         return [
             'person_type' => ['sometimes', 'required', 'string', 'in:NATURAL,JURIDICA'],
@@ -61,6 +66,15 @@ class UpdateThirdPartyRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:20'],
             'address' => ['nullable', 'string', 'max:200'],
             'municipality_uuid' => ['sometimes', 'required', 'uuid', 'exists:cities,uuid'],
+            'branch_uuid' => $companyUuid && ! $sucursalRestringida
+                ? [
+                    'required',
+                    'uuid',
+                    Rule::exists('branches', 'uuid')->where(function ($query) use ($companyUuid) {
+                        return $query->where('company_uuid', $companyUuid);
+                    }),
+                ]
+                : ['nullable', 'uuid'],
             'tax_regime' => ['sometimes', 'required', 'string', 'in:48,49,47,05,42'],
             'tax_responsibility_uuid' => ['sometimes', 'required', 'uuid', 'exists:tax_responsibilities,uuid'],
             'bank_account_number' => ['nullable', 'string', 'max:50'],
@@ -124,6 +138,7 @@ class UpdateThirdPartyRequest extends FormRequest
             'phone' => 'Teléfono',
             'address' => 'Dirección',
             'municipality_uuid' => 'Municipio',
+            'branch_uuid' => 'Sucursal',
             'tax_regime' => 'Régimen tributario',
             'tax_responsibility_uuid' => 'Responsabilidad fiscal',
             'bank_account_number' => 'Número de cuenta bancaria',

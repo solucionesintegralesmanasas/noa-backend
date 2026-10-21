@@ -12,6 +12,17 @@ use Closure;
  */
 trait ValidaEmpresaDelContexto
 {
+    /**
+     * Si el cliente no envía empresa, se usa la del contexto de la petición.
+     * Llámala desde `prepareForValidation` del request (antes de las reglas).
+     */
+    protected function prepararEmpresaDelContexto(): void
+    {
+        if (! $this->input('company_uuid')) {
+            $this->merge(['company_uuid' => $this->attributes->get('current_company_uuid')]);
+        }
+    }
+
     protected function reglaEmpresaDelContexto(): Closure
     {
         return function (string $attribute, mixed $value, Closure $fail): void {

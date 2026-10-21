@@ -28,6 +28,13 @@ return [
     'enforce' => (bool) env('AUTHZ_ENFORCE', false),
 
     /*
+     | Aislamiento por sede: un usuario con rol SUCURSAL solo ve los registros de la
+     | sede asignada a su tercero vinculado. Los administradores no se restringen.
+     | BRANCH_ISOLATION=false lo desactiva (útil para diagnóstico o rollback).
+     */
+    'branch_isolation' => (bool) env('BRANCH_ISOLATION', true),
+
+    /*
      | Los catálogos (api.v1.catalogs.*) son datos COMPARTIDOS entre todas las empresas: su escritura se
      | bloquea ya (SUPERADMIN y ADMIN_EMPRESA) aunque `enforce` siga en modo auditoría. Se puede apagar con
      | AUTHZ_ENFORCE_CATALOGS=false.
@@ -68,6 +75,9 @@ return [
         'owner-drivers' => 'vehicles',
         'vehicles-branches' => 'vehicles',
         'fuec-passengers' => 'fuec',
+        // La configuración de ApiDian se protege con los permisos del proveedor;
+        // sin este mapeo las 9 rutas quedaban SIN EVALUAR en authz:report.
+        'configuracion' => 'billing_providers',
     ],
 
     /*

@@ -72,6 +72,26 @@ class SetCompanyContext
 
             $request->attributes->set('current_company_uuid', $company->uuid);
             $request->attributes->set('current_company', $company);
+
+            // Aislamiento por sede: el rol SUCURSAL queda limitado a la sede de su
+            // tercero vinculado. Los administradores siguen viendo toda la empresa.
+            if (Auth::check()) {
+                $user = Auth::user();
+                $branchRestricted = $user->hasRole('SUCURSAL')
+                    && ! $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA']);
+
+                if ($branchRestricted) {
+                    $thirdPartyUuid = $companyUser?->pivot?->third_party_uuid;
+                    $branchUuid = $thirdPartyUuid
+                        ? \App\Models\ThirdParty::withoutGlobalScopes()
+                            ->where('uuid', $thirdPartyUuid)
+                            ->value('branch_uuid')
+                        : null;
+
+                    $request->attributes->set('branch_restricted', true);
+                    $request->attributes->set('current_branch_uuid', $branchUuid);
+                }
+            }
             // La sesión solo se escribe si cambió: con SESSION_DRIVER=database cada
             // escritura es un UPDATE a la misma fila y las peticiones API en paralelo
             // (la vista dispara ~8 a la vez) se bloquean entre sí hasta el timeout.

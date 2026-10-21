@@ -57,6 +57,7 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         'exception_approved_by',
         'exception_approved_at',
         'is_active',
+        'retirada_de_proyecto',
     ];
 
     protected $casts = [
@@ -69,6 +70,7 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         'number_of_tolls' => 'integer',
         'total_toll_value' => 'decimal:2',
         'is_active' => 'boolean',
+        'retirada_de_proyecto' => 'boolean',
         'exception_approved_at' => 'datetime',
     ];
 

@@ -14,6 +14,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Spatie\QueryBuilder\QueryBuilder;
 use Throwable;
 
@@ -95,6 +96,49 @@ abstract class BaseService
     private const TABLAS_AISLADAS_POR_AFILIADO = [
         'vehicles', 'vehicle_documents', 'operation_cards', 'vehicle_inspections', 'owners_drivers',
     ];
+
+    /**
+     * Sede efectiva del usuario para escrituras:
+     * - null: sin restricción (administradores).
+     * - '': restringido pero sin sede asignada.
+     * - uuid: sede a la que debe quedar asociado el registro.
+     */
+    protected function sucursalActual(): ?string
+    {
+        if (! config('authorization.branch_isolation', true)) {
+            return null;
+        }
+
+        $request = request();
+        if (! $request->attributes->get('branch_restricted', false)) {
+            return null;
+        }
+
+        return (string) ($request->attributes->get('current_branch_uuid') ?? '');
+    }
+
+    /**
+     * Fuerza la sede del usuario en los datos de escritura. Un usuario restringido
+     * no puede crear ni mover registros a otra sede.
+     */
+    protected function forzarSucursal(array $data, string $key = 'branch_uuid'): array
+    {
+        $branchUuid = $this->sucursalActual();
+
+        if ($branchUuid === null) {
+            return $data;
+        }
+
+        if ($branchUuid === '') {
+            throw ValidationException::withMessages([
+                $key => 'El usuario no tiene una sede asignada.',
+            ]);
+        }
+
+        $data[$key] = $branchUuid;
+
+        return $data;
+    }
 
     /**
      * Aplica al acceso por UUID el mismo filtro de afiliado que los listados, para que conocer el UUID

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\ServiceDeliveryControlSheet;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ServiceDeliveryControlSheet\BulkStoreServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\StoreServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\UpdateServiceDeliveryControlSheetRequest;
 use App\Models\Vehicle;
@@ -182,6 +183,43 @@ class ServiceDeliveryControlSheetController extends Controller
             $record = $this->serviceDeliveryControlSheetService->createServiceDeliveryControlSheet($request->validated());
 
             return $this->successResponse($record, 'Registro creado con éxito.', 201);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Post(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/bulk',
+        summary: 'Creación masiva de Hojas de Control por proyecto (una por coche)',
+        description: 'SPEC-009: crea una hoja de control directo por cada coche marcado en vehicle_uuids, con asignación activa en el proyecto. El par conductor↔vehículo y el responsable salen de la asignación vigente; pares, responsable y FUEC del cuerpo se ignoran. Tipos externos quedan fuera (usar el store individual).',
+        operationId: 'storeBulkServiceDeliveryControlSheets',
+        tags: ['ServiceDeliveryControlSheet'],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['company_uuid', 'project_uuid', 'service_date', 'vehicle_uuids'],
+                properties: [
+                    new OA\Property(property: 'company_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'project_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'service_date', type: 'string', format: 'date'),
+                    new OA\Property(property: 'start_date', type: 'string', format: 'date', nullable: true),
+                    new OA\Property(property: 'end_date', type: 'string', format: 'date', nullable: true),
+                    new OA\Property(property: 'vehicle_uuids', type: 'array', items: new OA\Items(type: 'string', format: 'uuid')),
+                    new OA\Property(property: 'routes', type: 'array', items: new OA\Items(type: 'object'), description: 'N recorridos: origin, destination'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 201, description: 'Creado con éxito. Devuelve created, daily_sheets y las hojas.'),
+            new OA\Response(response: 422, description: 'Alguno de los coches no tiene asignación activa o fechas fuera del proyecto.'),
+        ]
+    )]
+    public function storeBulk(BulkStoreServiceDeliveryControlSheetRequest $request): JsonResponse
+    {
+        try {
+            $resultado = $this->serviceDeliveryControlSheetService->createBulkForProject($request->validated());
+
+            return $this->successResponse($resultado, 'Hojas de control creadas por proyecto con éxito.', 201);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

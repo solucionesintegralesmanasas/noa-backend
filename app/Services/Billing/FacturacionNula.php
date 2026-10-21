@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace App\Services\Billing;
 
 use App\Models\CommercialInvoice;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 
 /**
  * Driver nulo: genera el UBL 2.1 mínimo, lo guarda en disco y no transmite.
  * La factura queda en PENDIENTE_DIAN hasta que se active el proveedor real.
  */
-class FacturacionNula implements ContratoFacturacionElectronica
+class FacturacionNula implements ContratoFacturacionElectronica, ContratoNotasElectronica
 {
     public function emitir(CommercialInvoice $factura): array
     {
@@ -37,6 +38,16 @@ class FacturacionNula implements ContratoFacturacionElectronica
     public function anular(CommercialInvoice $factura, string $motivo): array
     {
         return ['estado' => $factura->electronic_status, 'transmitido' => false, 'motivo' => $motivo];
+    }
+
+    public function emitirNota(Model $nota): array
+    {
+        return ['estado' => $nota->electronic_status, 'transmitido' => false, 'driver' => 'nulo'];
+    }
+
+    public function consultarEstadoNota(Model $nota): array
+    {
+        return ['estado' => $nota->electronic_status, 'transmitido' => false];
     }
 
     private function construirUbl(CommercialInvoice $factura): string

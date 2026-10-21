@@ -344,7 +344,7 @@ class VehicleInspectionController extends Controller
             // Get logo and firma
             $pdfService = app(PdfService::class);
             $company = $record->company ?? ($record->vehicle->company ?? null);
-            $logoModel = $company ? ($company->getFirstMedia('logos') ?? $company->logo ?? null) : null;
+            $logoModel = $company ? PdfService::logoParaMarca($company) : null;
 
             // Fetch inspector-specific signature
             $inspectorSignature = Signature::query()->where('entity_type', 'vehicle_inspection_inspector')

@@ -6,10 +6,12 @@ namespace App\Services\Projects;
 
 use App\Models\Project;
 use App\Models\ProjectDriverVehicle;
+use App\Models\ServiceDeliveryControlSheet;
 use App\Services\BaseService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -144,6 +146,9 @@ class ProjectService extends BaseService
     /**
      * Obtiene un proyecto por su UUID con sus asignaciones
      * conductor → vehículo (relación 1:1) para el detalle.
+     *
+     * Ordena por ingreso: la última asignación creada queda al final para que
+     * el detalle muestre qué vehículo entró de último al proyecto.
      */
     public function getProjectByUuid(string $uuid): ?Model
     {
@@ -172,7 +177,7 @@ class ProjectService extends BaseService
                     'is_active'
                 ),
             ])
-            ->orderByRaw('is_active DESC, id ASC')
+            ->orderBy('id')
             ->get();
 
         $assignedValuer = fn (ProjectDriverVehicle $assignment) => [
@@ -342,6 +347,63 @@ class ProjectService extends BaseService
                 ]);
             }
         }
+
+        $this->sincronizarHojasRetiradas($project);
+    }
+
+    /**
+     * SPEC-009 — Retiro del coche del proyecto.
+     *
+     * Terminada la sincronización se calcula el estado final del proyecto:
+     * coches con asignación activa y coches retirados (los distintos de los
+     * activos; un vehículo puede acumular varias asignaciones inactivas
+     * históricas). Las hojas ya creadas del par proyecto+coche retirado —
+     * padres e hijos diarios, identificados por su control interno — se marcan
+     * con `retirada_de_proyecto` para salir del listado sin borrarse; los
+     * coches reactivados deshacen la marca y sus hojas reaparecen respetando
+     * su `is_active` de cierre. Es idempotente: se marca por estado final del
+     * pivote, no por el diff del payload, así que cubre el coche quitado del
+     * formulario, el marcado inactivo y la reasignación del conductor.
+     */
+    private function sincronizarHojasRetiradas(Project $project): void
+    {
+        $asignaciones = ProjectDriverVehicle::query()
+            ->where('project_uuid', $project->uuid)
+            ->get(['vehicle_uuid', 'is_active']);
+
+        $activos = $asignaciones->where('is_active', true)
+            ->pluck('vehicle_uuid')
+            ->unique()
+            ->values();
+        // diff() exige array: una colección rompe con TypeError en el PUT.
+        $retirados = $asignaciones->pluck('vehicle_uuid')
+            ->unique()
+            ->diff($activos->all())
+            ->values();
+
+        if ($retirados->isNotEmpty()) {
+            $this->hojasDeVehiculos($project->uuid, $retirados)
+                ->where('retirada_de_proyecto', false)
+                ->update(['retirada_de_proyecto' => true]);
+        }
+
+        if ($activos->isNotEmpty()) {
+            $this->hojasDeVehiculos($project->uuid, $activos)
+                ->where('retirada_de_proyecto', true)
+                ->update(['retirada_de_proyecto' => false]);
+        }
+    }
+
+    /**
+     * Hojas (padres e hijos) cuyo control interno pertenece a los coches dados.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<\App\Models\ServiceDeliveryControlSheet>
+     */
+    private function hojasDeVehiculos(string $projectUuid, SupportCollection $vehicleUuids)
+    {
+        return ServiceDeliveryControlSheet::query()
+            ->where('project_uuid', $projectUuid)
+            ->whereHas('internalControl', fn ($q) => $q->whereIn('vehicle_uuid', $vehicleUuids));
     }
 
     /**

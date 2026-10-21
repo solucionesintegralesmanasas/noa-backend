@@ -11,7 +11,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 
 class UpdateServiceDeliveryControlSheetRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaPertenenciaPcp;
 
     public function authorize(): bool
     {
@@ -21,7 +21,8 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'company_uuid' => ['sometimes', 'required', 'uuid', 'exists:companies,uuid'],
+            // La empresa del registro no se cambia desde el cuerpo: el servicio
+            // conserva la del registro y el contexto solo acota qué se puede tocar.
             'official_name_and_surname' => ['sometimes', 'nullable', 'string', 'max:255'],
             'service_date' => ['sometimes', 'required', 'date'],
             'start_date' => ['sometimes', 'nullable', 'date'],
@@ -38,7 +39,7 @@ class UpdateServiceDeliveryControlSheetRequest extends FormRequest
             'day_kind' => ['sometimes', 'nullable', 'in:operacion,disponibilidad'],
             'availability_reason' => ['sometimes', 'nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'nullable', 'boolean'],
-            'project_uuid' => ['sometimes', 'nullable', 'uuid', 'exists:projects,uuid'],
+            'project_uuid' => ['sometimes', 'nullable', 'uuid', $this->reglaProyectoDelContexto()],
             'routes' => ['sometimes', 'nullable', 'array'],
             'routes.*.uuid' => ['sometimes', 'nullable', 'string'],
             'routes.*.order_index' => ['sometimes', 'nullable', 'integer'],
