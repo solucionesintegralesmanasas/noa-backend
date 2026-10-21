@@ -1,8 +1,15 @@
 # SPEC-009 — Hojas de control creadas por proyecto (una por coche)
 
-**Estado:** PROPUESTO (2026-10-20). Pendiente de implementar.
+**Estado:** IMPLEMENTADO (2026-10-21).
 **Fecha:** 2026-10-20
 **Predecesor:** primer paso ya integrado: el formulario de PCP trae vehículos y conductores de las asignaciones activas del proyecto (commit frontend `719b0ff`, helper `projectAssignments.js`).
+
+## Implementación (2026-10-21)
+
+- **Backend:** `POST /api/v1/control-sheets/service-delivery-control-sheets/bulk` (`api.v1.fleet.service-delivery-control-sheets.bulk`, `permission:service_delivery_control_sheets.create`, antes de `/{uuid}`), `BulkStoreServiceDeliveryControlSheetRequest` (`ValidaEmpresaDelContexto` + `ValidaPertenenciaPcp`; `vehicle_uuids` obligatorio; tipo solo `DIRECTO_CON_LA_EMPRESA`; `official_name_and_surname`, `vehicle_uuid`, `third_party_uuid` y `fuec_uuid` se aceptan y se IGNORAN) y `ServiceDeliveryControlSheetService::createBulkForProject` (transacción única; `persistirHoja` extraída del flujo individual sin su propia transacción; fechas validadas una sola vez para todo el bulk). Devuelve `{created, daily_sheets, sheets}` con 201.
+- **Frontend:** creación directa usa tabla de checkbox con las asignaciones activas del proyecto (placa, interno, conductor, documento), todas marcadas de entrada; «Mostrar todos» eliminado; responsable de servicio oculto en creación directa (lo resuelve el backend); resumen vivo de hojas y planillas diarias; confirmación con conteo antes de crear; el payload solo lleva `vehicle_uuids`. La edición conserva sus selects, con las opciones del proyecto MÁS el vehículo/conductor actual, que ya no se limpian aunque el proyecto lo haya retirado (histórico editable).
+- **Pruebas:** `CreacionMasivaHojasTest` (9 casos: una hoja por asignación con hijos por día, coche de otro proyecto, asignación inactiva, proyecto sin asignaciones, un solo día sin hijos, tipo externo, permiso 403, todo-o-nada con fallo a mitad de transacción y presupuesto de tiempo; origen: `docs/specs/SPEC-009 §9 === implementado`). Frontend: `projectAssignments.test.js` (17 casos, +11 del bulk).
+- **Rendimiento:** bulk del proyecto más grande local (14 coches × 30 días: 14 hojas, 420 planillas diarias, 434 controles internos) medido 3,33 s en local (2026-10-21); tope del caso `perf` fijado a 33 s, holgura de una potencia sobre lo medido.
 
 ## Decisiones acordadas (2026-10-20)
 

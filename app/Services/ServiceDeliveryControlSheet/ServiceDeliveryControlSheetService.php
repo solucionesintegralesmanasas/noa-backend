@@ -6,6 +6,7 @@ namespace App\Services\ServiceDeliveryControlSheet;
 
 use App\Models\Fuec;
 use App\Models\Project;
+use App\Models\ProjectDriverVehicle;
 use App\Models\ServiceDeliveryControlSheet;
 use App\Models\ServiceDeliveryControlSheetRoute;
 use App\Models\Signature;
@@ -713,90 +714,258 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         $type = $this->normalizeType($data['type_of_control_sheet'] ?? 'DIRECTO_CON_LA_EMPRESA');
 
-        return $this->transaction(function () use ($data, $type) {
-            $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
-            if (! $companyUuid) {
-                throw ValidationException::withMessages([
-                    'company_uuid' => 'No hay empresa activa en la petición.',
-                ]);
-            }
+        return $this->transaction(fn () => $this->persistirHoja($data, $type));
+    }
 
-            $this->validarPertenencia($companyUuid, $data);
-
-            $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
-            $endRaw = $data['end_date'] ?? null;
-            $this->validateProjectDates($data['project_uuid'] ?? null, $startRaw, $endRaw);
-
-            $dailyRoute = $this->buildDailyRoute($data['daily_route'] ?? null, $data['routes'] ?? null);
-
-            $record = ServiceDeliveryControlSheet::create([
-                'official_name_and_surname' => $data['official_name_and_surname'] ?? null,
-                'service_date' => $startRaw,
-                'start_date' => $startRaw,
-                'end_date' => $endRaw,
-                'daily_route' => $dailyRoute,
-                'start_time' => $data['start_time'] ?? null,
-                'end_time' => $data['end_time'] ?? null,
-                'total_hours' => $data['total_hours'] ?? null,
-                'starting_kilometer' => $data['starting_kilometer'] ?? null,
-                'ending_kilometer' => $data['ending_kilometer'] ?? null,
-                'number_of_tolls' => $data['number_of_tolls'] ?? null,
-                'total_toll_value' => $data['total_toll_value'] ?? null,
-                'type_of_control_sheet' => $type,
-                'is_active' => $data['is_active'] ?? true,
-                'company_uuid' => $companyUuid,
-                'project_uuid' => $data['project_uuid'] ?? null,
+    /**
+     * Creación masiva por proyecto (SPEC-009): una hoja de control directo por
+     * cada coche marcado, cuya asignación activa resuelve el par
+     * conductor↔vehículo y el responsable de servicio. La fuente de verdad es
+     * el proyecto: lo que venga en el cuerpo sobre pares, responsable o FUEC
+     * se ignora.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{created: int, daily_sheets: int, sheets: array<int, Model>}
+     */
+    public function createBulkForProject(array $data): array
+    {
+        $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
+        if (! $companyUuid) {
+            throw ValidationException::withMessages([
+                'company_uuid' => 'No hay empresa activa en la petición.',
             ]);
+        }
 
-            $this->createControlForSheet($record, $data, $type, false);
-            $this->syncRoutes($record, $data['routes'] ?? null);
+        $projectUuid = (string) $data['project_uuid'];
+        // Defensa en profundidad: el request ya acota el proyecto con sus
+        // scopes, pero el servicio también puede invocarse desde otros flujos.
+        if (! Project::query()->where('company_uuid', $companyUuid)->where('uuid', $projectUuid)->exists()) {
+            throw ValidationException::withMessages([
+                'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
+            ]);
+        }
 
-            // Si daily_route no venía pero sí routes, ya quedó construido. Si no hay routes ni daily_route, se deja null (compatible).
-            // Multi-día: generar hijos diarios
-            $startDate = $startRaw ? Carbon::parse($startRaw) : null;
-            $endDate = $endRaw ? Carbon::parse($endRaw) : null;
+        $porVehiculo = $this->asignacionesActivasPorVehiculo($projectUuid);
+        if (empty($porVehiculo)) {
+            throw ValidationException::withMessages([
+                'vehicle_uuids' => 'El proyecto no tiene asignaciones activas de vehículos.',
+            ]);
+        }
 
-            if ($startDate && $endDate && $endDate->greaterThan($startDate)) {
-                // Los hijos cubren TODOS los días incluyendo el de inicio, para que
-                // cada día (incluido el primero) tenga su planilla diaria trabajable.
-                $currentDate = $startDate->copy();
-                $parentRoutes = $record->routes()->get();
+        $solicitados = array_values(array_unique(array_filter((array) ($data['vehicle_uuids'] ?? []))));
+        $this->validarCochesSolicitados($solicitados, $porVehiculo);
 
-                while (! $currentDate->greaterThan($endDate)) {
-                    $child = ServiceDeliveryControlSheet::create([
-                        'official_name_and_surname' => $data['official_name_and_surname'] ?? null,
-                        'service_date' => $currentDate->toDateString(),
-                        'start_date' => $startDate->toDateString(),
-                        'end_date' => $endDate->toDateString(),
-                        'parent_uuid' => $record->uuid,
-                        'daily_route' => $dailyRoute,
-                        'type_of_control_sheet' => $type,
-                        'is_active' => true,
-                        'company_uuid' => $companyUuid,
-                        'project_uuid' => $data['project_uuid'] ?? null,
-                    ]);
+        // Fechas y ruta diaria se validan UNA vez para todo el bulk, no por hoja.
+        $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
+        $endRaw = $data['end_date'] ?? null;
+        $this->validateProjectDates($projectUuid, $startRaw, $endRaw);
 
-                    $this->createControlForSheet($child, $data, $type, true);
+        $hojas = $this->transaction(function () use ($data, $companyUuid, $projectUuid, $solicitados, $porVehiculo) {
+            $creadas = [];
+            foreach ($solicitados as $vehicleUuid) {
+                $asignacion = $porVehiculo[$vehicleUuid];
 
-                    foreach ($parentRoutes as $pr) {
-                        ServiceDeliveryControlSheetRoute::create([
-                            'uuid' => (string) Str::uuid(),
-                            'service_delivery_control_sheet_uuid' => $child->uuid,
-                            'order_index' => $pr->order_index,
-                            'origin' => $pr->origin,
-                            'destination' => $pr->destination,
-                            'funcionario_nombre' => $pr->funcionario_nombre,
-                            'funcionario_cc' => $pr->funcionario_cc,
-                            'is_active' => true,
-                        ]);
-                    }
+                // Ignora cualquier par/responsable/FUEC del cuerpo: la
+                // asignación vigente del proyecto manda (SPEC-009 decisión 5).
+                $datosHoja = $data;
+                $datosHoja['company_uuid'] = $companyUuid;
+                $datosHoja['project_uuid'] = $projectUuid;
+                $datosHoja['type_of_control_sheet'] = 'DIRECTO_CON_LA_EMPRESA';
+                $datosHoja['vehicle_uuid'] = $vehicleUuid;
+                $datosHoja['third_party_uuid'] = $asignacion->third_party_uuid;
+                $datosHoja['official_name_and_surname'] = $this->nombreDeConductor($asignacion->thirdParty);
+                $datosHoja['fuec_uuid'] = null;
+                $datosHoja['vehicle_license_plate'] = null;
+                $datosHoja['driver_name_and_surname'] = null;
+                $datosHoja['driver_license_number'] = null;
+                unset($datosHoja['vehicle_uuids']);
 
-                    $currentDate->addDay();
-                }
+                $creadas[] = $this->persistirHoja($datosHoja, 'DIRECTO_CON_LA_EMPRESA', false);
             }
 
-            return $record->fresh(['project', 'routes', 'children']);
+            return $creadas;
         });
+
+        // Transacción única: o se crean todas (con sus planillas diarias) o no
+        // persiste ninguna.
+        $dailySheets = ServiceDeliveryControlSheet::query()
+            ->whereIn('parent_uuid', array_column($hojas, 'uuid'))
+            ->count('uuid');
+
+        return [
+            'created' => count($hojas),
+            'daily_sheets' => (int) $dailySheets,
+            'sheets' => $hojas,
+        ];
+    }
+
+    /**
+     * Asignaciones activas del proyecto agrupadas por vehículo, con tercero y
+     * vehículo precargados. Una fila sin vehículo o sin conductor no puede
+     * crear hoja. La práctica actual es una activa por vehículo; si
+     * aparece más de una, gana la de ingreso más antiguo.
+     *
+     * @return array<string, ProjectDriverVehicle>
+     */
+    private function asignacionesActivasPorVehiculo(string $projectUuid): array
+    {
+        $asignaciones = ProjectDriverVehicle::query()
+            ->where('project_uuid', $projectUuid)
+            ->active()
+            ->with(['thirdParty', 'vehicle'])
+            ->orderBy('id')
+            ->get();
+
+        $porVehiculo = [];
+        foreach ($asignaciones as $asignacion) {
+            if (! $asignacion->vehicle_uuid || ! $asignacion->third_party_uuid) {
+                continue;
+            }
+            $porVehiculo[$asignacion->vehicle_uuid] ??= $asignacion;
+        }
+
+        return $porVehiculo;
+    }
+
+    /**
+     * Todo o nada antes de crear: un coche marcado sin asignación activa en el
+     * proyecto cancela el bulk completo con el motivo por cada coche.
+     *
+     * @param  array<int, string>  $solicitados
+     * @param  array<string, ProjectDriverVehicle>  $porVehiculo
+     */
+    private function validarCochesSolicitados(array $solicitados, array $porVehiculo): void
+    {
+        $faltantes = array_diff($solicitados, array_keys($porVehiculo));
+        if ($faltantes === []) {
+            return;
+        }
+
+        // Con el scope de empresa activa: no se filtran placas de otras cuentas.
+        $placas = Vehicle::query()
+            ->whereIn('uuid', $faltantes)
+            ->pluck('vehicle_license_plate', 'uuid');
+
+        $mensajes = [];
+        foreach ($faltantes as $uuid) {
+            $placa = $placas[$uuid] ?? null;
+            $coche = $placa ? "el vehículo con placa {$placa}" : "el vehículo {$uuid}";
+            $mensajes[] = "{$coche} no tiene una asignación activa en el proyecto.";
+        }
+
+        throw ValidationException::withMessages(['vehicle_uuids' => $mensajes]);
+    }
+
+    /**
+     * Nombre para el responsable de servicio: preferencia del natural
+     * (primero + apellido) o razón social del jurídico.
+     */
+    private function nombreDeConductor(?ThirdParty $conductor): ?string
+    {
+        if (! $conductor) {
+            return null;
+        }
+
+        if ($conductor->person_type === 'JURIDICA') {
+            return $conductor->business_name ?: null;
+        }
+
+        return trim(($conductor->first_name ?? '').' '.($conductor->last_name ?? '')) ?: null;
+    }
+
+    /**
+     * Cuerpo transaccional de la creación de UNA hoja. No abre su propia
+     * transacción: el flujo individual la envuelve y el bulk comparte una
+     * única para todas (evita N transacciones anidadas).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function persistirHoja(array $data, string $type, bool $validarFechas = true): Model
+    {
+        $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
+        if (! $companyUuid) {
+            throw ValidationException::withMessages([
+                'company_uuid' => 'No hay empresa activa en la petición.',
+            ]);
+        }
+
+        $this->validarPertenencia($companyUuid, $data);
+
+        $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
+        $endRaw = $data['end_date'] ?? null;
+        if ($validarFechas) {
+            $this->validateProjectDates($data['project_uuid'] ?? null, $startRaw, $endRaw);
+        }
+
+        $dailyRoute = $this->buildDailyRoute($data['daily_route'] ?? null, $data['routes'] ?? null);
+
+        $record = ServiceDeliveryControlSheet::create([
+            'official_name_and_surname' => $data['official_name_and_surname'] ?? null,
+            'service_date' => $startRaw,
+            'start_date' => $startRaw,
+            'end_date' => $endRaw,
+            'daily_route' => $dailyRoute,
+            'start_time' => $data['start_time'] ?? null,
+            'end_time' => $data['end_time'] ?? null,
+            'total_hours' => $data['total_hours'] ?? null,
+            'starting_kilometer' => $data['starting_kilometer'] ?? null,
+            'ending_kilometer' => $data['ending_kilometer'] ?? null,
+            'number_of_tolls' => $data['number_of_tolls'] ?? null,
+            'total_toll_value' => $data['total_toll_value'] ?? null,
+            'type_of_control_sheet' => $type,
+            'is_active' => $data['is_active'] ?? true,
+            'company_uuid' => $companyUuid,
+            'project_uuid' => $data['project_uuid'] ?? null,
+        ]);
+
+        $this->createControlForSheet($record, $data, $type, false);
+        $this->syncRoutes($record, $data['routes'] ?? null);
+
+        // Si daily_route no venía pero sí routes, ya quedó construido. Si no hay routes ni daily_route, se deja null (compatible).
+        // Multi-día: generar hijos diarios
+        $startDate = $startRaw ? Carbon::parse($startRaw) : null;
+        $endDate = $endRaw ? Carbon::parse($endRaw) : null;
+
+        if ($startDate && $endDate && $endDate->greaterThan($startDate)) {
+            // Los hijos cubren TODOS los días incluyendo el de inicio, para que
+            // cada día (incluido el primero) tenga su planilla diaria trabajable.
+            $currentDate = $startDate->copy();
+            $parentRoutes = $record->routes()->get();
+
+            while (! $currentDate->greaterThan($endDate)) {
+                $child = ServiceDeliveryControlSheet::create([
+                    'official_name_and_surname' => $data['official_name_and_surname'] ?? null,
+                    'service_date' => $currentDate->toDateString(),
+                    'start_date' => $startDate->toDateString(),
+                    'end_date' => $endDate->toDateString(),
+                    'parent_uuid' => $record->uuid,
+                    'daily_route' => $dailyRoute,
+                    'type_of_control_sheet' => $type,
+                    'is_active' => true,
+                    'company_uuid' => $companyUuid,
+                    'project_uuid' => $data['project_uuid'] ?? null,
+                ]);
+
+                $this->createControlForSheet($child, $data, $type, true);
+
+                foreach ($parentRoutes as $pr) {
+                    ServiceDeliveryControlSheetRoute::create([
+                        'uuid' => (string) Str::uuid(),
+                        'service_delivery_control_sheet_uuid' => $child->uuid,
+                        'order_index' => $pr->order_index,
+                        'origin' => $pr->origin,
+                        'destination' => $pr->destination,
+                        'funcionario_nombre' => $pr->funcionario_nombre,
+                        'funcionario_cc' => $pr->funcionario_cc,
+                        'is_active' => true,
+                    ]);
+                }
+
+                $currentDate->addDay();
+            }
+        }
+
+        return $record->fresh(['project', 'routes', 'children']);
     }
 
     public function updateServiceDeliveryControlSheet(string $uuid, array $data): Model
