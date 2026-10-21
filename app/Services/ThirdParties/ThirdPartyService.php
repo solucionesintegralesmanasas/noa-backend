@@ -65,7 +65,7 @@ class ThirdPartyService extends BaseService
         ?string $companyUuid = null,
         ?string $type = null
     ): LengthAwarePaginator {
-        $query = $this->query()->with('driverLicenses');
+        $query = $this->query()->with(['driverLicenses', 'branch:uuid,name']);
 
         if (! $companyUuid) {
             $companyUuid = request()->attributes->get('current_company_uuid');
@@ -106,6 +106,7 @@ class ThirdPartyService extends BaseService
             'email',
             'phone',
             'address',
+            'branch_uuid',
             'is_customer',
             'is_supplier',
             'is_employee',
@@ -143,6 +144,11 @@ class ThirdPartyService extends BaseService
                 'full_name' => $tp->company_name ?: "{$tp->first_name} {$tp->last_name}",
                 'email' => $tp->email,
                 'phone' => $tp->phone,
+                'branch_uuid' => $tp->branch_uuid,
+                'branch' => $tp->branch ? [
+                    'uuid' => $tp->branch->uuid,
+                    'name' => $tp->branch->name,
+                ] : null,
                 'is_active' => (bool) $tp->is_active,
                 'is_driver' => (bool) $tp->is_driver,
                 'is_employee' => (bool) $tp->is_employee,
@@ -218,6 +224,7 @@ class ThirdPartyService extends BaseService
         $record = $this->findByUuid($uuid);
 
         if ($record) {
+            $record->load('branch:uuid,name');
             $this->appendLinkedRoles($record);
         }
 
@@ -243,6 +250,8 @@ class ThirdPartyService extends BaseService
      */
     public function createThirdParty(array $data): Model
     {
+        $data = $this->forzarSucursal($data);
+
         return $this->transaction(function () use ($data) {
             $this->asegurarCorreoLibreDeOtroTercero((string) $data['email'], (string) $data['company_uuid']);
 
@@ -260,6 +269,7 @@ class ThirdPartyService extends BaseService
                 'phone' => $data['phone'] ?? null,
                 'address' => $data['address'] ?? null,
                 'municipality_uuid' => $data['municipality_uuid'],
+                'branch_uuid' => $data['branch_uuid'] ?? null,
                 'tax_regime' => $data['tax_regime'],
                 'tax_responsibility_uuid' => $data['tax_responsibility_uuid'],
                 'bank_account_number' => $data['bank_account_number'] ?? null,
@@ -538,6 +548,8 @@ class ThirdPartyService extends BaseService
      */
     public function updateThirdParty(string $uuid, array $data): Model
     {
+        $data = $this->forzarSucursal($data);
+
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
 
@@ -560,6 +572,7 @@ class ThirdPartyService extends BaseService
                 'phone' => $data['phone'] ?? $record->phone,
                 'address' => $data['address'] ?? $record->address,
                 'municipality_uuid' => $data['municipality_uuid'] ?? $record->municipality_uuid,
+                'branch_uuid' => array_key_exists('branch_uuid', $data) ? $data['branch_uuid'] : $record->branch_uuid,
                 'tax_regime' => $data['tax_regime'] ?? $record->tax_regime,
                 'tax_responsibility_uuid' => $data['tax_responsibility_uuid'] ?? $record->tax_responsibility_uuid,
                 'bank_account_number' => $data['bank_account_number'] ?? $record->bank_account_number,
@@ -642,6 +655,7 @@ class ThirdPartyService extends BaseService
                 'company.media',
                 'documentType',
                 'municipality.department',
+                'branch:uuid,name',
                 'driverLicenses' => function ($q) {
                     $q->orderBy('created_at', 'desc');
                 },

@@ -55,6 +55,13 @@ class StoreThirdPartyRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:20'],
             'address' => ['nullable', 'string', 'max:200'],
             'municipality_uuid' => ['required', 'uuid', 'exists:cities,uuid'],
+            'branch_uuid' => [
+                'required',
+                'uuid',
+                Rule::exists('branches', 'uuid')->where(function ($query) {
+                    return $query->where('company_uuid', $this->input('company_uuid'));
+                }),
+            ],
             'tax_regime' => ['required', 'string', 'in:48,49,47,05,42'],
             'tax_responsibility_uuid' => ['required', 'uuid', 'exists:tax_responsibilities,uuid'],
             'bank_account_number' => ['nullable', 'string', 'max:50'],
@@ -129,6 +136,7 @@ class StoreThirdPartyRequest extends FormRequest
             'phone' => 'Teléfono',
             'address' => 'Dirección',
             'municipality_uuid' => 'Municipio',
+            'branch_uuid' => 'Sucursal',
             'tax_regime' => 'Régimen tributario',
             'tax_responsibility_uuid' => 'Responsabilidad fiscal',
             'bank_account_number' => 'Número de cuenta bancaria',

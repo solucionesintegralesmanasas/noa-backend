@@ -234,7 +234,7 @@ class ThirdPartyController extends Controller
         requestBody: new OA\RequestBody(
             required: true,
             content: new OA\JsonContent(
-                required: ['company_uuid', 'person_type', 'document_type_uuid', 'document_number', 'email', 'municipality_uuid', 'tax_regime', 'tax_responsibility_uuid'],
+                required: ['company_uuid', 'person_type', 'document_type_uuid', 'document_number', 'email', 'municipality_uuid', 'branch_uuid', 'tax_regime', 'tax_responsibility_uuid'],
                 properties: [
                     new OA\Property(property: 'company_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'person_type', type: 'string', enum: ['NATURAL', 'JURIDICA']),
@@ -249,6 +249,7 @@ class ThirdPartyController extends Controller
                     new OA\Property(property: 'phone', type: 'string', nullable: true),
                     new OA\Property(property: 'address', type: 'string', nullable: true),
                     new OA\Property(property: 'municipality_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'branch_uuid', type: 'string', format: 'uuid', description: 'Sucursal del tercero (obligatoria en la práctica)'),
                     new OA\Property(property: 'tax_regime', type: 'string'),
                     new OA\Property(property: 'tax_responsibility_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'bank_account_number', type: 'string', nullable: true),
@@ -323,6 +324,7 @@ class ThirdPartyController extends Controller
                     new OA\Property(property: 'phone', type: 'string', nullable: true),
                     new OA\Property(property: 'address', type: 'string', nullable: true),
                     new OA\Property(property: 'municipality_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'branch_uuid', type: 'string', format: 'uuid', description: 'Sucursal del tercero (obligatoria en la práctica)'),
                     new OA\Property(property: 'tax_regime', type: 'string'),
                     new OA\Property(property: 'tax_responsibility_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'bank_account_number', type: 'string', nullable: true),

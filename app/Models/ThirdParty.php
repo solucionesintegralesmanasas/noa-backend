@@ -56,6 +56,7 @@ class ThirdParty extends Model implements HasMedia
         'phone',
         'address',
         'municipality_uuid',
+        'branch_uuid',
         'tax_regime',
         'tax_responsibility_uuid',
         'bank_account_number',
@@ -136,6 +137,14 @@ class ThirdParty extends Model implements HasMedia
     public function municipality(): BelongsTo
     {
         return $this->belongsTo(City::class, 'municipality_uuid', 'uuid');
+    }
+
+    /**
+     * Obtiene la sucursal a la que pertenece el tercero.
+     */
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'branch_uuid', 'uuid');
     }
 
     /**

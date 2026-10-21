@@ -165,7 +165,7 @@ class CompanyService extends BaseService
             ]);
 
             // Crear la Sede Principal delegando al BranchService
-            $this->branchService->createBranch([
+            $sedePrincipal = $this->branchService->createBranch([
                 'company_uuid' => $company->uuid,
                 'name' => 'Sede Principal',
                 'address' => $data['address'],
@@ -205,6 +205,7 @@ class CompanyService extends BaseService
                 'phone' => $data['phone'] ?? null,
                 'address' => $data['address'],
                 'municipality_uuid' => $data['municipality_uuid'],
+                'branch_uuid' => $sedePrincipal->uuid,
                 'tax_regime' => $taxRegimeCode,
                 'tax_responsibility_uuid' => $taxResponsibilityUuid,
                 'is_affiliate' => true,
