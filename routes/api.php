@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
+use App\Http\Controllers\Api\V1\Billing\BillingProviderConfigController;
 use App\Http\Controllers\Api\V1\Billing\BillingProviderController;
 use App\Http\Controllers\Api\V1\Billing\BillingResolutionController;
 use App\Http\Controllers\Api\V1\Billing\CommercialInvoiceController;
@@ -608,6 +609,19 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [BillingProviderController::class, 'show'])->name('api.v1.billing.billing-providers.show');
                 Route::put('/{uuid}', [BillingProviderController::class, 'update'])->name('api.v1.billing.billing-providers.update');
                 Route::delete('/{uuid}', [BillingProviderController::class, 'destroy'])->name('api.v1.billing.billing-providers.destroy');
+
+                // Módulo 01 - Configuraciones Básicas de ApiDian (por proveedor).
+                Route::prefix('{uuid}/configuracion')->group(function () {
+                    Route::get('/', [BillingProviderConfigController::class, 'show'])->name('api.v1.billing.billing-providers.configuracion.show');
+                    Route::post('/', [BillingProviderConfigController::class, 'guardarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.guardar');
+                    Route::put('/software', [BillingProviderConfigController::class, 'software'])->name('api.v1.billing.billing-providers.configuracion.software');
+                    Route::put('/software-nomina', [BillingProviderConfigController::class, 'softwareNomina'])->name('api.v1.billing.billing-providers.configuracion.software-nomina');
+                    Route::put('/certificado', [BillingProviderConfigController::class, 'certificado'])->name('api.v1.billing.billing-providers.configuracion.certificado');
+                    Route::post('/resoluciones', [BillingProviderConfigController::class, 'resoluciones'])->name('api.v1.billing.billing-providers.configuracion.resoluciones');
+                    Route::put('/ambiente', [BillingProviderConfigController::class, 'ambiente'])->name('api.v1.billing.billing-providers.configuracion.ambiente');
+                    Route::put('/webhook', [BillingProviderConfigController::class, 'webhook'])->name('api.v1.billing.billing-providers.configuracion.webhook');
+                    Route::delete('/empresa', [BillingProviderConfigController::class, 'eliminarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.empresa-eliminar');
+                });
             });
 
             Route::prefix('billing-resolutions')->group(function () {

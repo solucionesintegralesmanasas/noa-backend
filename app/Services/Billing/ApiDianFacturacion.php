@@ -25,11 +25,15 @@ use Illuminate\Database\Eloquent\Model;
  */
 class ApiDianFacturacion implements ContratoFacturacionElectronica, ContratoNotasElectronica
 {
+    private readonly ApiDianCliente $cliente;
+
     public function __construct(private readonly BillingProvider $proveedor)
     {
         if (! $this->proveedor->usaApiDian()) {
             throw new \InvalidArgumentException("El proveedor {$this->proveedor->name} no usa ApiDian.");
         }
+
+        $this->cliente = new ApiDianCliente($this->proveedor);
     }
 
     public function emitir(CommercialInvoice $factura): array
@@ -144,12 +148,9 @@ class ApiDianFacturacion implements ContratoFacturacionElectronica, ContratoNota
 
     private function transmite(string $tipo, array $payload, ?\Illuminate\Database\Eloquent\Model $documento): array
     {
-        $base = rtrim((string) $this->proveedor->server_url, '/');
-        if ($base === '') {
-            throw new \RuntimeException("El proveedor {$this->proveedor->name} no tiene URL del API configurada.");
-        }
+        $base = $this->cliente->baseUrl();
 
-        $this->asegurarToken();
+        $this->cliente->asegurarToken();
 
         $payload['send'] = $this->proveedor->send_to_dian;
 
@@ -157,7 +158,7 @@ class ApiDianFacturacion implements ContratoFacturacionElectronica, ContratoNota
             ? "{$base}/api/ubl2.1/{$tipo}/{$this->proveedor->test_set_id}"
             : "{$base}/api/ubl2.1/{$tipo}";
 
-        $respuestaHttp = $this->enviar($ruta, $payload);
+        $respuestaHttp = $this->cliente->enviar('post', $ruta, $payload);
 
         $crudo = $respuestaHttp->json() ?? [];
         if ($crudo === [] && $respuestaHttp->body() !== '') {
@@ -186,101 +187,15 @@ class ApiDianFacturacion implements ContratoFacturacionElectronica, ContratoNota
 
     private function estadoEnApiDian(string $identificador): array
     {
-        $base = rtrim((string) $this->proveedor->server_url, '/');
-        $criba = $this->enviar("{$base}/api/ubl2.1/status/document/{$identificador}");
+        $criba = $this->cliente->enviar('post', $this->cliente->baseUrl()."/api/ubl2.1/status/document/{$identificador}");
 
         return $criba->json() ?? ['http' => $criba->status()];
     }
 
-    /**
-     * Envía con el token vigente. Si ApiDian responde 401/403 y hay
-     * credenciales del portal, renueva el JWT (paso 00 de la colección:
-     * POST /api/auth/login con email + password) y reintenta una vez.
-     */
-    private function enviar(string $url, ?array $payload = null): \Illuminate\Http\Client\Response
-    {
-        $respuesta = $this->peticion($url, $payload);
-
-        if (in_array($respuesta->status(), [401, 403], true) && $this->puedeRenovarToken()) {
-            $this->renovarToken();
-            $respuesta = $this->peticion($url, $payload);
-        }
-
-        $this->abortarSiTokenInvalido($respuesta->status());
-
-        return $respuesta;
-    }
-
-    private function peticion(string $url, ?array $payload): \Illuminate\Http\Client\Response
-    {
-        return \Illuminate\Support\Facades\Http::acceptJson()
-            ->timeout(config('billing.timeout', 30))
-            ->withToken((string) $this->proveedor->client_secret)
-            ->post($url, $payload ?? []);
-    }
-
-    /** Sin token guardado pero con login del portal: se obtiene antes de enviar. */
-    private function asegurarToken(): void
-    {
-        if ((string) $this->proveedor->client_secret === '' && $this->puedeRenovarToken()) {
-            $this->renovarToken();
-        }
-
-        if ((string) $this->proveedor->client_secret === '') {
-            throw new \RuntimeException("El proveedor {$this->proveedor->name} no tiene token de ApiDian configurado.");
-        }
-    }
-
-    private function puedeRenovarToken(): bool
-    {
-        return (string) $this->proveedor->client_id !== ''
-            && (string) $this->proveedor->client_password !== '';
-    }
-
-    private function renovarToken(): void
-    {
-        $token = $this->obtenerTokenDeLogin();
-
-        $this->proveedor->withoutLogging(fn () => $this->proveedor->update(['client_secret' => $token]));
-        $this->proveedor->refresh();
-    }
-
-    /**
-     * Login del portal (paso 00 de la colección): POST /api/auth/login con
-     * email + password devuelve un JWT. No persiste: lo usan el servicio al
-     * guardar el proveedor y la renovación automática.
-     */
+    /** Login del portal (paso 00): delega en el cliente autenticado. */
     public function obtenerTokenDeLogin(): string
     {
-        $base = rtrim((string) $this->proveedor->server_url, '/');
-        if ($base === '') {
-            throw new \RuntimeException("El proveedor {$this->proveedor->name} no tiene URL del API configurada.");
-        }
-
-        $login = \Illuminate\Support\Facades\Http::acceptJson()
-            ->timeout(config('billing.timeout', 30))
-            ->post("{$base}/api/auth/login", [
-                'email' => (string) $this->proveedor->client_id,
-                'password' => (string) $this->proveedor->client_password,
-            ]);
-
-        $token = $login->json('access_token');
-        if ($login->failed() || ! is_string($token) || $token === '') {
-            throw new \RuntimeException('No se pudo renovar el token de ApiDian: verifica el correo y la contraseña del portal en el proveedor tecnológico.');
-        }
-
-        return $token;
-    }
-
-    /**
-     * Si el token sigue rechazado después de un intento de renovación, la
-     * emisión debe decirlo con claridad en lugar de reportar un rechazo de la DIAN.
-     */
-    private function abortarSiTokenInvalido(int $http): void
-    {
-        if (in_array($http, [401, 403], true)) {
-            throw new \RuntimeException('El token de ApiDian es inválido o expiró; actualízalo en el proveedor tecnológico de la empresa.');
-        }
+        return $this->cliente->obtenerTokenDeLogin();
     }
 
     private function estadoDeConsulta(array $crudo): string
