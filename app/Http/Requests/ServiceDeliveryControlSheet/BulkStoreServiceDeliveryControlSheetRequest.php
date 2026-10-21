@@ -33,9 +33,7 @@ class BulkStoreServiceDeliveryControlSheetRequest extends FormRequest
      */
     protected function prepareForValidation(): void
     {
-        if (! $this->input('company_uuid')) {
-            $this->merge(['company_uuid' => $this->attributes->get('current_company_uuid')]);
-        }
+        $this->prepararEmpresaDelContexto();
     }
 
     public function rules(): array
