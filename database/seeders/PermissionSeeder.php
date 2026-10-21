@@ -203,6 +203,12 @@ class PermissionSeeder extends Seeder
             'maintenance_parts.update' => ['module' => 'Repuestos', 'description' => 'Actualizar un repuesto'],
             'maintenance_parts.delete' => ['module' => 'Repuestos', 'description' => 'Eliminar un repuesto'],
 
+            // --- Control de Combustible y Kilometraje ---
+            'fuel_logs.index'  => ['module' => 'Combustible', 'description' => 'Listar los registros de combustible y kilometraje'],
+            'fuel_logs.create' => ['module' => 'Combustible', 'description' => 'Registrar un surtimiento de combustible'],
+            'fuel_logs.update' => ['module' => 'Combustible', 'description' => 'Actualizar un registro de combustible'],
+            'fuel_logs.delete' => ['module' => 'Combustible', 'description' => 'Eliminar un registro de combustible'],
+
             // --- Inspecciones de Vehículos ---
             'vehicle_inspections.index'  => ['module' => 'Inspecciones de Vehículos', 'description' => 'Listar todas las inspecciones de vehículos'],
             'vehicle_inspections.create' => ['module' => 'Inspecciones de Vehículos', 'description' => 'Registrar una nueva inspección'],
@@ -381,6 +387,13 @@ class PermissionSeeder extends Seeder
             'debit_notes.create'  => ['module' => 'Notas Débito', 'description' => 'Crear una nueva nota débito'],
             'debit_notes.update'  => ['module' => 'Notas Débito', 'description' => 'Actualizar una nota débito'],
             'debit_notes.delete'  => ['module' => 'Notas Débito', 'description' => 'Eliminar una nota débito'],
+
+            // --- Documentos electrónicos genéricos ApiDian (soporte, equivalentes, nómina, eventos) ---
+            'electronic_documents.index'   => ['module' => 'Documentos Electrónicos', 'description' => 'Listar los documentos electrónicos enviados a ApiDian'],
+            'electronic_documents.create'  => ['module' => 'Documentos Electrónicos', 'description' => 'Registrar y emitir un documento electrónico'],
+            'electronic_documents.update'  => ['module' => 'Documentos Electrónicos', 'description' => 'Actualizar un documento electrónico aún no emitido'],
+            'electronic_documents.delete'  => ['module' => 'Documentos Electrónicos', 'description' => 'Eliminar un documento electrónico no transmitido'],
+            'electronic_documents.profile' => ['module' => 'Documentos Electrónicos', 'description' => 'Ver el detalle y estado DIAN de un documento electrónico'],
 
             // --- Geolocalización ---
             'locations.view'        => ['module' => 'Geolocalización', 'description' => 'Ver mapa de conductores en tiempo real'],

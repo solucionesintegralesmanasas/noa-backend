@@ -17,6 +17,11 @@ class CreditNoteService extends BaseService
 {
     protected array $searchableFields = ['note_number', 'observation'];
 
+    public function __construct(private readonly ContratoNotasElectronica $emisionElectronica)
+    {
+        parent::__construct();
+    }
+
     protected function getModelInstance(): Model
     {
         return new CreditNote;
@@ -75,6 +80,8 @@ class CreditNoteService extends BaseService
             ]));
 
             $nota->update(['status' => 'EMITIDA_INTERNA']);
+
+            $this->emisionElectronica->emitirNota($nota->fresh());
 
             return $this->detalle($nota->uuid);
         });

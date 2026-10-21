@@ -241,6 +241,13 @@ class PermissionSeeder extends Seeder
             'debit_notes.update'  => ['module' => 'Notas Débito', 'description' => 'Actualizar una nota débito'],
             'debit_notes.delete'  => ['module' => 'Notas Débito', 'description' => 'Eliminar una nota débito'],
 
+            // --- Documentos Electrónicos genéricos ApiDian (soporte, equivalentes POS, nómina 102/103, eventos RADIAN) ---
+            'electronic_documents.index'   => ['module' => 'Documentos Electrónicos', 'description' => 'Listar los documentos electrónicos enviados a ApiDian'],
+            'electronic_documents.create'  => ['module' => 'Documentos Electrónicos', 'description' => 'Registrar y emitir un documento electrónico'],
+            'electronic_documents.update'  => ['module' => 'Documentos Electrónicos', 'description' => 'Actualizar un documento electrónico aún no emitido'],
+            'electronic_documents.delete'  => ['module' => 'Documentos Electrónicos', 'description' => 'Eliminar un documento electrónico no transmitido'],
+            'electronic_documents.profile' => ['module' => 'Documentos Electrónicos', 'description' => 'Ver el detalle y estado DIAN de un documento electrónico'],
+
             // --- Órdenes de Compra ---
             'purchase_orders.index'  => ['module' => 'Órdenes de Compra', 'description' => 'Listar todas las órdenes de compra'],
             'purchase_orders.create' => ['module' => 'Órdenes de Compra', 'description' => 'Crear una nueva orden de compra'],

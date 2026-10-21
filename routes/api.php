@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\Billing\BillingResolutionController;
 use App\Http\Controllers\Api\V1\Billing\CommercialInvoiceController;
 use App\Http\Controllers\Api\V1\Billing\CreditNoteController;
 use App\Http\Controllers\Api\V1\Billing\DebitNoteController;
+use App\Http\Controllers\Api\V1\Billing\ElectronicDocumentController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -54,6 +55,7 @@ use App\Http\Controllers\Api\V1\Fleet\AffiliateAdminChargeController;
 use App\Http\Controllers\Api\V1\Fleet\BusinessCollaborationAgreementController;
 use App\Http\Controllers\Api\V1\Fleet\ControlSheetController;
 use App\Http\Controllers\Api\V1\Fleet\DriverLicenseController;
+use App\Http\Controllers\Api\V1\Fleet\FuelLogController;
 use App\Http\Controllers\Api\V1\Fleet\InspectionResultController;
 use App\Http\Controllers\Api\V1\Fleet\MaintenanceController;
 use App\Http\Controllers\Api\V1\Fleet\MaintenancePartController;
@@ -646,6 +648,16 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{uuid}/emitir', [DebitNoteController::class, 'emitir'])->name('api.v1.billing.debit-notes.emitir');
                 Route::post('/{uuid}/anular', [DebitNoteController::class, 'anular'])->name('api.v1.billing.debit-notes.anular');
             });
+
+            Route::prefix('electronic-documents')->group(function () {
+                Route::get('/', [ElectronicDocumentController::class, 'index'])->name('api.v1.billing.electronic-documents.index');
+                Route::post('/', [ElectronicDocumentController::class, 'store'])->name('api.v1.billing.electronic-documents.store');
+                Route::get('/{uuid}', [ElectronicDocumentController::class, 'show'])->name('api.v1.billing.electronic-documents.show');
+                Route::put('/{uuid}', [ElectronicDocumentController::class, 'update'])->name('api.v1.billing.electronic-documents.update');
+                Route::post('/{uuid}/emitir', [ElectronicDocumentController::class, 'emitir'])->name('api.v1.billing.electronic-documents.emitir');
+                Route::get('/{uuid}/estado', [ElectronicDocumentController::class, 'estado'])->name('api.v1.billing.electronic-documents.estado');
+                Route::delete('/{uuid}', [ElectronicDocumentController::class, 'destroy'])->name('api.v1.billing.electronic-documents.destroy');
+            });
         });
 
         // ─── RUTAS PARA EL MODULO DE FLOTA ───
@@ -707,6 +719,16 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [MaintenanceController::class, 'show'])->name('api.v1.fleet.maintenances.show');
                 Route::put('/{uuid}', [MaintenanceController::class, 'update'])->name('api.v1.fleet.maintenances.update');
                 Route::delete('/{uuid}', [MaintenanceController::class, 'destroy'])->name('api.v1.fleet.maintenances.destroy');
+            });
+
+            // Control de Combustible, Kilometraje y Saldos
+            Route::prefix('fuel-logs')->group(function () {
+                Route::get('/', [FuelLogController::class, 'index'])->name('api.v1.fleet.fuel-logs.index');
+                Route::get('/context', [FuelLogController::class, 'context'])->name('api.v1.fleet.fuel-logs.context');
+                Route::post('/', [FuelLogController::class, 'store'])->name('api.v1.fleet.fuel-logs.store');
+                Route::get('/{uuid}', [FuelLogController::class, 'show'])->name('api.v1.fleet.fuel-logs.show');
+                Route::put('/{uuid}', [FuelLogController::class, 'update'])->name('api.v1.fleet.fuel-logs.update');
+                Route::delete('/{uuid}', [FuelLogController::class, 'destroy'])->name('api.v1.fleet.fuel-logs.destroy');
             });
 
             // Repuestos de Mantenimiento

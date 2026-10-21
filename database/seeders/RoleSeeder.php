@@ -187,6 +187,11 @@ class RoleSeeder extends Seeder
             'maintenance_parts.update',
             'maintenance_parts.delete',
 
+            'fuel_logs.index',
+            'fuel_logs.create',
+            'fuel_logs.update',
+            'fuel_logs.delete',
+
             'vehicle_inspections.index',
             'vehicle_inspections.create',
             'vehicle_inspections.update',
@@ -329,6 +334,12 @@ class RoleSeeder extends Seeder
             'debit_notes.update',
             'debit_notes.delete',
 
+            'electronic_documents.index',
+            'electronic_documents.create',
+            'electronic_documents.update',
+            'electronic_documents.delete',
+            'electronic_documents.profile',
+
             'locations.view',
             'locations.track',
             'locations.history',
@@ -365,6 +376,10 @@ class RoleSeeder extends Seeder
             'maintenance_parts.create',
             'maintenance_parts.update',
 
+            'fuel_logs.index',
+            'fuel_logs.create',
+            'fuel_logs.update',
+
             'vehicle_inspections.index',
             'vehicle_inspections.create',
             'vehicle_inspections.update',
@@ -392,6 +407,9 @@ class RoleSeeder extends Seeder
         $conductorPerms = Permission::query()->whereIn('name', [
             'vehicle_inspections.index',
             'vehicle_inspections.create',
+
+            'fuel_logs.index',
+            'fuel_logs.create',
 
             'fuec.index',
             'fuec.profile',

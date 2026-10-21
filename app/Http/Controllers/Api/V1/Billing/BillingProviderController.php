@@ -9,6 +9,7 @@ use App\Http\Requests\Billing\StoreBillingProviderRequest;
 use App\Services\Billing\BillingProviderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use OpenApi\Attributes as OA;
 
 /** Catálogo de proveedores tecnológicos (solo registro por ahora). */
@@ -57,6 +58,8 @@ class BillingProviderController extends Controller
             $registro = $this->proveedores->create($request->validated());
 
             return $this->successResponse($registro, 'Proveedor registrado con éxito.', 201);
+        } catch (ValidationException $e) {
+            throw $e; // 422 con errores por campo (login fallido del proveedor)
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
@@ -73,6 +76,8 @@ class BillingProviderController extends Controller
             $this->proveedores->update($uuid, $request->validated());
 
             return $this->successResponse($this->proveedores->findByUuid($uuid), 'Proveedor actualizado con éxito.');
+        } catch (ValidationException $e) {
+            throw $e; // 422 con errores por campo (login fallido del proveedor)
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
