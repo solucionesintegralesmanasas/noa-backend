@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Services\ServiceDeliveryControlSheet;
 
+use App\Models\Fuec;
 use App\Models\Project;
 use App\Models\ServiceDeliveryControlSheet;
 use App\Models\ServiceDeliveryControlSheetRoute;
 use App\Models\Signature;
+use App\Models\ThirdParty;
+use App\Models\Vehicle;
 use App\Services\BaseService;
 use App\Services\Signature\SignatureService;
 use App\Utils\Logger;
@@ -15,6 +18,7 @@ use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -201,6 +205,63 @@ class ServiceDeliveryControlSheetService extends BaseService
     private function isExternalType(string $type): bool
     {
         return in_array($type, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true);
+    }
+
+    /**
+     * Empresa efectiva del registro: manda el contexto de la petición (ya
+     * validado por `SetCompanyContext`); el valor del cuerpo solo se usa en
+     * flujos internos sin petición.
+     */
+    private function resolverEmpresa(?string $companyUuid): ?string
+    {
+        $contexto = request()->attributes->get('current_company_uuid');
+        if ($contexto) {
+            return $contexto;
+        }
+
+        if ($companyUuid) {
+            return $companyUuid;
+        }
+
+        return Auth::user()?->companies()->first()?->uuid;
+    }
+
+    /**
+     * Defensa en profundidad: el request ya acota proyecto, vehículo, tercero y
+     * FUEC con sus global scopes, pero el servicio también se invoca desde otros
+     * flujos y no debe guardar vínculos de otra empresa o sede.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function validarPertenencia(string $companyUuid, array $data): void
+    {
+        if (! empty($data['project_uuid'])
+            && ! Project::query()->where('company_uuid', $companyUuid)->where('uuid', $data['project_uuid'])->exists()) {
+            throw ValidationException::withMessages([
+                'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
+            ]);
+        }
+
+        if (! empty($data['vehicle_uuid'])
+            && ! Vehicle::query()->where('company_uuid', $companyUuid)->where('uuid', $data['vehicle_uuid'])->exists()) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'El vehículo no pertenece a la empresa o sede activa.',
+            ]);
+        }
+
+        if (! empty($data['third_party_uuid'])
+            && ! ThirdParty::query()->where('company_uuid', $companyUuid)->where('uuid', $data['third_party_uuid'])->exists()) {
+            throw ValidationException::withMessages([
+                'third_party_uuid' => 'El tercero no pertenece a la empresa o sede activa.',
+            ]);
+        }
+
+        if (! empty($data['fuec_uuid'])
+            && ! Fuec::query()->where('company_uuid', $companyUuid)->where('uuid', $data['fuec_uuid'])->exists()) {
+            throw ValidationException::withMessages([
+                'fuec_uuid' => 'El FUEC no pertenece a la empresa activa.',
+            ]);
+        }
     }
 
     /**
@@ -653,6 +714,15 @@ class ServiceDeliveryControlSheetService extends BaseService
         $type = $this->normalizeType($data['type_of_control_sheet'] ?? 'DIRECTO_CON_LA_EMPRESA');
 
         return $this->transaction(function () use ($data, $type) {
+            $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
+            if (! $companyUuid) {
+                throw ValidationException::withMessages([
+                    'company_uuid' => 'No hay empresa activa en la petición.',
+                ]);
+            }
+
+            $this->validarPertenencia($companyUuid, $data);
+
             $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
             $endRaw = $data['end_date'] ?? null;
             $this->validateProjectDates($data['project_uuid'] ?? null, $startRaw, $endRaw);
@@ -674,7 +744,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'total_toll_value' => $data['total_toll_value'] ?? null,
                 'type_of_control_sheet' => $type,
                 'is_active' => $data['is_active'] ?? true,
-                'company_uuid' => $data['company_uuid'],
+                'company_uuid' => $companyUuid,
                 'project_uuid' => $data['project_uuid'] ?? null,
             ]);
 
@@ -702,7 +772,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                         'daily_route' => $dailyRoute,
                         'type_of_control_sheet' => $type,
                         'is_active' => true,
-                        'company_uuid' => $data['company_uuid'],
+                        'company_uuid' => $companyUuid,
                         'project_uuid' => $data['project_uuid'] ?? null,
                     ]);
 
@@ -739,6 +809,10 @@ class ServiceDeliveryControlSheetService extends BaseService
             $newProject = $data['project_uuid'] ?? $record->project_uuid;
             $newStart = $data['start_date'] ?? ($record->start_date ? Carbon::parse($record->start_date)->toDateString() : null);
             $newEnd = $data['end_date'] ?? ($record->end_date ? Carbon::parse($record->end_date)->toDateString() : null);
+
+            // El proyecto nuevo debe ser de la misma empresa del registro; si no,
+            // la planilla quedaría vinculada a un proyecto de otra cuenta.
+            $this->validarPertenencia($record->company_uuid, ['project_uuid' => $newProject]);
             $this->validateProjectDates($newProject, $newStart, $newEnd);
 
             $dailyRoute = $this->buildDailyRoute(
