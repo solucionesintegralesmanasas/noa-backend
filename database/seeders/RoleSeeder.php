@@ -19,6 +19,7 @@ class RoleSeeder extends Seeder
         $empleado = Role::firstOrCreate(['name' => 'EMPLEADO', 'guard_name' => 'api']);
         $afiliado = Role::firstOrCreate(['name' => 'AFILIADO', 'guard_name' => 'api']);
         $conductor = Role::firstOrCreate(['name' => 'CONDUCTOR', 'guard_name' => 'api']);
+        $sucursal = Role::firstOrCreate(['name' => 'SUCURSAL', 'guard_name' => 'api']);
 
         $adminEmpresaPerms = Permission::query()->whereIn('name', [
             'users.index',
@@ -424,6 +425,113 @@ class RoleSeeder extends Seeder
             'locations.track',
         ], 'and', false)->get();
 
+        $sucursalPerms = Permission::query()->whereIn('name', [
+
+            'customer.index',
+            'customer.create',
+            'customer.update',
+            'customer.delete',
+            'customer.profile',
+
+            'supplier.index',
+            'supplier.create',
+            'supplier.update',
+            'supplier.delete',
+            'supplier.profile',
+
+            'employee.index',
+            'employee.create',
+            'employee.update',
+            'employee.delete',
+            'employee.profile',
+
+            'vehicles.index',
+            'vehicles.create',
+            'vehicles.update',
+            'vehicles.delete',
+            'vehicles.profile',
+            'vehicles.change_branch',
+            'vehicles.history_pdf',
+            'vehicles.technical_sheet_pdf',
+
+            'reports.vehicles.index',
+            'reports.vehicles.export-excel',
+            'reports.vehicles.export-pdf',
+
+            'vehicle_documents.index',
+            'vehicle_documents.create',
+            'vehicle_documents.update',
+            'vehicle_documents.delete',
+            'vehicle_documents.profile',
+
+            'operation_cards.index',
+            'operation_cards.create',
+            'operation_cards.update',
+            'operation_cards.delete',
+
+            'business_collaboration_agreements.index',
+            'business_collaboration_agreements.create',
+            'business_collaboration_agreements.update',
+            'business_collaboration_agreements.delete',
+
+            'maintenance.index',
+            'maintenance.create',
+            'maintenance.update',
+            'maintenance.delete',
+            'maintenance.forecast',
+
+            'maintenance_parts.index',
+            'maintenance_parts.create',
+            'maintenance_parts.update',
+
+            'fuel_logs.index',
+            'fuel_logs.create',
+            'fuel_logs.update',
+
+            'vehicle_inspections.index',
+            'vehicle_inspections.create',
+            'vehicle_inspections.update',
+
+            'inspection_results.index',
+            'inspection_results.create',
+            'inspection_results.update',
+
+            'driver_licenses.index',
+            'driver_licenses.create',
+            'driver_licenses.update',
+
+            'security_contributions.index',
+            'security_contributions.create',
+            'security_contributions.update',
+
+            'contractors.index',
+            'contractors.create',
+            'contractors.update',
+
+            'fuec.index',
+            'fuec.create',
+            'fuec.update',
+            'fuec.profile',
+
+            'control_sheets.index',
+            'control_sheets.create',
+
+            'service_delivery_control_sheets.index',
+            'service_delivery_control_sheets.create',
+            'service_delivery_control_sheets.history_pdf',
+
+            'locations.track',
+
+            'brands.index',
+            'brands.create',
+            'brands.update',
+
+            'vehicle_classes.index',
+            'vehicle_classes.create',
+            'vehicle_classes.update',
+        ], 'and', false)->get();
+
+
         // 1. Asignar TODOS los permisos al SUPERADMIN
         $superAdmin->syncPermissions(Permission::all());
 
@@ -432,6 +540,7 @@ class RoleSeeder extends Seeder
         $empleado->syncPermissions($empleadoPerms);
         $afiliado->syncPermissions($afiliadoPerms);
         $conductor->syncPermissions($conductorPerms);
+        $sucursal->syncPermissions($sucursalPerms);
 
         $this->command->info('✅ Roles creados y permisos asignados correctamente.');
 
@@ -443,6 +552,7 @@ class RoleSeeder extends Seeder
                 ['EMPLEADO',       $empleado->permissions()->count()],
                 ['AFILIADO',       $afiliado->permissions()->count()],
                 ['CONDUCTOR',      $conductor->permissions()->count()],
+                ['SUCURSAL',       $sucursal->permissions()->count()],
             ]
         );
     }

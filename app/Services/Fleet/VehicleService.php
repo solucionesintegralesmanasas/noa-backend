@@ -287,6 +287,8 @@ class VehicleService extends BaseService
      */
     public function createVehicle(array $data): Model
     {
+        $data = $this->forzarSucursal($data);
+
         return $this->transaction(function () use ($data) {
             $internalNumber = $data['internal_number'] ?? null;
 
@@ -378,6 +380,8 @@ class VehicleService extends BaseService
      */
     public function updateVehicle(string $uuid, array $data): Model
     {
+        $data = $this->forzarSucursal($data);
+
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
 
