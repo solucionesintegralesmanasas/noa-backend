@@ -116,7 +116,7 @@ Reglas comunes replicadas de `StoreServiceDeliveryControlSheetRequest` (fechas, 
 
 El retiro ocurre cuando la sincronización de asignaciones del proyecto (`ProjectService::syncProjectAssignments`, dentro del PUT de `updateProject`) desactiva al coche: fuera del payload, marcado `is_active` = false, o porque su conductor pasó a otro coche.
 
-- **Columna:** `retirada_de_proyecto` BOOLEAN (default false) en `service_delivery_control_sheet` (migración `2026_10_21_000007`).
+- **Columna:** `retirada_de_proyecto` BOOLEAN (default false) en `service_delivery_control_sheet` (migración `2026_10_21_000007`). El relleno de la migración `2026_10_21_000008` marca las hojas de retiros anteriores (coche con fila en el pivote pero sin asignación activa hoy; idempotente, con `updated_at` intacto).
 - **Marcado (estado final, idempotente):** al terminar el sync, `sincronizarHojasRetiradas` calcula coches con asignación activa y coches retirados, y marca/desmarca sus hojas — padres e hijos, identificados por `whereHas('internalControl', whereIn vehicle_uuid)` + `project_uuid`. Cubre los tres caminos sin mirar el diff del payload.
 - **Listados:** `getAllServiceDeliveryControlSheetsWithPagination`, `getAllServiceDeliveryControlSheets` y `PcpEvidence::resumenProyecto` excluyen `retirada_de_proyecto` (el módulo refleja la asignación vigente). Los flujos internos (cierres, rutas, GPS) no se tocan.
 
@@ -154,6 +154,6 @@ El retiro ocurre cuando la sincronización de asignaciones del proyecto (`Projec
 
 ## Despliegue
 
-1. **Migración:** `php artisan migrate:status` debe mostrar pendientes la `2026_10_21_000007` (columna `retirada_de_proyecto`); correr `php artisan migrate --force`. Sin relleno de datos: las hojas viejas no cambian de estado.
+1. **Migraciones:** `php artisan migrate:status` debe mostrar pendientes la `2026_10_21_000007` (columna `retirada_de_proyecto`) y la `2026_10_21_000008` (relleno de retiros anteriores); correr `php artisan migrate --force`.
 2. Rutas y permisos: el permiso `service_delivery_control_sheets.create` ya existe; no correr seeders en producción.
 3. Subir backend y frontend juntos; el frontend nuevo llama por defecto a `/bulk` solo en creación directa.
