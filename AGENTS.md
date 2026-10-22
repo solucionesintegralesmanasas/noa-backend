@@ -217,6 +217,11 @@ Al guardar en «Control Directo con la Empresa» se crean N hojas, **una por coc
 - **Ruta y frontend:** `GET /fuel-logs/status` exige `permission:fuel_logs.index` (antes lectura sin permiso con `AUTHZ_ENFORCE=false`); el modal en el frontend condiciona el fetch con `permissionsStore.can('fuel_logs.index')` y el botón usa `v-if` con el mismo permiso (repo `noa-frontend-tsb`, commit propio). Glosario de dominio de combustible en `CONTEXT.md` (raíz).
 - **Pruebas:** suite completa 504 passed (2026-10-22) con `CombustibleEstadoTest` (contrato de `/status` intacto, helper pasa por `estadoDeFlota`), `CombustibleRendimientoTest` (12, sin cambios), `CombustibleNotificacionTest` (sin cambios), `CombustibleAislamientoTest`, `NotificacionesConsultasTest` (tope sync 26 intacto) y la prueba de presupuesto nueva.
 
+### Aislamiento de solicitudes de tanqueo (2026-10-22)
+
+- **`FuelRequestService` falla cerrado:** `crear()` consulta el vehículo CON scopes (empresa/sede) y exige empresa del contexto o del argumento — se retiró el fallback a `company_uuid` del vehículo con el que un flujo interno sin contexto creaba solicitudes en cualquier empresa; `bloquear()` (aprobar/rechazar/anular) sin empresa activa lanza 422 salvo `SUPERADMIN`; `expirarVencidas()` sin empresa explícita toma la del contexto y sin empresa resolvable devuelve 0 (antes vencía TODAS las empresas al listar o mostrar sin empresa). La consulta `activa` por `vehicle_uuid`, `marcarUsada`/`codigoUnico` conservan su `withoutGlobalScopes` (acotados por vehículo/unicidad global) y `porToken` sigue sin scopes por diseño público (token de 48 aleatorios). El store del controlador reemplaza `exists:vehicles,uuid` pelado por una regla con `Vehicle::query()` (scopes): vehículo ajeno responde «El vehículo no pertenece a la empresa o sede activa.».
+- **Pruebas:** `SolicitudTanqueoAislamientoTest` (5: vehículo de otra empresa 422, creación sin empresa falla cerrado, aprobación cross-company 422 conservando PENDIENTE, SUPERADMIN sin empresa SÍ aprueba, `expirarVencidas` del contexto A no toca la vencida de B). `SolicitudTanqueoTest` (10) ahora fija `current_company_uuid` en la petición para emular el flujo interno con contexto (lo que `SetCompanyContext` resuelve en HTTP).
+
 ## Convención de Commits
 
 - Mensajes directos en español, en una sola línea, formato `tipo(scope): descripción corta`.
