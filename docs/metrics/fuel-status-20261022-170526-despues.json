@@ -1,0 +1,41 @@
+{
+    "fecha": "2026-10-22 17:05:26",
+    "entorno": "local",
+    "base": "noa_test",
+    "motor": "10.4.32-MariaDB",
+    "framework": "12.69.3",
+    "php": "8.2.12",
+    "etiqueta": "estado-combustible-despues",
+    "flujo": "FuelStatusService::estadoDeFlota",
+    "lote": "chunk de 100 vehículos: 1 consulta de vehículos + 4 voluminosas por lote",
+    "mediciones": [
+        {
+            "vehiculos": 2,
+            "consultas": 5,
+            "filas": 2,
+            "ms_mediana": 2.41,
+            "memoria_mb": 70
+        },
+        {
+            "vehiculos": 30,
+            "consultas": 5,
+            "filas": 30,
+            "ms_mediana": 4.74,
+            "memoria_mb": 70
+        },
+        {
+            "vehiculos": 90,
+            "consultas": 5,
+            "filas": 90,
+            "ms_mediana": 12.4,
+            "memoria_mb": 70
+        },
+        {
+            "vehiculos": 330,
+            "consultas": 20,
+            "filas": 330,
+            "ms_mediana": 36.48,
+            "memoria_mb": 72
+        }
+    ]
+}

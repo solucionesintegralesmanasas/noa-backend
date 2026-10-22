@@ -745,7 +745,7 @@ Route::prefix('v1')->group(function () {
             Route::prefix('fuel-logs')->group(function () {
                 Route::get('/', [FuelLogController::class, 'index'])->name('api.v1.fleet.fuel-logs.index')->middleware('permission:fuel_logs.index');
                 Route::get('/context', [FuelLogController::class, 'context'])->name('api.v1.fleet.fuel-logs.context')->middleware('permission:fuel_logs.index');
-                Route::get('/status', [FuelLogController::class, 'status'])->name('api.v1.fleet.fuel-logs.status');
+                Route::get('/status', [FuelLogController::class, 'status'])->name('api.v1.fleet.fuel-logs.status')->middleware('permission:fuel_logs.index');
                 Route::post('/', [FuelLogController::class, 'store'])->name('api.v1.fleet.fuel-logs.store')->middleware('permission:fuel_logs.create');
                 Route::get('/{uuid}', [FuelLogController::class, 'show'])->name('api.v1.fleet.fuel-logs.show')->middleware('permission:fuel_logs.index');
                 Route::put('/{uuid}', [FuelLogController::class, 'update'])->name('api.v1.fleet.fuel-logs.update')->middleware('permission:fuel_logs.update');

@@ -68,7 +68,7 @@ class CombustibleEstadoTest extends TestCase
     /** @return array<string, mixed> */
     private function estado(): array
     {
-        return app(FuelStatusService::class)->fleetStatus($this->empresa);
+        return app(FuelStatusService::class)->estadoDeFlota($this->empresa);
     }
 
     public function test_la_ruta_de_estado_esta_registrada(): void
