@@ -11,8 +11,10 @@ use App\Models\Vehicle;
 use App\Services\BaseService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de TarjetaOperacion.
@@ -38,6 +40,26 @@ class OperationCardService extends BaseService
         'affiliated_company',
     ];
 
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->sortableFields = [
+            'operating_card_number' => 'operation_cards.operating_card_number',
+            'service_type' => 'operation_cards.service_type',
+            'transport_mode' => 'operation_cards.transport_mode',
+            'expiration_date' => 'operation_cards.expiration_date',
+            'status' => 'operation_cards.status',
+            'vehicle.vehicle_license_plate' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('vehicles')
+                    ->select('vehicles.vehicle_license_plate')
+                    ->whereColumn('vehicles.uuid', 'operation_cards.vehicle_uuid')
+                    ->limit(1),
+                $direction
+            ),
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new OperationCard;
@@ -52,7 +74,9 @@ class OperationCardService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $thirdPartyUuid = null,
-        ?string $vehicleUuid = null
+        ?string $vehicleUuid = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with('vehicle');
 
@@ -86,6 +110,8 @@ class OperationCardService extends BaseService
                 });
             });
         }
+
+        $this->applySorting($query, $sortBy, $sortOrder);
 
         return $query->paginate($perPage, ['*'], 'page', $page);
     }

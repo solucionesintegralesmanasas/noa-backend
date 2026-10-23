@@ -32,6 +32,18 @@ class WithholdingService extends BaseService
      */
     protected array $searchableFields = ['name'];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'code' => 'withholdings.code',
+            'name' => 'withholdings.name',
+            'type' => 'withholdings.type',
+            'rate' => 'withholdings.rate',
+            'is_active' => 'withholdings.is_active',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new Withholding;
@@ -44,9 +56,20 @@ class WithholdingService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, [], ['uuid', 'code', 'name']);
+        return $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: [],
+            columns: ['uuid', 'code', 'name', 'type', 'rate', 'is_active'],
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
     }
 
     /**

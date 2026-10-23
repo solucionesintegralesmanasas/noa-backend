@@ -17,7 +17,7 @@ use Illuminate\Validation\Rule;
  */
 class UpdateThirdPartyRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaDatosPersona;
 
     /**
      * Determina si el usuario está autorizado para realizar esta solicitud.
@@ -77,32 +77,7 @@ class UpdateThirdPartyRequest extends FormRequest
                 : ['nullable', 'uuid'],
             'tax_regime' => ['sometimes', 'required', 'string', 'in:48,49,47,05,42'],
             'tax_responsibility_uuid' => ['sometimes', 'required', 'uuid', 'exists:tax_responsibilities,uuid'],
-            // Datos de la cédula: obligatorios cuando el cuerpo declara persona
-            // NATURAL. En una edición parcial sin person_type no se exige (los
-            // campos ausentes no se tocan, como el resto de la edición).
-            'id_card_issue_place_uuid' => [
-                'nullable',
-                Rule::requiredIf($this->input('person_type') === 'NATURAL'),
-                'uuid',
-                Rule::exists('cities', 'uuid'),
-            ],
-            'id_card_issue_date' => [
-                'nullable',
-                Rule::requiredIf($this->input('person_type') === 'NATURAL'),
-                'date',
-                'before_or_equal:today',
-            ],
-            'sex' => ['nullable', Rule::requiredIf($this->input('person_type') === 'NATURAL'), 'in:M,F,O'],
-            'marital_status' => [
-                'nullable',
-                Rule::requiredIf($this->input('person_type') === 'NATURAL'),
-                Rule::in(['SOLTERO', 'CASADO', 'UNION_LIBRE', 'SEPARADO', 'DIVORCIADO', 'VIUDO']),
-            ],
-            'blood_type' => [
-                'nullable',
-                Rule::requiredIf($this->input('person_type') === 'NATURAL'),
-                Rule::in(['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']),
-            ],
+            ...$this->reglasDatosPersona(),
             'bank_account_number' => ['nullable', 'string', 'max:50'],
             'bank_account_type' => ['nullable', 'string', 'in:AHORROS,CORRIENTE,MONEDA_EXTRANJERA'],
             'bank_name' => ['nullable', 'string', 'max:100'],
@@ -143,15 +118,7 @@ class UpdateThirdPartyRequest extends FormRequest
     {
         return [
             'document_number.unique' => 'Ya existe un tercero registrado con este número de documento para la empresa y tipo de documento seleccionados.',
-            'id_card_issue_place_uuid.required' => 'El lugar de expedición de la cédula es obligatorio para personas naturales.',
-            'id_card_issue_date.required' => 'La fecha de expedición de la cédula es obligatoria para personas naturales.',
-            'id_card_issue_date.before_or_equal' => 'La fecha de expedición de la cédula no puede ser posterior a hoy.',
-            'sex.required' => 'El sexo es obligatorio para personas naturales.',
-            'sex.in' => 'El sexo seleccionado no es válido.',
-            'marital_status.required' => 'El estado civil es obligatorio para personas naturales.',
-            'marital_status.in' => 'El estado civil seleccionado no es válido.',
-            'blood_type.required' => 'El grupo sanguíneo es obligatorio para personas naturales.',
-            'blood_type.in' => 'El grupo sanguíneo seleccionado no es válido.',
+            ...$this->mensajesDatosPersona(),
         ];
     }
 
@@ -174,11 +141,7 @@ class UpdateThirdPartyRequest extends FormRequest
             'address' => 'Dirección',
             'municipality_uuid' => 'Municipio',
             'branch_uuid' => 'Sucursal',
-            'id_card_issue_place_uuid' => 'Lugar de expedición de la cédula',
-            'id_card_issue_date' => 'Fecha de expedición de la cédula',
-            'sex' => 'Sexo',
-            'marital_status' => 'Estado civil',
-            'blood_type' => 'Grupo sanguíneo',
+            ...$this->atributosDatosPersona(),
             'tax_regime' => 'Régimen tributario',
             'tax_responsibility_uuid' => 'Responsabilidad fiscal',
             'bank_account_number' => 'Número de cuenta bancaria',

@@ -415,7 +415,9 @@ abstract class BaseService
         string $search = '',
         ?string $companyUuid = null,
         array $relations = [],
-        array $columns = ['*']
+        array $columns = ['*'],
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with($relations);
 
@@ -434,6 +436,8 @@ abstract class BaseService
                 }
             });
         }
+
+        $this->applySorting($query, $sortBy, $sortOrder);
 
         return $query->paginate($perPage, $columns, 'page', $page);
     }

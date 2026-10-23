@@ -50,8 +50,17 @@ class CompanyController extends Controller
             $page = (int) $request->query('page', '1');
             $search = (string) $request->query('search', '');
             $companyUuid = $request->attributes->get('current_company_uuid') ?? $request->query('company_uuid') ?? $request->query('companyUuid');
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order', 'asc');
 
-            $data = $this->companyService->getAllCompaniesWithPagination($perPage, $page, $search, $companyUuid);
+            $data = $this->companyService->getAllCompaniesWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                is_string($sortBy) ? $sortBy : null,
+                is_string($sortOrder) ? $sortOrder : 'asc'
+            );
 
             return $this->successResponse($data, 'Listado paginado de empresas recuperado.');
         } catch (\Throwable $e) {

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Services\Administrations;
 
 use App\Models\ConveyorCapacity;
+use App\Models\EnablingResolution;
 use App\Services\BaseService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
@@ -33,6 +35,25 @@ class ConveyorCapacityService extends BaseService
      */
     protected array $searchableFields = ['vehicle_type'];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'enabling_resolution.resolution_number' => fn (Builder $query, string $direction) => $query->orderBy(
+                EnablingResolution::query()
+                    ->select('resolution_number')
+                    ->whereColumn('enabling_resolutions.uuid', 'conveyor_capacities.enabling_resolution_uuid')
+                    ->take(1),
+                $direction
+            ),
+            'vehicle_type' => 'conveyor_capacities.vehicle_type',
+            'authorized_capacity' => 'conveyor_capacities.authorized_capacity',
+            'current_capacity' => 'conveyor_capacities.current_capacity',
+            'minimum_own_capacity' => 'conveyor_capacities.minimum_own_capacity',
+            'status' => 'conveyor_capacities.status',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new ConveyorCapacity;
@@ -50,9 +71,19 @@ class ConveyorCapacityService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, self::RELATIONS);
+        return $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: self::RELATIONS,
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
     }
 
     /**

@@ -187,7 +187,32 @@ Una columna `sortable` de un `DataTable` en modo `lazy` **no ordena sola**: Prim
 - **Backend:** `BaseService::$sortableFields` declara la lista blanca (`'campo' => 'tabla.columna'` o `Closure(Builder, string $dirección)` para relaciones) y `applySorting()` la aplica con desempate por clave primaria, para que la paginación no repita ni omita filas. Las columnas de relación se ordenan con subconsulta escalar (no `join`), porque la sede del vehículo es `hasOneThrough` y un join duplicaría filas. Los `NULL` (p. ej. vehículo sin marca) van primero en `asc`, como en MySQL.
 - **Frontend:** `src/hooks/useServerSort.js` traduce `@sort` (1/-1/0) al contrato y expone `sortField` + `sortOrdenPrimeVue`; el store guarda `sortField`/`sortOrder`, vuelve a la página 1 al ordenar y los envía en `fetchItems`; la vista conecta `:sortField`, `:sortOrder`, `removableSort` y `@sort` y persiste `?sort=&order=` en la URL (se restaura en `onMounted` sin recargar dos veces).
 - **Piloto (2026-10-23):** listado de vehículos, 8 columnas (`vehicle_license_plate`, `vehicle_class.description`, `brand.description`, `line`, `model`, `branch.name`, `type_of_service`, `is_active`). Pruebas: `OrdenamientoVehiculosTest` (8) y `useServerSort.test.js` + `vehicles.store.test.js` (10). El presupuesto de `ListadosFlotaConsultasTest` sigue en 6 consultas con orden activo (el orden no añade consultas; va en el SQL).
-- **Pendiente:** replicar en las ~29 vistas restantes (cada servicio declara su lista blanca). Para los listados que pasan por `BaseService::getPaginatedData` hay que añadirle `sortBy`/`sortOrder` **y actualizar `EmploymentContractService::getPaginatedData` en el mismo cambio** (sobrescribe la firma y PHP no admite parámetros extra en la hija: es error de compilación, no excepción).
+- **Extensión a Bloque 1 (Flota, Terceros y Cobros, 2026-10-23):**
+  - *Terceros:* `ThirdPartyService` (`document_number`, `trade_name`) y `ThirdPartyController`. Prueba: `OrdenamientoTercerosTest` (4) y `thirdParties.store.test.js` (5).
+  - *Documentos de Vehículo:* `VehicleDocumentService` (`policy_number`, relación `vehicle.vehicle_license_plate`) y `VehicleDocumentController`. Prueba: `OrdenamientoDocumentosVehiculoTest` (4) y `vehicleDocuments.store.test.js` (5).
+  - *Tarjetas de Operación:* `OperationCardService` (`operating_card_number`, relación `vehicle.vehicle_license_plate`) y `OperationCardController`. Prueba: `OrdenamientoTarjetasOperacionTest` (4) y `operationCards.store.test.js` (5).
+  - *Inspecciones Vehiculares:* `VehicleInspectionService` (`mileage`, relación `vehicle.vehicle_license_plate`, relación `driver.name`) y `VehicleInspectionController`. Prueba: `OrdenamientoInspeccionesVehiculoTest` (5) y `vehicleInspections.store.test.js` (5).
+  - *Cobros Cuota Administración:* `AffiliateAdminChargeService` (`amount`, relación `vehicle.vehicle_license_plate`) y `AffiliateAdminChargeController`. Se corrigió además la celda y modal de cuotas que mostraban texto literal «Vehículo» en lugar de la placa real (`vehicle.vehicle_license_plate`). Prueba: `OrdenamientoCargosAdministracionTest` (4) y `affiliateCharges.store.test.js` (5).
+- **Extensión a Bloque 2 (Catálogos y Administración, 2026-10-23):**
+  - *Marcas:* `BrandService` (`description`).
+  - *Clases de Vehículo:* `VehicleClassService` (`class_code_class`, `description`).
+  - *Sucursales:* `BranchService` (`name`, relación escalar `company` a `companies.business_name`, `status`).
+  - *Empresas:* `CompanyService` (`business_name`, `document_number`, `phone`, `email`, `is_active`).
+  - *Cuentas Bancarias:* `BankDetailService` (`bank_name`, `account_number`, `account_type`, `account_holder`, `is_active`).
+  - *Actividades Económicas:* `EconomicActivityService` (`activity_code`, `activity_description`, relación escalar `company`, `is_main_activity`).
+  - *Ítems de Inspección:* `InspectionItemService` (`category`, `item_name`, `description`).
+  - *Objetos de Contratos:* `ObjectContractService` (`name`, `description`).
+  - *Resoluciones de Habilitación:* `EnablingResolutionService` (`company.business_name`, `resolution_number`, `number_fuec`, `territorial_code`, `resolution_date`, `status`).
+  - *Capacidad Transportadora:* `ConveyorCapacityService` (`enabling_resolution.resolution_number`, `vehicle_type`, `authorized_capacity`, `current_capacity`, `minimum_own_capacity`, `status`).
+  - *Retenciones:* `WithholdingService` (`code`, `name`, `type`, `rate`, `is_active`).
+  - *Usuarios:* `UserService` (`name`, `email`, `user_name`, `status`).
+  - *Pruebas de Catálogos y Admin:* `OrdenamientoCatalogosAdminTest` (6 passed).
+- **Regla crítica de arquitectura (`BaseService` y herencia de constructores):**
+  - Cualquier servicio que extienda `BaseService` y defina `__construct()` **DEBE llamar explícitamente a `parent::__construct()`**; de lo contrario, la propiedad fuertemente tipada `BaseService::$model` no se inicializa (`Typed property BaseService::$model must not be accessed before initialization`).
+  - Las relaciones ordenadas deben resolverse siempre mediante subconsultas escalares (`fn (Builder $query, string $direction) => $query->orderBy(RelatedModel::query()->select(...)->whereColumn(...)->take(1), $direction)`), nunca mediante `join` para evitar duplicación de filas o romper scopes multi-tenant.
+  - No romper las firmas de métodos heredados de `BaseService` (verificado siempre con `FirmasDeClasesTest`).
+  - En los stores de Pinia, `clearFilters()` limpia la búsqueda y reinicia a la página 1, pero **NO debe resetear `sortField` ni `sortOrder`**.
+- **Pendiente:** Bloque 3 (Operaciones y Contratos: FUEC, Contratos de servicio, Hojas de control, Mantenimientos) y Bloque 4 (Facturación, Recursos Humanos, Contabilidad).
 
 ### Datos de persona en terceros (issue #9, 2026-10-23)
 
@@ -237,6 +262,12 @@ Al guardar en «Control Directo con la Empresa» se crean N hojas, **una por coc
 
 - **`FuelRequestService` falla cerrado:** `crear()` consulta el vehículo CON scopes (empresa/sede) y exige empresa del contexto o del argumento — se retiró el fallback a `company_uuid` del vehículo con el que un flujo interno sin contexto creaba solicitudes en cualquier empresa; `bloquear()` (aprobar/rechazar/anular) sin empresa activa lanza 422 salvo `SUPERADMIN`; `expirarVencidas()` sin empresa explícita toma la del contexto y sin empresa resolvable devuelve 0 (antes vencía TODAS las empresas al listar o mostrar sin empresa). La consulta `activa` por `vehicle_uuid`, `marcarUsada`/`codigoUnico` conservan su `withoutGlobalScopes` (acotados por vehículo/unicidad global) y `porToken` sigue sin scopes por diseño público (token de 48 aleatorios). El store del controlador reemplaza `exists:vehicles,uuid` pelado por una regla con `Vehicle::query()` (scopes): vehículo ajeno responde «El vehículo no pertenece a la empresa o sede activa.».
 - **Pruebas:** `SolicitudTanqueoAislamientoTest` (5: vehículo de otra empresa 422, creación sin empresa falla cerrado, aprobación cross-company 422 conservando PENDIENTE, SUPERADMIN sin empresa SÍ aprueba, `expirarVencidas` del contexto A no toca la vencida de B). `SolicitudTanqueoTest` (10) ahora fija `current_company_uuid` en la petición para emular el flujo interno con contexto (lo que `SetCompanyContext` resuelve en HTTP).
+
+### Rediseño Stitch en Listados Genéricos Frontend (2026-10-23)
+- **Estandarización visual en `noa-frontend-tsb`:** Se migró el contenedor de tabla a tarjeta única (`.noa-list-card`), integrando el buscador `.noa-search`, el paginador propio `ListPagination.vue` (`Mostrando X a Y de Z | Filas: [N ▾]` y botones de página de 28px con elipsis) y la botonera de acciones `.noa-row-actions` con menú contextual `⋮` (`RowActions.vue`).
+- **Estado de migración:**
+  - *Migradas (7 listados):* Terceros (`ThirdPartiesListView`), Vehículos (`VehiclesListView`), Documentos Vehiculares (`VehicleDocumentsListView`), Tarjetas de Operación (`OperationCardsListView`), Radicación TO (`RadicacionListView`), Inspecciones (`VehicleInspectionListView`), Mantenimiento (`MaintenanceListView`).
+  - *Pendientes (~29 listados):* Bloque 2 (Operación y Contratos: FUEC, Proyectos, Planillas, Combustible, Contratos Colaboración, Geocercas), Bloque 3 (Facturación, Cobros, RRHH, Contabilidad/Impuestos), Bloque 4 (Administración y Catálogos).
 
 ## Convención de Commits
 

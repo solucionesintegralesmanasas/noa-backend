@@ -52,7 +52,9 @@ class VehicleClassController extends Controller
             $page = (int) $request->query('page', '1');
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid');
-            $data = $this->vehicleClassService->getAllVehicleClassesWithPagination($perPage, $page, $search, $companyUuid);
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order');
+            $data = $this->vehicleClassService->getAllVehicleClassesWithPagination($perPage, $page, $search, $companyUuid, $sortBy, $sortOrder);
 
             return $this->successResponse($data, 'Listado paginado de ClaseVehiculo recuperado con éxito.');
         } catch (\Throwable $e) {

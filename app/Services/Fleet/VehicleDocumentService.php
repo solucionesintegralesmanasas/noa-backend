@@ -11,8 +11,10 @@ use App\Services\BaseService;
 use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de DocumentoVehiculo.
@@ -32,6 +34,26 @@ class VehicleDocumentService extends BaseService
      */
     protected array $searchableFields = ['policy_number', 'issuing_entity'];
 
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->sortableFields = [
+            'policy_number' => 'vehicle_documents.policy_number',
+            'document_type' => 'vehicle_documents.document_type',
+            'vehicle.vehicle_license_plate' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('vehicles')
+                    ->select('vehicles.vehicle_license_plate')
+                    ->whereColumn('vehicles.uuid', 'vehicle_documents.vehicle_uuid')
+                    ->limit(1),
+                $direction
+            ),
+            'issuing_entity' => 'vehicle_documents.issuing_entity',
+            'expiry_date' => 'vehicle_documents.expiry_date',
+            'status' => 'vehicle_documents.status',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new VehicleDocument;
@@ -47,7 +69,9 @@ class VehicleDocumentService extends BaseService
         ?string $companyUuid = null,
         ?string $documentType = null,
         ?string $thirdPartyUuid = null,
-        ?string $vehicleUuid = null
+        ?string $vehicleUuid = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with(['vehicle.thirdParty']);
 
@@ -68,7 +92,7 @@ class VehicleDocumentService extends BaseService
         if ($documentType) {
             $types = explode(',', $documentType);
             if (count($types) > 1) {
-                return $this->getGroupedVehicleDocumentPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $types);
+                return $this->getGroupedVehicleDocumentPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $types, $sortBy, $sortOrder);
             }
             $query->where('document_type', $documentType);
         }
@@ -83,6 +107,8 @@ class VehicleDocumentService extends BaseService
                 });
             });
         }
+
+        $this->applySorting($query, $sortBy, $sortOrder);
 
         $columns = [
             'uuid',
@@ -111,7 +137,9 @@ class VehicleDocumentService extends BaseService
         string $search,
         ?string $companyUuid,
         ?string $thirdPartyUuid,
-        array $types
+        array $types,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $vehicleQuery = Vehicle::query()
             ->whereExists(function ($q) use ($types, $companyUuid) {
@@ -140,6 +168,13 @@ class VehicleDocumentService extends BaseService
                             });
                     });
             });
+        }
+
+        $dir = strtolower((string) $sortOrder) === 'desc' ? 'desc' : 'asc';
+        if ($sortBy === 'vehicle.vehicle_license_plate' || $sortBy === 'vehicle_license_plate') {
+            $vehicleQuery->orderBy('vehicle_license_plate', $dir);
+        } else {
+            $vehicleQuery->orderBy('vehicle_license_plate', 'asc');
         }
 
         $vehicles = $vehicleQuery->paginate($perPage, ['uuid', 'vehicle_license_plate'], 'page', $page);

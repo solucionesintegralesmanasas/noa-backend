@@ -43,6 +43,8 @@ class ThirdPartyController extends Controller
             new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'search', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'type', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others'])),
+            new OA\Parameter(name: 'sort_by', in: 'query', required: false, description: 'Campo visible de la columna (lista blanca del servicio).', schema: new OA\Schema(type: 'string', enum: ['document_number', 'trade_name', 'email', 'branch.name', 'is_active'])),
+            new OA\Parameter(name: 'sort_order', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['asc', 'desc'], default: 'asc')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
@@ -58,8 +60,18 @@ class ThirdPartyController extends Controller
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid');
             $type = $request->query('type');
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order');
 
-            $data = $this->thirdPartyService->getAllThirdPartiesWithPagination($perPage, $page, $search, $companyUuid, $type);
+            $data = $this->thirdPartyService->getAllThirdPartiesWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                $type,
+                is_string($sortBy) ? $sortBy : null,
+                is_string($sortOrder) ? $sortOrder : null
+            );
 
             return $this->successResponse($data, 'Listado paginado de Tercero recuperado con éxito.');
         } catch (\Throwable $e) {
