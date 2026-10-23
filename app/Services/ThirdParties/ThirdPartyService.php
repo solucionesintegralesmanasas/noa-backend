@@ -224,7 +224,7 @@ class ThirdPartyService extends BaseService
         $record = $this->findByUuid($uuid);
 
         if ($record) {
-            $record->load('branch:uuid,name');
+            $record->load('branch:uuid,name', 'idCardIssuePlace:uuid,name');
             $this->appendLinkedRoles($record);
         }
 
@@ -270,6 +270,11 @@ class ThirdPartyService extends BaseService
                 'address' => $data['address'] ?? null,
                 'municipality_uuid' => $data['municipality_uuid'],
                 'branch_uuid' => $data['branch_uuid'] ?? null,
+                'id_card_issue_place_uuid' => $data['id_card_issue_place_uuid'] ?? null,
+                'id_card_issue_date' => $data['id_card_issue_date'] ?? null,
+                'sex' => $data['sex'] ?? null,
+                'marital_status' => $data['marital_status'] ?? null,
+                'blood_type' => $data['blood_type'] ?? null,
                 'tax_regime' => $data['tax_regime'],
                 'tax_responsibility_uuid' => $data['tax_responsibility_uuid'],
                 'bank_account_number' => $data['bank_account_number'] ?? null,
@@ -573,6 +578,13 @@ class ThirdPartyService extends BaseService
                 'address' => $data['address'] ?? $record->address,
                 'municipality_uuid' => $data['municipality_uuid'] ?? $record->municipality_uuid,
                 'branch_uuid' => array_key_exists('branch_uuid', $data) ? $data['branch_uuid'] : $record->branch_uuid,
+                'id_card_issue_place_uuid' => array_key_exists('id_card_issue_place_uuid', $data)
+                    ? $data['id_card_issue_place_uuid'] : $record->id_card_issue_place_uuid,
+                'id_card_issue_date' => array_key_exists('id_card_issue_date', $data)
+                    ? $data['id_card_issue_date'] : $record->id_card_issue_date,
+                'sex' => array_key_exists('sex', $data) ? $data['sex'] : $record->sex,
+                'marital_status' => array_key_exists('marital_status', $data) ? $data['marital_status'] : $record->marital_status,
+                'blood_type' => array_key_exists('blood_type', $data) ? $data['blood_type'] : $record->blood_type,
                 'tax_regime' => $data['tax_regime'] ?? $record->tax_regime,
                 'tax_responsibility_uuid' => $data['tax_responsibility_uuid'] ?? $record->tax_responsibility_uuid,
                 'bank_account_number' => $data['bank_account_number'] ?? $record->bank_account_number,

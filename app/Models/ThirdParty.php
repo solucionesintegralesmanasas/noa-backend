@@ -57,6 +57,11 @@ class ThirdParty extends Model implements HasMedia
         'address',
         'municipality_uuid',
         'branch_uuid',
+        'id_card_issue_place_uuid',
+        'id_card_issue_date',
+        'sex',
+        'marital_status',
+        'blood_type',
         'tax_regime',
         'tax_responsibility_uuid',
         'bank_account_number',
@@ -94,6 +99,7 @@ class ThirdParty extends Model implements HasMedia
         'is_driver' => 'boolean',
         'is_others' => 'boolean',
         'is_active' => 'boolean',
+        'id_card_issue_date' => 'date',
     ];
 
     /**
@@ -145,6 +151,14 @@ class ThirdParty extends Model implements HasMedia
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class, 'branch_uuid', 'uuid');
+    }
+
+    /**
+     * Ciudad en la que se expidió la cédula (datos de persona natural, issue #9).
+     */
+    public function idCardIssuePlace(): BelongsTo
+    {
+        return $this->belongsTo(City::class, 'id_card_issue_place_uuid', 'uuid');
     }
 
     /**
