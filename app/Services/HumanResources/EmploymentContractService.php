@@ -33,7 +33,9 @@ class EmploymentContractService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         array $relations = [],
-        array $columns = ['*']
+        array $columns = ['*'],
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): \Illuminate\Pagination\LengthAwarePaginator {
         $query = $this->query()
             ->with(self::RELATIONS)
@@ -50,6 +52,8 @@ class EmploymentContractService extends BaseService
                   ->orWhere('employment_contracts.status', 'like', "%{$search}%");
             });
         }
+
+        $this->applySorting($query, $sortBy, $sortOrder);
 
         return $query->paginate($perPage, ['employment_contracts.*'], 'page', $page);
     }

@@ -47,6 +47,13 @@ class CompanyService extends BaseService
         private readonly ThirdPartyService $thirdPartyService
     ) {
         parent::__construct();
+        $this->sortableFields = [
+            'business_name' => 'companies.business_name',
+            'document_number' => 'companies.document_number',
+            'phone' => 'companies.phone',
+            'email' => 'companies.email',
+            'is_active' => 'companies.is_active',
+        ];
     }
 
     /** @var array<int, string> Relaciones estándar cargadas en consultas de detalle y catálogo. */
@@ -82,15 +89,19 @@ class CompanyService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
         $paginator = $this->getPaginatedData(
-            $perPage,
-            $page,
-            $search,
-            $companyUuid,
-            [], // Sin cargar relaciones para optimizar la cuadrícula
-            ['uuid', 'document_number', 'verification_digit', 'business_name', 'phone', 'email', 'is_active']
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: [], // Sin cargar relaciones para optimizar la cuadrícula
+            columns: ['uuid', 'document_number', 'verification_digit', 'business_name', 'phone', 'email', 'is_active'],
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
         );
 
         // Optimización de payload in-place

@@ -56,8 +56,20 @@ class VehicleInspectionController extends Controller
             $thirdPartyUuid = $request->query('third_party_uuid') ?? ($filter['third_party_uuid'] ?? null);
             $vehicleUuid = $request->query('vehicle_uuid') ?? ($filter['vehicle_uuid'] ?? null);
             $driverUuid = $request->query('driver_uuid') ?? ($filter['driver_uuid'] ?? null);
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order');
 
-            $data = $this->inspectionService->getAllVehicleInspectionsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $vehicleUuid, $driverUuid);
+            $data = $this->inspectionService->getAllVehicleInspectionsWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                $thirdPartyUuid,
+                $vehicleUuid,
+                $driverUuid,
+                $sortBy,
+                $sortOrder
+            );
 
             return $this->successResponse($data, 'Listado paginado de InspeccionVehiculo recuperado con éxito.');
         } catch (\Throwable $e) {

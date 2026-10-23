@@ -30,7 +30,17 @@ class InspectionItemService extends BaseService
     /**
      * @var array<string>
      */
-    protected array $searchableFields = ['name'];
+    protected array $searchableFields = ['item_name'];
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'category' => 'inspection_items.category',
+            'item_name' => 'inspection_items.item_name',
+            'description' => 'inspection_items.description',
+        ];
+    }
 
     protected function getModelInstance(): Model
     {
@@ -44,9 +54,20 @@ class InspectionItemService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, [], ['uuid', 'category', 'item_name']);
+        return $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: [],
+            columns: ['uuid', 'category', 'item_name', 'description'],
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
     }
 
     /**

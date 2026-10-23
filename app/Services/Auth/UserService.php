@@ -43,6 +43,17 @@ class UserService extends BaseService
         'user_name',
     ];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'name' => 'users.name',
+            'email' => 'users.email',
+            'user_name' => 'users.user_name',
+            'status' => 'users.status',
+        ];
+    }
+
     /**
      * Retorna la instancia del modelo que este servicio gestiona.
      */
@@ -58,9 +69,19 @@ class UserService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        $paginator = $this->getPaginatedData($perPage, $page, $search, $companyUuid, ['roles']);
+        $paginator = $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: ['roles'],
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
         // Añadir nombres de roles para el frontend
         $paginator->getCollection()->transform(function ($user) {
             $roleNames = $user->getRoleNames()->toArray();

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Services\Administrations;
 
+use App\Models\Company;
 use App\Models\EconomicActivity;
 use App\Services\BaseService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
@@ -32,6 +34,30 @@ class EconomicActivityService extends BaseService
      */
     protected array $searchableFields = ['activity_code'];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'activity_code' => 'economic_activities.activity_code',
+            'activity_description' => 'economic_activities.activity_description',
+            'company_uuid' => fn (Builder $query, string $direction) => $query->orderBy(
+                Company::query()
+                    ->select('business_name')
+                    ->whereColumn('companies.uuid', 'economic_activities.company_uuid')
+                    ->take(1),
+                $direction
+            ),
+            'company' => fn (Builder $query, string $direction) => $query->orderBy(
+                Company::query()
+                    ->select('business_name')
+                    ->whereColumn('companies.uuid', 'economic_activities.company_uuid')
+                    ->take(1),
+                $direction
+            ),
+            'is_main_activity' => 'economic_activities.is_main_activity',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new EconomicActivity;
@@ -49,9 +75,19 @@ class EconomicActivityService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, self::RELATIONS);
+        return $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: self::RELATIONS,
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
     }
 
     /**

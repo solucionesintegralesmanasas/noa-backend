@@ -48,7 +48,18 @@ class OperationCardController extends Controller
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $thirdPartyUuid = $request->query('third_party_uuid') ?? $request->input('filter.third_party_uuid');
             $vehicleUuid = $request->query('vehicle_uuid') ?? $request->input('filter.vehicle_uuid');
-            $data = $this->operationCardService->getAllOperationCardsWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $vehicleUuid);
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order');
+            $data = $this->operationCardService->getAllOperationCardsWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                $thirdPartyUuid,
+                $vehicleUuid,
+                $sortBy,
+                $sortOrder
+            );
 
             return $this->successResponse($data, 'Listado paginado de TarjetaOperacion recuperado con éxito.');
         } catch (\Throwable $e) {

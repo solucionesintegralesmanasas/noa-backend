@@ -9,6 +9,7 @@ use App\Services\BaseService;
 use App\Utils\Logger;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +44,27 @@ class AffiliateAdminChargeService extends BaseService
         'notes',
     ];
 
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->sortableFields = [
+            'payment_reference' => 'affiliate_admin_charges.payment_reference',
+            'charge_type' => 'affiliate_admin_charges.charge_type',
+            'amount' => 'affiliate_admin_charges.amount',
+            'period_date' => 'affiliate_admin_charges.period_date',
+            'due_date' => 'affiliate_admin_charges.due_date',
+            'status' => 'affiliate_admin_charges.status',
+            'vehicle.vehicle_license_plate' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('vehicles')
+                    ->select('vehicles.vehicle_license_plate')
+                    ->whereColumn('vehicles.uuid', 'affiliate_admin_charges.vehicle_uuid')
+                    ->limit(1),
+                $direction
+            ),
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new AffiliateAdminCharge;
@@ -56,7 +78,9 @@ class AffiliateAdminChargeService extends BaseService
         int $page = 1,
         string $search = '',
         ?string $companyUuid = null,
-        ?string $thirdPartyUuid = null
+        ?string $thirdPartyUuid = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with(['vehicle:uuid,vehicle_license_plate']);
 
@@ -84,11 +108,14 @@ class AffiliateAdminChargeService extends BaseService
             });
         }
 
+        $this->applySorting($query, $sortBy, $sortOrder);
+
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
         // Optimización de payload in-place
         $paginator->getCollection()->transform(fn ($charge) => [
             'uuid' => $charge->uuid,
+            'vehicle_uuid' => $charge->vehicle_uuid,
             'payment_reference' => $charge->payment_reference,
             'bank_reference' => $charge->bank_reference,
             'charge_type' => $charge->charge_type,
@@ -99,6 +126,7 @@ class AffiliateAdminChargeService extends BaseService
             'payment_date' => $charge->payment_date,
             'status' => $charge->status,
             'vehicle' => $charge->vehicle ? [
+                'uuid' => $charge->vehicle->uuid,
                 'vehicle_license_plate' => $charge->vehicle->vehicle_license_plate,
             ] : null,
         ]);

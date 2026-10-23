@@ -60,7 +60,17 @@ class AffiliateAdminChargeController extends Controller
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $thirdPartyUuid = $request->query('third_party_uuid') ?? $request->input('filter.third_party_uuid');
-            $data = $this->chargeService->getAllAffiliateAdminChargesWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid);
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order');
+            $data = $this->chargeService->getAllAffiliateAdminChargesWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                $thirdPartyUuid,
+                $sortBy,
+                $sortOrder
+            );
 
             return $this->successResponse($data, 'Listado paginado de cargos de administración recuperado con éxito.');
         } catch (\Throwable $e) {

@@ -10,10 +10,12 @@ use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use App\Services\Fleet\DriverLicenseService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 
@@ -45,6 +47,22 @@ class ThirdPartyService extends BaseService
         protected DriverLicenseService $driverLicenseService
     ) {
         parent::__construct();
+
+        $this->sortableFields = [
+            'document_number' => 'third_parties.document_number',
+            'trade_name' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::raw("COALESCE(NULLIF(third_parties.trade_name, ''), NULLIF(third_parties.company_name, ''), CONCAT(third_parties.first_name, ' ', third_parties.last_name))"),
+                $direction
+            ),
+            'email' => 'third_parties.email',
+            'branch.name' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('branches')
+                    ->select('branches.name')
+                    ->whereColumn('branches.uuid', 'third_parties.branch_uuid'),
+                $direction
+            ),
+            'is_active' => 'third_parties.is_active',
+        ];
     }
 
     /**
@@ -63,7 +81,9 @@ class ThirdPartyService extends BaseService
         int $page = 1,
         string $search = '',
         ?string $companyUuid = null,
-        ?string $type = null
+        ?string $type = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with(['driverLicenses', 'branch:uuid,name']);
 
@@ -96,10 +116,13 @@ class ThirdPartyService extends BaseService
             $query->where($type, true);
         }
 
+        $this->applySorting($query, $sortBy, $sortOrder);
+
         $paginator = $query->paginate($perPage, [
             'uuid',
             'document_number',
             'nit_check_digit',
+            'trade_name',
             'company_name',
             'first_name',
             'last_name',
@@ -141,7 +164,11 @@ class ThirdPartyService extends BaseService
             return [
                 'uuid' => $tp->uuid,
                 'document_number' => $tp->document_number,
-                'full_name' => $tp->company_name ?: "{$tp->first_name} {$tp->last_name}",
+                'trade_name' => $tp->trade_name,
+                'company_name' => $tp->company_name,
+                'first_name' => $tp->first_name,
+                'last_name' => $tp->last_name,
+                'full_name' => $tp->trade_name ?: ($tp->company_name ?: trim("{$tp->first_name} {$tp->last_name}")),
                 'email' => $tp->email,
                 'phone' => $tp->phone,
                 'branch_uuid' => $tp->branch_uuid,

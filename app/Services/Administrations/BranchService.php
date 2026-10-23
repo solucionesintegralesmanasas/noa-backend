@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Services\Administrations;
 
 use App\Models\Branch;
+use App\Models\Company;
 use App\Services\BaseService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
@@ -33,6 +35,22 @@ class BranchService extends BaseService
      */
     protected array $searchableFields = ['name'];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'name' => 'branches.name',
+            'company' => fn (Builder $query, string $direction) => $query->orderBy(
+                Company::query()
+                    ->select('business_name')
+                    ->whereColumn('companies.uuid', 'branches.company_uuid')
+                    ->take(1),
+                $direction
+            ),
+            'status' => 'branches.status',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new Branch;
@@ -51,9 +69,19 @@ class BranchService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, self::RELATIONS);
+        return $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: self::RELATIONS,
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
     }
 
     /**
