@@ -9,10 +9,12 @@ use App\Models\Vehicle;
 use App\Services\BaseService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de Vehiculo.
@@ -39,6 +41,38 @@ class VehicleService extends BaseService
         private readonly VehicleBranchService $vehicleBranchService
     ) {
         parent::__construct();
+
+        // Columnas por las que el listado de vehículos admite orden (contrato `sort_by`).
+        // Las de relación se resuelven con una subconsulta escalar para no duplicar filas
+        // en la paginación (la sede es hasOneThrough y puede tener varias asignaciones).
+        $this->sortableFields = [
+            'vehicle_license_plate' => 'vehicles.vehicle_license_plate',
+            'vehicle_class.description' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('vehicle_class')
+                    ->select('vehicle_class.description')
+                    ->whereColumn('vehicle_class.uuid', 'vehicles.vehicle_class_uuid'),
+                $direction
+            ),
+            'brand.description' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('brands')
+                    ->select('brands.description')
+                    ->whereColumn('brands.uuid', 'vehicles.brand_uuid'),
+                $direction
+            ),
+            'line' => 'vehicles.line',
+            'model' => 'vehicles.model',
+            'branch.name' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('branches')
+                    ->join('vehicles_branches', 'vehicles_branches.branch_uuid', '=', 'branches.uuid')
+                    ->select('branches.name')
+                    ->whereColumn('vehicles_branches.vehicle_uuid', 'vehicles.uuid')
+                    ->where('vehicles_branches.is_active', 1)
+                    ->limit(1),
+                $direction
+            ),
+            'type_of_service' => 'vehicles.type_of_service',
+            'is_active' => 'vehicles.is_active',
+        ];
     }
 
     protected function getModelInstance(): Model
@@ -65,7 +99,7 @@ class VehicleService extends BaseService
     /**
      * Método getAllVehiclesWithPagination.
      */
-    public function getAllVehiclesWithPagination(int $perPage = 15, int $page = 1, string $search = '', ?string $companyUuid = null, ?string $thirdPartyUuid = null): LengthAwarePaginator
+    public function getAllVehiclesWithPagination(int $perPage = 15, int $page = 1, string $search = '', ?string $companyUuid = null, ?string $thirdPartyUuid = null, ?string $sortBy = null, ?string $sortOrder = null): LengthAwarePaginator
     {
         $columns = [
             'uuid',
@@ -137,6 +171,10 @@ class VehicleService extends BaseService
                 }
             });
         }
+
+        // Orden solicitado por el listado (contrato `sort_by`/`sort_order`); campo no
+        // declarado en $sortableFields se ignora y la consulta conserva su orden natural.
+        $this->applySorting($query, $sortBy, $sortOrder);
 
         $paginator = $query->paginate($perPage, $columns, 'page', $page);
 

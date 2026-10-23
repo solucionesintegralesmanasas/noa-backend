@@ -43,6 +43,8 @@ class VehicleController extends Controller
             new OA\Parameter(name: 'search', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'third_party_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'sort_by', in: 'query', required: false, description: 'Campo visible de la columna (lista blanca del servicio).', schema: new OA\Schema(type: 'string', enum: ['vehicle_license_plate', 'vehicle_class.description', 'brand.description', 'line', 'model', 'branch.name', 'type_of_service', 'is_active'])),
+            new OA\Parameter(name: 'sort_order', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['asc', 'desc'], default: 'asc')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
@@ -58,7 +60,17 @@ class VehicleController extends Controller
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid') ?? $request->input('filter.company_uuid');
             $thirdPartyUuid = $request->query('third_party_uuid') ?? $request->input('filter.third_party_uuid');
-            $data = $this->vehicleService->getAllVehiclesWithPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid);
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order');
+            $data = $this->vehicleService->getAllVehiclesWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                $thirdPartyUuid,
+                is_string($sortBy) ? $sortBy : null,
+                is_string($sortOrder) ? $sortOrder : null
+            );
 
             return $this->successResponse($data, 'Listado paginado de Vehiculo recuperado con éxito.');
         } catch (\Throwable $e) {
