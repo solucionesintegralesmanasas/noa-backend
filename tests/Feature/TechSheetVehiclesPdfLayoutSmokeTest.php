@@ -38,6 +38,63 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $this->assertSame(1, count($c[0]));
     }
 
+    public function test_la_ficha_del_vehiculo_con_datos_completos_cabe_en_una_hoja_vertical(): void
+    {
+        $datos = $this->datosFicha();
+        $datos['vehicle']->vehicle_documents = collect([
+            (object) [
+                'document_type' => 'Seguro Obligatorio (SOAT)',
+                'policy_number' => 'SOAT-984210547',
+                'issuing_entity' => 'Seguros del Estado S.A.',
+                'expiry_date' => '2026-11-14',
+            ],
+            (object) [
+                'document_type' => 'Revisión Técnico-Mecánica (RTM)',
+                'policy_number' => 'CDA-049281-2025',
+                'issuing_entity' => 'CDA del Sinú S.A.S.',
+                'expiry_date' => '2026-10-02',
+            ],
+            (object) [
+                'document_type' => 'Póliza Resp. Civil Contractual (RCC)',
+                'policy_number' => 'RCC-88410294',
+                'issuing_entity' => 'La Previsora S.A. Seguros',
+                'expiry_date' => '2027-01-20',
+            ],
+            (object) [
+                'document_type' => 'Póliza Extracontractual (RCE)',
+                'policy_number' => 'RCE-88410295',
+                'issuing_entity' => 'La Previsora S.A. Seguros',
+                'expiry_date' => '2027-01-20',
+            ],
+        ]);
+        $datos['vehicle']->operation_cards = collect([
+            (object) [
+                'operating_card_number' => 'TO-2024-009841',
+                'affiliated_company' => 'TRANSPORTES TEST',
+                'issue_date' => '2024-02-15',
+                'expiration_date' => '2026-02-15',
+            ],
+        ]);
+        $datos['vehicle']->business_collaboration_agreements = collect([
+            (object) [
+                'contracting_entity_name' => 'TRANSPORTES COLECTIVOS DEL VALLE S.A.',
+                'agreement_internal_id' => 'CONV-COLAB-2025-018',
+                'expiry_date' => '2027-01-15',
+            ],
+        ]);
+        $datos['vehicle']->third_party->address = 'Calle 29 N° 14-38';
+        $datos['vehicle']->third_party->municipality = (object) ['name' => 'Montería'];
+        $datos['vehicle']->third_party->phone = '3117894521';
+
+        $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $datos)
+            ->setPaper('letter', 'portrait');
+        app(PdfService::class)->sellarPaginado($pdf);
+
+        preg_match_all('~/Type\s*/Page([^s]|$)~', $pdf->output(), $c);
+
+        $this->assertSame(1, count($c[0]));
+    }
+
     /** @return array<string, mixed> */
     private function datosFicha(): array
     {

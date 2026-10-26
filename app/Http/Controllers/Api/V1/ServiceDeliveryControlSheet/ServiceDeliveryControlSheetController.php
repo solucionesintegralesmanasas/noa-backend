@@ -65,7 +65,7 @@ class ServiceDeliveryControlSheetController extends Controller
             $soloCerradas = $request->has('solo_cerradas')
                 ? filter_var($request->query('solo_cerradas'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false
                 : false;
-            $data = $this->serviceDeliveryControlSheetService->getAllServiceDeliveryControlSheetsWithPagination($perPage, $page, $search, $companyUuid, $projectUuid, $soloCerradas);
+            $data = $this->serviceDeliveryControlSheetService->getAllServiceDeliveryControlSheetsWithPagination($perPage, $page, $search, $companyUuid, $projectUuid, $soloCerradas, filter_var($request->query('agrupar_proyecto'), FILTER_VALIDATE_BOOLEAN));
 
             return $this->successResponse($data, 'Listado paginado recuperado con éxito.');
         } catch (\Throwable $e) {

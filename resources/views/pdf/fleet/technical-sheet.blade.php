@@ -3,138 +3,138 @@
 {{-- Estilos propios de la ficha técnica. Van en crudo porque la base los inyecta dentro de su <style>. --}}
 @push('styles')
     body {
-        margin-top: 1cm;
-        margin-bottom: 1cm;
-        margin-left: 1cm;
-        margin-right: 1cm;
-        font-size: 10px;
+    margin-top: 1cm;
+    margin-bottom: 1cm;
+    margin-left: 1cm;
+    margin-right: 1cm;
+    font-size: 10px;
     }
 
     table {
-        table-layout: auto;
+    table-layout: auto;
     }
 
     /* La base fija .header-table td en 33.33%: se revierte a auto. */
     .header-table th,
     .header-table td {
-        width: auto;
+    width: auto;
     }
 
     .main-container {
-        width: 100%;
-        border: 1.2px solid #000;
-        border-radius: 12px;
-        overflow: hidden;
-        border-collapse: separate;
+    width: 100%;
+    border: 1.2px solid #000;
+    border-radius: 12px;
+    overflow: hidden;
+    border-collapse: separate;
     }
 
     td {
-        border: 0.5px solid #000;
-        padding: 6px 8px;
-        vertical-align: middle;
-        word-wrap: break-word;
+    border: 0.5px solid #000;
+    padding: 6px 8px;
+    vertical-align: middle;
+    word-wrap: break-word;
     }
 
     .label {
-        font-weight: bold;
-        font-size: 10px;
-        text-transform: uppercase;
-        background-color: var(--pdf-encabezado);
-        color: var(--pdf-banda-texto);
-        width: 20%;
+    font-weight: bold;
+    font-size: 10px;
+    text-transform: uppercase;
+    background-color: var(--pdf-encabezado);
+    color: var(--pdf-banda-texto);
+    width: 20%;
     }
 
     .value {
-        font-size: 11px;
+    font-size: 11px;
     }
 
     h3 {
-        font-size: 14px;
-        margin: 5px 0;
-        text-transform: uppercase;
-        color: var(--pdf-banda-texto);
+    font-size: 14px;
+    margin: 5px 0;
+    text-transform: uppercase;
+    color: var(--pdf-banda-texto);
     }
 
     .section-header {
-        background-color: var(--pdf-banda);
-        color: var(--pdf-banda-texto);
-        font-weight: bold;
-        text-align: center;
-        padding: 5px;
-        text-transform: uppercase;
-        border: 1px solid var(--pdf-banda-texto);
+    background-color: var(--pdf-banda);
+    color: var(--pdf-banda-texto);
+    font-weight: bold;
+    text-align: center;
+    padding: 5px;
+    text-transform: uppercase;
+    border: 1px solid var(--pdf-banda-texto);
     }
 
     /* Celdas de código/versión del encabezado: tenues y compactas. */
     .meta-kv td {
-        border: none;
-        border-bottom: 0.5px solid #000;
-        padding: 2px 5px;
-        font-size: 8px;
+    border: none;
+    border-bottom: 0.5px solid #000;
+    padding: 2px 5px;
+    font-size: 8px;
     }
 
     .meta-kv .k {
-        font-weight: bold;
-        border-right: 0.5px solid #000;
-        background-color: var(--pdf-tenue);
+    font-weight: bold;
+    border-right: 0.5px solid #000;
+    background-color: var(--pdf-tenue);
     }
 
     .badge {
-        display: inline-block;
-        padding: 2px 5px;
-        border-radius: 4px;
-        font-weight: bold;
-        font-size: 9px;
+    display: inline-block;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 9px;
     }
 
     .badge-success {
-        background-color: #DCFCE7;
-        color: #14532D;
+    background-color: #DCFCE7;
+    color: #14532D;
     }
 
     .badge-danger {
-        background-color: var(--pdf-alerta);
-        color: var(--pdf-alerta-texto);
+    background-color: var(--pdf-alerta);
+    color: var(--pdf-alerta-texto);
     }
 
     .qr-section-container {
-        display: table;
-        width: 100%;
-        border-top: 1.2px solid #000;
+    display: table;
+    width: 100%;
+    border-top: 1.2px solid #000;
     }
 
     .qr-box {
-        display: table-cell;
-        width: 20%;
-        padding: 10px;
-        text-align: center;
-        vertical-align: middle;
-        border-right: 0.5px solid #000;
+    display: table-cell;
+    width: 20%;
+    padding: 10px;
+    text-align: center;
+    vertical-align: middle;
+    border-right: 0.5px solid #000;
     }
 
     .instruction-box {
-        display: table-cell;
-        width: 80%;
-        padding: 15px;
-        vertical-align: middle;
-        text-align: left;
-        font-size: 10px;
-        line-height: 1.4;
+    display: table-cell;
+    width: 80%;
+    padding: 15px;
+    vertical-align: middle;
+    text-align: left;
+    font-size: 10px;
+    line-height: 1.4;
     }
 
     img.qr {
-        width: 85px;
-        height: 85px;
-        display: block;
-        margin: 0 auto;
+    width: 85px;
+    height: 85px;
+    display: block;
+    margin: 0 auto;
     }
 
     .footer-legal {
-        margin-top: 10px;
-        font-size: 9px;
-        text-align: center;
-        font-style: italic;
-        color: #666;
+    margin-top: 10px;
+    font-size: 9px;
+    text-align: center;
+    font-style: italic;
+    color: #666;
     }
 @endpush
 
@@ -325,8 +325,9 @@
 
         <div class="qr-section-container">
             @include('pdf.layouts.partials.qr-block', [
-                'qr' => !empty($data['qrcode'] ?? null) ? 'data:image/svg+xml;base64,'.$data['qrcode'] : null,
-                'instruction' => '<strong>VALIDACIÓN ELECTRÓNICA:</strong><br>Este documento cuenta con un código QR para su validación en línea. Para verificar la autenticidad y el estado actual de la documentación de este vehículo, escanee el código con la cámara de su dispositivo móvil. La información mostrada en el sistema de la empresa prevalecerá sobre este documento impreso.',
+                'qr' => !empty($data['qrcode'] ?? null) ? 'data:image/svg+xml;base64,' . $data['qrcode'] : null,
+                'instruction' =>
+                    '<strong>VALIDACIÓN ELECTRÓNICA:</strong><br>Este documento cuenta con un código QR para su validación en línea. Para verificar la autenticidad y el estado actual de la documentación de este vehículo, escanee el código con la cámara de su dispositivo móvil. La información mostrada en el sistema de la empresa prevalecerá sobre este documento impreso.',
             ])
         </div>
     </div>

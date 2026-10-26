@@ -75,4 +75,10 @@ return [
         'secret' => env('CRON_SECRET'),
     ],
 
+    // Binario PHP CLI que usa WebCronMiddleware para lanzar `webcron:run` en
+    // segundo plano. Si está vacío se autodetecta (PHP_BINDIR/php).
+    'webcron' => [
+        'php_binary' => env('WEBCRON_PHP_BINARY'),
+    ],
+
 ];

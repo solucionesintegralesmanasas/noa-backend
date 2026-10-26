@@ -6,6 +6,10 @@ namespace Tests\Feature;
 
 use App\Mail\VehicleExpiryDigestMail;
 use App\Models\EmailNotificationLog;
+use App\Models\OperationCard;
+use App\Models\VehicleDocument;
+use App\Services\Fleet\OperationCardService;
+use App\Services\Fleet\VehicleDocumentService;
 use App\Services\Notifications\EmailLogService;
 use App\Utils\OwnCompany;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -374,5 +378,119 @@ class DigestVencimientosTest extends TestCase
         Artisan::call('webcron:run');
 
         Mail::assertSent(VehicleExpiryDigestMail::class, fn (VehicleExpiryDigestMail $m) => $m->hasTo(self::DESTINO));
+    }
+
+    public function test_cambiar_un_documento_a_vencido_ayer_envia_aviso_inmediato(): void
+    {
+        $empresa = $this->empresaConCorreo();
+        $datos = $this->vehiculo($empresa, 'INM001', self::EMPRESA, '2026-10-15');
+
+        app(VehicleDocumentService::class)->updateVehicleDocument($datos['soat'], [
+            'expiry_date' => '2026-09-29',
+        ]);
+
+        Mail::assertSent(VehicleExpiryDigestMail::class, 1);
+        Mail::assertSent(VehicleExpiryDigestMail::class, function (VehicleExpiryDigestMail $m) {
+            return $m->hasTo(self::DESTINO)
+                && str_contains($m->asunto, 'Documento vencido')
+                && collect($m->items)->contains(fn (array $i) => $i['placa'] === 'INM001'
+                    && $i['estado'] === 'VENCIDO');
+        });
+
+        $this->assertDatabaseHas('email_notification_logs', [
+            'entity_type' => VehicleDocument::class,
+            'entity_uuid' => $datos['soat'],
+            'milestone' => 'vencimiento_inmediato:2026-09-29',
+            'status' => 'sent',
+        ]);
+    }
+
+    public function test_el_aviso_inmediato_no_se_duplica_al_volver_a_guardar(): void
+    {
+        $empresa = $this->empresaConCorreo();
+        $datos = $this->vehiculo($empresa, 'INM002', self::EMPRESA, '2026-10-15');
+
+        $servicio = app(VehicleDocumentService::class);
+        $servicio->updateVehicleDocument($datos['soat'], ['expiry_date' => '2026-09-29']);
+        $servicio->updateVehicleDocument($datos['soat'], ['expiry_date' => '2026-09-28']);
+
+        Mail::assertSent(VehicleExpiryDigestMail::class, 1);
+    }
+
+    public function test_no_envia_aviso_inmediato_si_el_documento_sigue_vigente(): void
+    {
+        $empresa = $this->empresaConCorreo();
+        $datos = $this->vehiculo($empresa, 'INM003', self::EMPRESA, '2026-10-15');
+
+        app(VehicleDocumentService::class)->updateVehicleDocument($datos['soat'], [
+            'expiry_date' => '2026-12-31',
+        ]);
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_no_envia_aviso_inmediato_para_vehiculos_de_afiliados(): void
+    {
+        $empresa = $this->empresaConCorreo();
+        $datos = $this->vehiculo($empresa, 'AFL001', 'OTRA EMPRESA S.A.S', '2026-10-15');
+
+        app(VehicleDocumentService::class)->updateVehicleDocument($datos['soat'], [
+            'expiry_date' => '2026-09-29',
+        ]);
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_no_envia_aviso_inmediato_si_el_correo_esta_deshabilitado(): void
+    {
+        $empresa = $this->empresaConCorreo(['notify_by_email' => false]);
+        $datos = $this->vehiculo($empresa, 'INM004', self::EMPRESA, '2026-10-15');
+
+        app(VehicleDocumentService::class)->updateVehicleDocument($datos['soat'], [
+            'expiry_date' => '2026-09-29',
+        ]);
+
+        Mail::assertNothingSent();
+    }
+
+    public function test_una_tarjeta_de_operacion_vencida_tambien_dispara_el_aviso(): void
+    {
+        $empresa = $this->empresaConCorreo();
+        $datos = $this->vehiculo($empresa, 'TAR001', self::EMPRESA);
+
+        app(OperationCardService::class)->updateOperationCard($datos['tarjeta'], [
+            'expiration_date' => '2026-09-29',
+        ]);
+
+        Mail::assertSent(VehicleExpiryDigestMail::class, function (VehicleExpiryDigestMail $m) {
+            return $m->hasTo(self::DESTINO)
+                && str_contains($m->asunto, 'Documento vencido')
+                && collect($m->items)->contains(fn (array $i) => $i['placa'] === 'TAR001'
+                    && str_contains($i['documento'], 'Tarjeta de Operación')
+                    && $i['estado'] === 'VENCIDO');
+        });
+
+        $this->assertDatabaseHas('email_notification_logs', [
+            'entity_type' => OperationCard::class,
+            'entity_uuid' => $datos['tarjeta'],
+            'milestone' => 'vencimiento_inmediato:2026-09-29',
+            'status' => 'sent',
+        ]);
+    }
+
+    public function test_el_digest_no_repite_el_mismo_dia_un_documento_ya_avisado_inmediato(): void
+    {
+        $empresa = $this->empresaConCorreo();
+        $datos = $this->vehiculo($empresa, 'INM005', self::EMPRESA, '2026-10-15');
+
+        app(VehicleDocumentService::class)->updateVehicleDocument($datos['soat'], [
+            'expiry_date' => '2026-09-29',
+        ]);
+
+        // El digest de la mañana corre después del aviso inmediato: el documento
+        // no debe repetirse en el consolidado del mismo día.
+        $this->ejecutar();
+
+        Mail::assertSent(VehicleExpiryDigestMail::class, 1);
     }
 }

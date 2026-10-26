@@ -60,7 +60,8 @@ class ServiceDeliveryControlSheetService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $projectUuid = null,
-        bool $soloCerradas = false
+        bool $soloCerradas = false,
+        bool $agruparPorProyecto = false
     ): LengthAwarePaginator {
         $query = $this->query()
             ->whereNull('parent_uuid')
@@ -74,6 +75,8 @@ class ServiceDeliveryControlSheetService extends BaseService
         // como histórico pero ya no se listan; el módulo refleja la asignación
         // vigente.
         $query->where('retirada_de_proyecto', false);
+
+        $this->aplicarFiltroConductor($query, $companyUuid);
 
         if ($soloCerradas) {
             // Solo fechas cerradas que imprimen PDF:
@@ -107,7 +110,26 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
                 // Buscar también por nombre de proyecto
                 $q->orWhereHas('project', fn ($pq) => $pq->where('project_name', 'like', "%{$search}%"));
+                // ...por placa y conductor (vehículo interno o subcontratado).
+                $q->orWhereHas('internalControl', function ($ic) use ($search) {
+                    $ic->whereHas('vehicle', fn ($v) => $v->where('vehicle_license_plate', 'like', "%{$search}%"))
+                        ->orWhereHas('thirdParty', fn ($t) => $t->where('first_name', 'like', "%{$search}%")
+                            ->orWhere('last_name', 'like', "%{$search}%")
+                            ->orWhere('company_name', 'like', "%{$search}%")
+                            ->orWhere('trade_name', 'like', "%{$search}%"));
+                });
+                $q->orWhereHas('subcontractedControl', fn ($sc) => $sc->where('vehicle_license_plate', 'like', "%{$search}%")
+                    ->orWhere('driver_name_and_surname', 'like', "%{$search}%"));
             });
+        }
+
+        // Agrupación por proyecto: la paginación es del servidor, así que el orden
+        // por nombre de proyecto mantiene juntas las filas de cada grupo.
+        if ($agruparPorProyecto) {
+            $query->orderBy(Project::query()->select('project_name')
+                ->whereColumn('projects.uuid', 'service_delivery_control_sheet.project_uuid')
+                ->limit(1))
+                ->orderByDesc('service_delivery_control_sheet.service_date');
         }
 
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
@@ -133,11 +155,66 @@ class ServiceDeliveryControlSheetService extends BaseService
     public function getAllServiceDeliveryControlSheets(): Collection
     {
         // SPEC-009: igual que el listado paginado, excluye las retiradas.
-        return $this->query()
+        $query = $this->query()
             ->whereNull('parent_uuid')
             ->where('retirada_de_proyecto', false)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl'])
-            ->get();
+            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+
+        $this->aplicarFiltroConductor($query);
+
+        return $query->get();
+    }
+
+    /**
+     * Si el usuario autenticado es CONDUCTOR (y no un rol administrativo/afiliado),
+     * restringe las planillas a las suyas: aquellas cuyo control interno (o el de
+     * alguno de sus días hijos) está asignado a su tercero. Sin tercero asociado
+     * no devuelve nada.
+     */
+    private function aplicarFiltroConductor($query, ?string $companyUuid = null): void
+    {
+        $thirdPartyUuid = $this->conductorThirdPartyUuid($companyUuid);
+
+        if ($thirdPartyUuid === false) {
+            return;
+        }
+
+        if ($thirdPartyUuid === null) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $query->where(function ($q) use ($thirdPartyUuid) {
+            $q->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid));
+        });
+    }
+
+    /**
+     * @return string|null|false false = el usuario no está limitado como conductor;
+     *                           null = es conductor pero sin tercero asociado.
+     */
+    private function conductorThirdPartyUuid(?string $companyUuid = null): string|null|false
+    {
+        $user = Auth::user();
+
+        if (! $user || ! method_exists($user, 'hasRole') || ! $user->hasRole('CONDUCTOR')
+            || $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA', 'EMPLEADO', 'AFILIADO'])) {
+            return false;
+        }
+
+        $thirdPartyUuid = request()->attributes->get('current_third_party_uuid');
+
+        if (! $thirdPartyUuid) {
+            $companyUser = ($companyUuid
+                    ? $user->companies()->where('company_user.company_uuid', $companyUuid)->first()
+                    : null)
+                ?? $user->companies()->first();
+            $thirdPartyUuid = $companyUser?->pivot?->third_party_uuid;
+        }
+
+        return $thirdPartyUuid ?: null;
     }
 
     /**
@@ -195,9 +272,24 @@ class ServiceDeliveryControlSheetService extends BaseService
 
     public function getServiceDeliveryControlSheetByUuid(string $uuid): ?Model
     {
-        return ServiceDeliveryControlSheet::where('uuid', $uuid)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl'])
-            ->first();
+        $query = ServiceDeliveryControlSheet::where('uuid', $uuid)
+            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+
+        $thirdPartyUuid = $this->conductorThirdPartyUuid();
+        if ($thirdPartyUuid !== false) {
+            $query->where(function ($q) use ($thirdPartyUuid) {
+                if ($thirdPartyUuid === null) {
+                    $q->whereRaw('1 = 0');
+
+                    return;
+                }
+                $q->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                    ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                    ->orWhereHas('parent.children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid));
+            });
+        }
+
+        return $query->first();
     }
 
     /**

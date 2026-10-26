@@ -9,11 +9,13 @@ use App\Models\CapacityMovement;
 use App\Models\OperationCard;
 use App\Models\Vehicle;
 use App\Services\BaseService;
+use App\Services\Notifications\EmailLogService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -156,7 +158,7 @@ class OperationCardService extends BaseService
     {
         $this->asegurarQueElVehiculoRequiereTarjeta($data['vehicle_uuid'] ?? null);
 
-        return $this->transaction(function () use ($data) {
+        $card = $this->transaction(function () use ($data) {
             $tipo = $this->resolverTipoTarjeta($data);
             $movimientoCupo = $this->verificarCupoParaTarjeta($tipo, $data['vehicle_uuid'] ?? null, $data['company_uuid'] ?? null);
 
@@ -211,6 +213,11 @@ class OperationCardService extends BaseService
 
             return $card;
         });
+
+        // Disparador inmediato si la tarjeta se registra ya vencida (o vence hoy).
+        app(EmailLogService::class)->notifyExpiredNowSafe($card);
+
+        return $card;
     }
 
     /**
@@ -218,8 +225,13 @@ class OperationCardService extends BaseService
      */
     public function updateOperationCard(string $uuid, array $data): Model
     {
-        return $this->transaction(function () use ($uuid, $data) {
+        $vencimientoAnterior = null;
+
+        $card = $this->transaction(function () use ($uuid, $data, &$vencimientoAnterior) {
             $record = $this->findByUuid($uuid);
+            $vencimientoAnterior = $record->expiration_date
+                ? Carbon::parse($record->expiration_date)->startOfDay()
+                : null;
 
             $vehicleUuid = $data['vehicle_uuid'] ?? $record->vehicle_uuid;
             // Solo si cambia de vehículo: la tarjeta histórica de un vehículo ya particular se puede editar.
@@ -280,6 +292,12 @@ class OperationCardService extends BaseService
 
             return $record->fresh();
         });
+
+        // Disparador inmediato: solo cuando la tarjeta pasa de vigente a vencida
+        // (o vence hoy) con esta edición; si ya estaba vencida no repite.
+        app(EmailLogService::class)->notifyExpiredNowSafe($card, $vencimientoAnterior);
+
+        return $card;
     }
 
     /**
