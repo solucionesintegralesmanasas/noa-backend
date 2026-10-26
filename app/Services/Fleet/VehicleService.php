@@ -770,6 +770,17 @@ class VehicleService extends BaseService
             'exact_payment',
             'is_active',
             'internal_number',
+            'number_of_windows',
+            'steering_type',
+            'transmission_type',
+            'number_of_speeds',
+            'bearing_type',
+            'rear_suspension',
+            'number_of_tires',
+            'rim_size',
+            'rim_material',
+            'front_brake_type',
+            'rear_brake_type',
         ];
 
         $relations = [

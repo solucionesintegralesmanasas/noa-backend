@@ -23,6 +23,12 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $this->assertStringNotContainsString('Generado por NOA', $html);
         // Datos del vehículo.
         $this->assertStringContainsString('ABC123', $html);
+        // Datos nuevos: registro, sucursal, capacidades y mecánica.
+        $this->assertStringContainsString('15/03/2020', $html);
+        $this->assertStringContainsString('Sede Montería', $html);
+        $this->assertStringContainsString('4.500 KG', $html);
+        $this->assertStringContainsString('HIDRÁULICA', $html);
+        $this->assertStringContainsString('DISC', $html);
         // El encabezado default de 3 logos no se usa.
         $this->assertStringNotContainsString('class="logo-header"', $html);
     }
@@ -110,6 +116,23 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
                 'engine_displacement' => '2000',
                 'number_of_axles' => '2',
                 'type_of_service' => 'PÚBLICO',
+                'registration_date' => '2020-03-15',
+                'doors' => 4,
+                'branch' => (object) ['name' => 'Sede Montería'],
+                'load_capacity' => 4500,
+                'gross_vehicle_weight' => 8500,
+                'exact_payment' => true,
+                'steering_type' => 'HIDRÁULICA',
+                'transmission_type' => 'MECÁNICA',
+                'number_of_speeds' => '6',
+                'bearing_type' => 'BOLAS',
+                'rear_suspension' => 'BALLESTA',
+                'number_of_tires' => '6',
+                'rim_size' => 'R22.5',
+                'rim_material' => 'ACERO',
+                'front_brake_type' => 'DISCO',
+                'rear_brake_type' => 'TAMBOR',
+                'number_of_windows' => '12',
                 'company' => (object) ['business_name' => 'TRANSPORTES TEST', 'document_number' => '9001'],
                 'business_collaboration_agreements' => collect(),
                 'operation_cards' => collect(),

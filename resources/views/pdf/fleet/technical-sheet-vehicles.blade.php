@@ -424,6 +424,14 @@
                 <td class="lbl">N° de Ejes:</td>
                 <td class="val text-center mono">{{ !empty($vehicle->number_of_axles) ? $vehicle->number_of_axles . ' EJES' : 'N/A' }}</td>
             </tr>
+            <tr>
+                <td class="lbl">Fecha de Matrícula:</td>
+                <td class="val mono">{{ !empty($vehicle->registration_date) ? \Carbon\Carbon::parse($vehicle->registration_date)->format('d/m/Y') : 'N/A' }}</td>
+                <td class="lbl">N° de Puertas:</td>
+                <td class="val text-center mono">{{ $vehicle->doors ?? 'N/A' }}</td>
+                <td class="lbl">Sucursal:</td>
+                <td class="val uppercase">{{ $vehicle->branch->name ?? 'N/A' }}</td>
+            </tr>
         </tbody>
     </table>
 
@@ -444,8 +452,12 @@
                 <td class="val mono" style="width: 32%;">{{ $vehicle->chassis_number ?? 'N/A' }}</td>
             </tr>
             <tr>
-                <td class="lbl">VIN / Serial Chasis:</td>
-                <td class="val mono">{{ $vehicle->vin_number ?? ($vehicle->serial_number ?? 'N/A') }}</td>
+                <td class="lbl">VIN:</td>
+                <td class="val mono">{{ $vehicle->vin_number ?? 'N/A' }}</td>
+                <td class="lbl">N° de Serie:</td>
+                <td class="val mono">{{ $vehicle->serial_number ?? 'N/A' }}</td>
+            </tr>
+            <tr>
                 <td class="lbl">Licencia de Tránsito:</td>
                 <td class="val mono">
                     {{ $vehicle->transit_license_number ?? 'N/A' }}
@@ -453,6 +465,8 @@
                         ({{ $vehicle->transit_authority }})
                     @endif
                 </td>
+                <td class="lbl">Pago Exacto:</td>
+                <td class="val text-center">{{ $vehicle->exact_payment ? 'SÍ' : 'NO' }}</td>
             </tr>
             <tr>
                 <td class="lbl">Capacidad Pasajeros:</td>
@@ -467,14 +481,65 @@
                     <strong style="color: #1e3a8a;">{{ $vehicle->type_of_service ?? 'SERVICIO PÚBLICO ESPECIAL' }}</strong>
                 </td>
             </tr>
+            <tr>
+                <td class="lbl">Capacidad de Carga:</td>
+                <td class="val mono">{{ !empty($vehicle->load_capacity) ? number_format((float) $vehicle->load_capacity, 0, ',', '.') . ' KG' : 'N/A' }}</td>
+                <td class="lbl">Peso Bruto Vehicular:</td>
+                <td class="val mono">{{ !empty($vehicle->gross_vehicle_weight) ? number_format((float) $vehicle->gross_vehicle_weight, 0, ',', '.') . ' KG' : 'N/A' }}</td>
+            </tr>
         </tbody>
     </table>
 
-    <!-- 3. INFORMACIÓN DEL PROPIETARIO O TENEDOR REGISTRADO -->
+    <!-- 3. ESPECIFICACIONES MECÁNICAS -->
     <table cellpadding="0" cellspacing="0" class="section-banner">
         <tbody>
             <tr>
-                <td>3. Información del Propietario o Tenedor Registrado</td>
+                <td>3. Especificaciones Mecánicas</td>
+            </tr>
+        </tbody>
+    </table>
+    <table cellpadding="0" cellspacing="0" class="data-table">
+        <tbody>
+            <tr>
+                <td class="lbl">Dirección:</td>
+                <td class="val uppercase">{{ $vehicle->steering_type ?? 'N/A' }}</td>
+                <td class="lbl">Transmisión:</td>
+                <td class="val uppercase">{{ $vehicle->transmission_type ?? 'N/A' }}</td>
+                <td class="lbl">N° Velocidades:</td>
+                <td class="val text-center mono">{{ $vehicle->number_of_speeds ?? 'N/A' }}</td>
+            </tr>
+            <tr>
+                <td class="lbl">Rodamientos:</td>
+                <td class="val uppercase">{{ $vehicle->bearing_type ?? 'N/A' }}</td>
+                <td class="lbl">Suspensión Trasera:</td>
+                <td class="val uppercase">{{ $vehicle->rear_suspension ?? 'N/A' }}</td>
+                <td class="lbl">N° Llantas:</td>
+                <td class="val text-center mono">{{ $vehicle->number_of_tires ?? 'N/A' }}</td>
+            </tr>
+            <tr>
+                <td class="lbl">Dimensión Rines:</td>
+                <td class="val mono">{{ $vehicle->rim_size ?? 'N/A' }}</td>
+                <td class="lbl">Material Rines:</td>
+                <td class="val uppercase">{{ $vehicle->rim_material ?? 'N/A' }}</td>
+                <td class="lbl">N° Ventanas:</td>
+                <td class="val text-center mono">{{ $vehicle->number_of_windows ?? 'N/A' }}</td>
+            </tr>
+            <tr>
+                <td class="lbl">Frenos Delanteros:</td>
+                <td class="val uppercase">{{ $vehicle->front_brake_type ?? 'N/A' }}</td>
+                <td class="lbl">Frenos Traseros:</td>
+                <td class="val uppercase">{{ $vehicle->rear_brake_type ?? 'N/A' }}</td>
+                <td class="lbl"></td>
+                <td class="val"></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- 4. INFORMACIÓN DEL PROPIETARIO O TENEDOR REGISTRADO -->
+    <table cellpadding="0" cellspacing="0" class="section-banner">
+        <tbody>
+            <tr>
+                <td>4. Información del Propietario o Tenedor Registrado</td>
             </tr>
         </tbody>
     </table>
@@ -505,11 +570,11 @@
         </tbody>
     </table>
 
-    <!-- 4. DOCUMENTACIÓN REGLAMENTARIA Y PÓLIZAS OBLIGATORIAS (PESV) -->
+    <!-- 5. DOCUMENTACIÓN REGLAMENTARIA Y PÓLIZAS OBLIGATORIAS (PESV) -->
     <table cellpadding="0" cellspacing="0" class="section-banner">
         <tbody>
             <tr>
-                <td>4. Documentación Reglamentaria y Pólizas Obligatorias (PESV)</td>
+                <td>5. Documentación Reglamentaria y Pólizas Obligatorias (PESV)</td>
             </tr>
         </tbody>
     </table>
@@ -552,11 +617,11 @@
         </tbody>
     </table>
 
-    <!-- 5. TARJETA(S) DE OPERACIÓN - MINISTERIO DE TRANSPORTE -->
+    <!-- 6. TARJETA(S) DE OPERACIÓN - MINISTERIO DE TRANSPORTE -->
     <table cellpadding="0" cellspacing="0" class="section-banner">
         <tbody>
             <tr>
-                <td>5. Tarjeta(s) de Operación - Ministerio de Transporte</td>
+                <td>6. Tarjeta(s) de Operación - Ministerio de Transporte</td>
             </tr>
         </tbody>
     </table>
@@ -601,11 +666,11 @@
         </tbody>
     </table>
 
-    <!-- 6. CONVENIO DE COLABORACIÓN EMPRESARIAL -->
+    <!-- 7. CONVENIO DE COLABORACIÓN EMPRESARIAL -->
     <table cellpadding="0" cellspacing="0" class="section-banner">
         <tbody>
             <tr>
-                <td>6. Convenio de Colaboración Empresarial</td>
+                <td>7. Convenio de Colaboración Empresarial</td>
             </tr>
         </tbody>
     </table>
