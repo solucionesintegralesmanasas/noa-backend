@@ -116,6 +116,11 @@ class EmailLogService extends BaseService
         ));
         $criticos = array_values(array_filter($items, fn (array $item) => $item['days_left'] <= 0));
 
+        // Un documento ya avisado de forma inmediata hoy no se repite en el
+        // digest del mismo día (mañana o tarde); desde el día siguiente vuelve
+        // al digest normal.
+        $criticos = $this->excluirAvisadosHoy($criticos);
+
         // 2a. Digest diario de próximos: una vez al día, en cualquier corrida.
         if (! empty($proximos) && ! $this->digestEnviado($companyUuid, self::SLOT_DIARIO, $today)) {
             $this->enviarDigest(
@@ -248,6 +253,160 @@ class EmailLogService extends BaseService
             'entity_type' => $entityType,
             'entity_uuid' => $entityUuid,
         ];
+    }
+
+    /**
+     * Envía un aviso inmediato cuando un documento o tarjeta pasa a estar vencido
+     * (o vence hoy) por una edición del usuario, sin esperar a la franja del digest.
+     *
+     * Idempotente por entidad y fecha de vencimiento: si la misma entidad ya se
+     * avisó para esa fecha, no se repite. Un fallo de SMTP no rompe el guardado.
+     */
+    public function notifyExpiredNow(Model $entity, ?Carbon $previousExpiry = null): void
+    {
+        $expiry = $this->fechaVencimiento($entity);
+        $today = Carbon::today();
+
+        if ($expiry === null || $expiry->gt($today)) {
+            return;
+        }
+
+        // Solo el momento en que deja de estar vigente: si ya estaba vencido
+        // antes de esta edición, el digest normal ya lo reporta.
+        if ($previousExpiry !== null && $previousExpiry->lte($today)) {
+            return;
+        }
+
+        $companyUuid = (string) $entity->company_uuid;
+        if ($companyUuid === '') {
+            return;
+        }
+
+        $config = SystemConfiguration::query()->where('company_uuid', $companyUuid)->first();
+        if (! $config || ! $config->activate_notifications || ! $config->notify_by_email) {
+            return;
+        }
+
+        $email = trim((string) $config->notification_email);
+        if ($email === '') {
+            return;
+        }
+
+        // Reutiliza las reglas del digest: vehículo activo y propio, documento
+        // vigente y tarjeta no cancelada. Si no aparece, no corresponde aviso.
+        $item = collect($this->recolectarItems($companyUuid))
+            ->first(fn (array $i) => $i['entity_uuid'] === $entity->uuid
+                && $i['entity_type'] === $entity::class);
+
+        if ($item === null || $item['days_left'] > 0) {
+            return;
+        }
+
+        $milestone = 'vencimiento_inmediato:'.$expiry->toDateString();
+
+        $yaEnviado = EmailNotificationLog::query()
+            ->where('entity_type', $entity::class)
+            ->where('entity_uuid', $entity->uuid)
+            ->where('milestone', $milestone)
+            ->where('status', 'sent')
+            ->exists();
+
+        if ($yaEnviado) {
+            return;
+        }
+
+        $companyName = $config->company?->business_name ?? $config->company?->trade_name ?? 'la empresa';
+        $asunto = $item['days_left'] === 0
+            ? "Documento vence hoy - {$companyName}"
+            : "Documento vencido - {$companyName}";
+        $intro = $item['days_left'] === 0
+            ? 'Se detectó un documento que vence hoy. Este aviso se envía en el momento de la detección.'
+            : 'Se detectó un documento vencido. Este aviso se envía en el momento de la detección.';
+
+        try {
+            Mail::to($email)->send(new VehicleExpiryDigestMail($companyName, [$item], $asunto, $intro));
+            Log::info("Aviso inmediato de vencimiento enviado a {$email} | Entidad: {$entity->uuid} | Vence: {$expiry->toDateString()}");
+
+            $this->registrarEnvio([
+                'company_uuid' => null,
+                'entity_type' => $entity::class,
+                'entity_uuid' => $entity->uuid,
+                'recipient_email' => $email,
+                'milestone' => $milestone,
+                'sent_date' => null,
+                'status' => 'sent',
+            ], true);
+        } catch (\Exception $e) {
+            Log::error("Error enviando aviso inmediato de vencimiento a {$email}: ".$e->getMessage());
+
+            $this->registrarEnvio([
+                'company_uuid' => null,
+                'entity_type' => $entity::class,
+                'entity_uuid' => $entity->uuid,
+                'recipient_email' => $email,
+                'milestone' => $milestone,
+                'sent_date' => null,
+                'status' => 'failed',
+            ], false);
+        }
+    }
+
+    /**
+     * Variante segura del disparador: nunca interrumpe el guardado del documento.
+     * Cualquier error de consulta o de configuración se registra en el log.
+     */
+    public function notifyExpiredNowSafe(Model $entity, ?Carbon $previousExpiry = null): void
+    {
+        try {
+            $this->notifyExpiredNow($entity, $previousExpiry);
+        } catch (\Throwable $e) {
+            Log::error('Error en el disparador inmediato de vencimiento: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Fecha de vencimiento de la entidad (documento o tarjeta).
+     */
+    private function fechaVencimiento(Model $entity): ?Carbon
+    {
+        $fecha = match (true) {
+            $entity instanceof VehicleDocument => $entity->expiry_date,
+            $entity instanceof OperationCard => $entity->expiration_date,
+            default => null,
+        };
+
+        return $fecha ? Carbon::parse($fecha)->startOfDay() : null;
+    }
+
+    /**
+     * Quita de la lista los ítems que ya recibieron un aviso inmediato hoy.
+     *
+     * @param  array<int, array{entity_uuid: string}>  $items
+     * @return array<int, array{entity_uuid: string}>
+     */
+    private function excluirAvisadosHoy(array $items): array
+    {
+        $uuids = array_column($items, 'entity_uuid');
+        if ($uuids === []) {
+            return $items;
+        }
+
+        $avisados = EmailNotificationLog::query()
+            ->where('milestone', 'like', 'vencimiento_inmediato:%')
+            ->where('status', 'sent')
+            ->whereDate('created_at', Carbon::today())
+            ->whereIn('entity_uuid', $uuids)
+            ->pluck('entity_uuid')
+            ->all();
+
+        if ($avisados === []) {
+            return $items;
+        }
+
+        return array_values(array_filter(
+            $items,
+            fn (array $item) => ! in_array($item['entity_uuid'], $avisados, true)
+        ));
     }
 
     /**
