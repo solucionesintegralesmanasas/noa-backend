@@ -694,6 +694,7 @@ class ThirdPartyService extends BaseService
                 'company.media',
                 'documentType',
                 'municipality.department',
+                'idCardIssuePlace:uuid,name',
                 'branch:uuid,name',
                 'driverLicenses' => function ($q) {
                     $q->orderBy('created_at', 'desc');

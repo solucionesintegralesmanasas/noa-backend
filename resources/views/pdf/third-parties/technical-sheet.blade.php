@@ -425,6 +425,23 @@
         @php
             $fmtFecha = fn($fecha) => $fecha ? \Carbon\Carbon::parse($fecha)->format('d/m/Y') : '';
 
+            // Datos de la cédula: el backend guarda los códigos y la ficha
+            // imprime el texto legible (mismos mapas que el detalle del tercero).
+            $mapaSexo = ['M' => 'Masculino', 'F' => 'Femenino', 'O' => 'Otro'];
+            $mapaEstadoCivil = [
+                'SOLTERO' => 'Soltero/a',
+                'CASADO' => 'Casado/a',
+                'UNION_LIBRE' => 'Unión libre',
+                'SEPARADO' => 'Separado/a',
+                'DIVORCIADO' => 'Divorciado/a',
+                'VIUDO' => 'Viudo/a',
+            ];
+            $sexo = $mapaSexo[$driver->sex] ?? ($driver->sex ?? '');
+            $estadoCivil = $mapaEstadoCivil[$driver->marital_status] ?? ($driver->marital_status ?? '');
+            $lugarExpedicion = $driver->idCardIssuePlace->name ?? '';
+            $fechaExpedicion = $fmtFecha($driver->id_card_issue_date ?? null);
+            $grupoSanguineo = $driver->blood_type ?? '';
+
             $contrato = $driver->employmentContracts->first();
             $aportes = $driver->socialSecurityContributions
                 ->sortByDesc(fn($c) => optional($c->billing_period)->timestamp ?? 0)
@@ -512,7 +529,13 @@
                                     <td class="field-label" style="width: 33%;">Cédula de Ciudadanía:</td>
                                     <td class="mono-value" style="width: 27%;">{{ $driver->document_number ?? '' }}</td>
                                     <td class="field-label" style="width: 21%;">Expedida en:</td>
-                                    <td class="field-value" style="width: 19%;">&nbsp;</td>
+                                    <td class="field-value" style="width: 19%;">{{ $lugarExpedicion }}</td>
+                                </tr>
+                                <tr>
+                                    <td class="field-label">Fecha de Expedición:</td>
+                                    <td class="mono-value">{{ $fechaExpedicion }}</td>
+                                    <td class="field-label">Sexo:</td>
+                                    <td class="field-value">{{ $sexo }}</td>
                                 </tr>
                                 <tr>
                                     <td class="field-label">Nombres y Apellidos:</td>
@@ -526,16 +549,14 @@
                                     <td class="field-value" colspan="3">&nbsp;</td>
                                 </tr>
                                 <tr>
-                                    <td class="field-label">Sexo:</td>
-                                    <td class="field-value">&nbsp;</td>
                                     <td class="field-label">Estado Civil:</td>
-                                    <td class="field-value">&nbsp;</td>
+                                    <td class="field-value">{{ $estadoCivil }}</td>
+                                    <td class="field-label">G.S. RH:</td>
+                                    <td class="mono-value">{{ $grupoSanguineo }}</td>
                                 </tr>
                                 <tr>
                                     <td class="field-label">Teléfono:</td>
-                                    <td class="mono-value">{{ $driver->phone ?? '' }}&nbsp;</td>
-                                    <td class="field-label">G.S. RH:</td>
-                                    <td class="mono-value">&nbsp;</td>
+                                    <td class="mono-value" colspan="3">{{ $driver->phone ?? '' }}</td>
                                 </tr>
                                 <tr>
                                     <td class="field-label">Dirección de Residencia:</td>
