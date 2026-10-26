@@ -171,8 +171,10 @@ class LocationTrackingService extends BaseService
     }
 
     /**
-     * Normaliza la hora del dispositivo: un reloj adelantado no puede fechar
-     * un punto en el futuro (rompería la distancia y la frescura del mapa).
+     * Normaliza la hora del dispositivo: un reloj adelantado (o que envía UTC
+     * como texto sin zona horaria) no puede fechar un punto en el futuro. Se
+     * ancla a now() para no romper la distancia, el historial ni la frescura
+     * del mapa. El ISO-8601 con 'Z' del navegador se convierte solo a Bogotá.
      */
     private function normalizarRecordedAt(mixed $recordedAt): Carbon
     {
