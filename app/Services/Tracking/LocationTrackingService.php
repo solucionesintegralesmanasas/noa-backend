@@ -61,7 +61,7 @@ class LocationTrackingService extends BaseService
         }
 
         return $this->transaction(function () use ($data) {
-            $recordedAt = $data['recorded_at'] ?? now();
+            $recordedAt = $this->normalizarRecordedAt($data['recorded_at'] ?? null);
 
             // La distancia se calcula antes de insertar: el punto anterior del
             // conductor ya existe y así el nuevo se guarda una sola vez.
@@ -94,7 +94,7 @@ class LocationTrackingService extends BaseService
 
             $this->actualizarResumenDiario($location);
             $this->recalcularPuntoSiguiente($location);
-            $this->updateActiveSession($location);
+            $this->updateActiveSession($location, $data['session_uuid'] ?? null);
             $this->processGeofences($location, $anterior);
 
             return $location;
@@ -111,20 +111,74 @@ class LocationTrackingService extends BaseService
         }
 
         return $this->transaction(function () use ($data) {
-            DriverLocationSession::where('third_party_uuid', $data['third_party_uuid'])
+            $driverUuid = $data['third_party_uuid'];
+            $companyUuid = $data['company_uuid'];
+            $vehicleUuid = $data['vehicle_uuid'] ?? null;
+
+            $activa = DriverLocationSession::where('third_party_uuid', $driverUuid)
+                ->where('company_uuid', $companyUuid)
+                ->where('status', 'active')
+                ->orderByDesc('id')
+                ->lockForUpdate()
+                ->first();
+
+            // Reabrir la app o recargar la web NO debe pausar la sesión que el
+            // servicio nativo sigue usando: si sigue viva y es el mismo vehículo,
+            // se devuelve la misma sesión.
+            if ($activa && $this->sesionVigente($activa)
+                && ($vehicleUuid === null || $activa->vehicle_uuid === null || $activa->vehicle_uuid === $vehicleUuid)) {
+                $cambios = [];
+                if ($vehicleUuid && $activa->vehicle_uuid === null) {
+                    $cambios['vehicle_uuid'] = $vehicleUuid;
+                }
+                if (! empty($data['project_uuid'])) {
+                    $cambios['project_uuid'] = $data['project_uuid'];
+                }
+                if ($cambios !== []) {
+                    $activa->update($cambios);
+                }
+
+                return $activa;
+            }
+
+            DriverLocationSession::where('third_party_uuid', $driverUuid)
+                ->where('company_uuid', $companyUuid)
                 ->where('status', 'active')
                 ->update(['status' => 'paused', 'ended_at' => now()]);
 
             return DriverLocationSession::create([
                 'uuid' => (string) Str::uuid(),
-                'company_uuid' => $data['company_uuid'],
-                'third_party_uuid' => $data['third_party_uuid'],
-                'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
+                'company_uuid' => $companyUuid,
+                'third_party_uuid' => $driverUuid,
+                'vehicle_uuid' => $vehicleUuid,
                 'project_uuid' => $data['project_uuid'] ?? null,
                 'started_at' => now(),
                 'status' => 'active',
             ]);
         });
+    }
+
+    /**
+     * Una sesión activa deja de serlo si pasó demasiado tiempo sin recibir puntos.
+     * Se usa para decidir si un startSession reabre o reemplaza la sesión.
+     */
+    private function sesionVigente(DriverLocationSession $sesion): bool
+    {
+        $horas = (int) config('tracking.session_paused_hours', 12);
+        $referencia = $sesion->updated_at ?? $sesion->started_at ?? now();
+
+        return $referencia->greaterThanOrEqualTo(now()->subHours($horas));
+    }
+
+    /**
+     * Normaliza la hora del dispositivo: un reloj adelantado no puede fechar
+     * un punto en el futuro (rompería la distancia y la frescura del mapa).
+     */
+    private function normalizarRecordedAt(mixed $recordedAt): Carbon
+    {
+        $fecha = $recordedAt ? Carbon::parse($recordedAt) : now();
+
+        return $fecha->greaterThan(now()) ? now() : $fecha;
     }
 
     /**
@@ -160,6 +214,9 @@ class LocationTrackingService extends BaseService
             ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
             ->when($soloConductores !== null, fn ($q) => $q->whereIn('third_party_uuid', $soloConductores))
             ->where('status', 'active')
+            // Un vehículo que dejó de reportar desaparece del mapa: la sesión
+            // solo cuenta como viva si recibió puntos dentro del umbral.
+            ->where('updated_at', '>=', now()->subMinutes($this->minutosSinReportar()))
             ->pluck('third_party_uuid');
 
         if ($activeDriverUuids->isEmpty()) {
@@ -660,20 +717,145 @@ class LocationTrackingService extends BaseService
     /**
      * Actualiza la sesión activa con la nueva ubicación recibida.
      *
-     * La distancia usa la ya calculada para el punto, sin repetir la consulta
-     * del vecino anterior.
+     * El camino normal es un único UPDATE (sin SELECT): si la sesión del
+     * payload sigue activa, no hace falta resolverla. Solo cuando no hay
+     * coincidencia se busca o se reactiva la sesión del conductor.
      */
-    private function updateActiveSession(DriverLocation $location): void
+    private function updateActiveSession(DriverLocation $location, ?string $sessionUuid = null): void
     {
         $distanceKm = round(((float) ($location->distance_meters ?? 0)) / 1000, 4);
 
+        $consulta = DriverLocationSession::where('third_party_uuid', $location->third_party_uuid)
+            ->where('status', 'active');
+
+        if ($sessionUuid) {
+            $consulta->where('uuid', $sessionUuid);
+        }
+
         // Un solo UPDATE atómico (antes: SELECT + 2 incrementos por punto).
-        DriverLocationSession::where('third_party_uuid', $location->third_party_uuid)
+        $afectadas = $consulta->update([
+            'total_distance_km' => DB::raw('total_distance_km + '.$distanceKm),
+            'total_points' => DB::raw('total_points + 1'),
+            'updated_at' => now(),
+        ]);
+
+        if ($afectadas > 0) {
+            return;
+        }
+
+        $sesion = $this->resolverSesion($location, $sessionUuid);
+        if (! $sesion) {
+            return;
+        }
+
+        DriverLocationSession::whereKey($sesion->getKey())->update([
+            'total_distance_km' => DB::raw('total_distance_km + '.$distanceKm),
+            'total_points' => DB::raw('total_points + 1'),
+            'updated_at' => now(),
+        ]);
+    }
+
+    /**
+     * Devuelve la sesión a la que pertenece un punto cuando ninguna sesión
+     * activa lo captó. Reactiva la pausada (reinicio de app, red caída o
+     * startSession fallido) y, si no hay ninguna reutilizable, abre una nueva.
+     */
+    private function resolverSesion(DriverLocation $location, ?string $sessionUuid): ?DriverLocationSession
+    {
+        $driverUuid = $location->third_party_uuid;
+        $companyUuid = $location->company_uuid;
+
+        $activa = DriverLocationSession::where('third_party_uuid', $driverUuid)
+            ->where('company_uuid', $companyUuid)
             ->where('status', 'active')
-            ->update([
-                'total_distance_km' => DB::raw('total_distance_km + '.$distanceKm),
-                'total_points' => DB::raw('total_points + 1'),
-            ]);
+            ->orderByDesc('id')
+            ->first();
+
+        if ($activa && $this->sesionVigente($activa)) {
+            return $activa;
+        }
+
+        // Una activa vieja no debe ganarle a la sesión que el cliente sigue usando.
+        if ($activa) {
+            $activa->update(['status' => 'paused', 'ended_at' => now()]);
+        }
+
+        if ($sessionUuid) {
+            $sesion = DriverLocationSession::where('uuid', $sessionUuid)
+                ->where('third_party_uuid', $driverUuid)
+                ->where('company_uuid', $companyUuid)
+                ->first();
+
+            if ($sesion && $sesion->status === 'paused') {
+                return $this->reactivarSesion($sesion);
+            }
+
+            // Una sesión terminada explícitamente no revive con un punto tardío.
+            if ($sesion && $sesion->status === 'ended') {
+                return null;
+            }
+        }
+
+        $horas = (int) config('tracking.session_paused_hours', 12);
+        $pausada = DriverLocationSession::where('third_party_uuid', $driverUuid)
+            ->where('company_uuid', $companyUuid)
+            ->where('status', 'paused')
+            ->where('updated_at', '>=', now()->subHours($horas))
+            // No revivir una sesión de otro vehículo: el punto nuevo puede ser
+            // de un cambio de vehículo y la sesión quedaría mal etiquetada.
+            ->when($location->vehicle_uuid, function ($q) use ($location) {
+                $q->where(function ($sub) use ($location) {
+                    $sub->whereNull('vehicle_uuid')
+                        ->orWhere('vehicle_uuid', $location->vehicle_uuid);
+                });
+            })
+            ->orderByDesc('id')
+            ->first();
+
+        if ($pausada) {
+            return $this->reactivarSesion($pausada);
+        }
+
+        if (! $location->vehicle_uuid) {
+            return null;
+        }
+
+        return DriverLocationSession::create([
+            'uuid' => (string) Str::uuid(),
+            'company_uuid' => $companyUuid,
+            'third_party_uuid' => $driverUuid,
+            'vehicle_uuid' => $location->vehicle_uuid,
+            'project_uuid' => $location->project_uuid,
+            'started_at' => now(),
+            'status' => 'active',
+        ]);
+    }
+
+    /**
+     * Reactiva una sesión pausada garantizando que quede una sola activa
+     * por conductor.
+     */
+    private function reactivarSesion(DriverLocationSession $sesion): DriverLocationSession
+    {
+        DriverLocationSession::where('third_party_uuid', $sesion->third_party_uuid)
+            ->where('company_uuid', $sesion->company_uuid)
+            ->where('status', 'active')
+            ->whereKeyNot($sesion->getKey())
+            ->update(['status' => 'paused', 'ended_at' => now()]);
+
+        $sesion->update(['status' => 'active', 'ended_at' => null]);
+
+        return $sesion;
+    }
+
+    /**
+     * Minutos sin recibir puntos tras los que un conductor deja de aparecer
+     * en el mapa en vivo. Configurable mientras la flota migra al APK con
+     * heartbeat (los APK viejos no reportan cuando están parados).
+     */
+    private function minutosSinReportar(): int
+    {
+        return max(1, (int) config('tracking.stale_minutes', 10));
     }
 
     /**
