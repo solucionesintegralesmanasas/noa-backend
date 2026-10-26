@@ -9,13 +9,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | Minutos sin recibir puntos tras los que un conductor deja de aparecer
-    | en /tracking/active-drivers. Mientras la flota no esté toda en el APK
-    | con heartbeat conviene un umbral amplio (10): los APK viejos no envían
-    | nada cuando el vehículo está parado. Con la flota actualizada se puede
-    | bajar a 3-5.
+    | en /tracking/active-drivers. En 720 (12 h) el mapa muestra la última
+    | posición conocida del conductor aunque el vehículo lleve rato parado
+    | (los APK viejos no envían nada cuando no se mueven); pasado ese tiempo
+    | la sesión se considera abandonada y sale del mapa.
     |
     */
-    'stale_minutes' => (int) env('TRACKING_STALE_MINUTES', 10),
+    'stale_minutes' => (int) env('TRACKING_STALE_MINUTES', 720),
 
     /*
     |--------------------------------------------------------------------------

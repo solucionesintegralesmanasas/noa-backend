@@ -165,15 +165,17 @@ class ReactivacionSesionTrackingTest extends TestCase
         $this->sesion('active');
         $this->punto();
 
+        // Supera el umbral de frescura (12 h): sale del mapa.
         DB::table('driver_location_sessions')
             ->where('third_party_uuid', $this->conductor)
-            ->update(['updated_at' => now()->subMinutes(30)]);
+            ->update(['updated_at' => now()->subHours(13)]);
 
         $this->assertCount(0, app(LocationTrackingService::class)->getActiveDrivers($this->empresa()));
 
+        // Dentro del umbral (11 h): conserva su última posición conocida.
         DB::table('driver_location_sessions')
             ->where('third_party_uuid', $this->conductor)
-            ->update(['updated_at' => now()->subMinutes(5)]);
+            ->update(['updated_at' => now()->subHours(11)]);
 
         $this->assertCount(1, app(LocationTrackingService::class)->getActiveDrivers($this->empresa()));
     }
