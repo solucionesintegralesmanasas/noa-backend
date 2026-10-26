@@ -60,6 +60,62 @@ class PdfService
     }
 
     /**
+     * Clase del vehículo según el tipo de control de la planilla.
+     *
+     * Los tipos externos (incluido EXTERNO_PLATAFORMA) la toman del control
+     * subcontratado y, si no existe, del vehículo cargado como interno.
+     */
+    private function claseDeHoja(ServiceDeliveryControlSheet $sheet): string
+    {
+        if ($sheet->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
+            return $sheet->internalControl?->vehicle?->vehicleClass?->name ?: 'N/A';
+        }
+
+        if (in_array($sheet->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
+            return $sheet->subcontractedControl?->vehicleClass?->name
+                ?? $sheet->internalControl?->vehicle?->vehicleClass?->name
+                ?? 'N/A';
+        }
+
+        return 'N/A';
+    }
+
+    /**
+     * Peajes consolidados de un lote de planillas.
+     *
+     * El cierre puede guardarlos en la hoja o por recorrido. Se prefiere el
+     * valor de la hoja y, si está en cero, se suman los recorridos para que el
+     * consolidado no muestre 0 cuando el detalle sí trae peajes.
+     *
+     * @param  iterable<int, ServiceDeliveryControlSheet>  $hojas
+     * @param  callable|null  $rutasDe  recorridos ya precargados (evita N+1)
+     * @return array{tolls: int, valor: float}
+     */
+    private function consolidarPeajes(iterable $hojas, ?callable $rutasDe = null): array
+    {
+        $tolls = 0;
+        $valor = 0.0;
+
+        foreach ($hojas as $hoja) {
+            $tollsHoja = (int) ($hoja->number_of_tolls ?? 0);
+            $valorHoja = (float) ($hoja->total_toll_value ?? 0);
+
+            if ($tollsHoja === 0 && $valorHoja <= 0.0) {
+                $rutas = $rutasDe ? $rutasDe($hoja) : ($hoja->routes ?? collect());
+                foreach ($rutas as $ruta) {
+                    $tollsHoja += (int) ($ruta->number_of_tolls ?? 0);
+                    $valorHoja += (float) ($ruta->total_toll_value ?? 0);
+                }
+            }
+
+            $tolls += $tollsHoja;
+            $valor += $valorHoja;
+        }
+
+        return ['tolls' => $tolls, 'valor' => $valor];
+    }
+
+    /**
      * Método generateFromView.
      *
      *
@@ -1090,15 +1146,11 @@ class PdfService
             $empresaTransportadora = $company?->business_name ?? 'TRANSPORTES SIN BARRERAS S.A.S.';
 
             $placa = $sheet->vehicle_license_plate;
-            $area = $sheet->official_name_and_surname; // Area o dependencia del funcionario que firma
+            $numeroInterno = $sheet->internalControl?->vehicle?->internal_number;
+            $area = $sheet->official_name_and_surname; // Nombre del funcionario que firma
 
             // Determinar clase del vehículo
-            $clase = 'N/A';
-            if ($sheet->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA' && $sheet->internalControl?->vehicle?->vehicleClass) {
-                $clase = $sheet->internalControl->vehicle->vehicleClass->name;
-            } elseif (($sheet->type_of_control_sheet === 'SUBCONTRATADO' || $sheet->type_of_control_sheet === 'CON_VEHICULO_CONTRATADO') && $sheet->subcontractedControl?->vehicleClass) {
-                $clase = $sheet->subcontractedControl->vehicleClass->name;
-            }
+            $clase = $this->claseDeHoja($sheet);
 
             // Determinar contratista/cliente y su NIT
             $empresa = 'N/A';
@@ -1163,7 +1215,7 @@ class PdfService
                     $grupo = $firmasCoordPorId->get($padreExterno->id) ?? collect();
                 }
 
-                return $grupo->first();
+                return ServiceControlSheetSignatures::porRol($grupo, Signature::ROL_COORDINADOR, 0);
             };
 
             // En disponibilidad no hay funcionario: solo hay 1 firma (conductor).
@@ -1173,9 +1225,17 @@ class PdfService
                 $grupoDia = $firmasDeHoja($hojaDia);
                 $coordDia = $coordDeHoja($hojaDia);
                 $esDispDia = ! $hojaDia->routes()->where('is_active', true)->exists();
-                $archivosFirmas["recibido_{$hojaDia->id}"] = $esDispDia ? $coordDia : ($coordDia ?? $grupoDia->get(0));
-                $archivosFirmas["func_{$hojaDia->id}"] = $esDispDia ? null : $grupoDia->get(0);
-                $archivosFirmas["cond_{$hojaDia->id}"] = $esDispDia ? $grupoDia->get(0) : $grupoDia->get(1);
+                $funcDia = ServiceControlSheetSignatures::porRol($grupoDia, Signature::ROL_FUNCIONARIO, 0);
+                // En disponibilidad solo firma el conductor: no hay funcionario.
+                $condDia = ServiceControlSheetSignatures::porRol(
+                    $grupoDia,
+                    Signature::ROL_CONDUCTOR,
+                    $esDispDia ? 0 : 1,
+                );
+                $archivosFirmas["recibido_{$hojaDia->id}"] = $coordDia;
+                $archivosFirmas["coord_{$hojaDia->id}"] = $coordDia;
+                $archivosFirmas["func_{$hojaDia->id}"] = $esDispDia ? null : $funcDia;
+                $archivosFirmas["cond_{$hojaDia->id}"] = $condDia;
             }
 
             $base64Images = $this->getBase64Parallel($archivosFirmas);
@@ -1213,14 +1273,16 @@ class PdfService
                 firmasRuta: function ($hoja, $route) use ($routeSignatures) {
                     $sigGroup = $routeSignatures->get($route->id) ?? collect();
                     $base64 = $this->getBase64Parallel([
-                        'firma_funcionario' => $sigGroup->get(0),
-                        'firma_conductor' => $sigGroup->get(1),
+                        'firma_funcionario' => ServiceControlSheetSignatures::porRol($sigGroup, Signature::ROL_FUNCIONARIO, 0),
+                        'firma_conductor' => ServiceControlSheetSignatures::porRol($sigGroup, Signature::ROL_CONDUCTOR, 1),
                     ]);
 
                     return ['funcionario' => $base64['firma_funcionario'], 'conductor' => $base64['firma_conductor']];
                 },
                 numeroEntero: true,
                 conRutasDetalle: true,
+                firmaCoordinador: fn ($hoja) => $base64Images["coord_{$hoja->id}"] ?? null,
+                firmaConductor: fn ($hoja) => $base64Images["cond_{$hoja->id}"] ?? null,
             ));
             $dias = $resultadoFilas['dias'];
             $rutasDetalle = $resultadoFilas['rutasDetalle'];
@@ -1230,10 +1292,11 @@ class PdfService
 
             // Observaciones: peajes + recorridos + vigencia del proyecto
             $obsPartes = [];
-            $totalPeajes = (int) $hojasDias->sum('number_of_tolls');
-            $valorPeajes = $hojasDias->sum('total_toll_value');
-            if ($totalPeajes > 0) {
-                $obsPartes[] = "Peajes: {$totalPeajes} | Valor: $ {$valorPeajes}";
+            $peajes = $this->consolidarPeajes($hojasDias, fn ($hoja) => $hoja->routes);
+            $totalPeajes = $peajes['tolls'];
+            $valorPeajes = $peajes['valor'];
+            if ($totalPeajes > 0 || $valorPeajes > 0) {
+                $obsPartes[] = "Peajes: {$totalPeajes} | Valor: $ ".number_format($valorPeajes, 0, ',', '.');
             }
             if ($totalRecorridos > 0) {
                 $obsPartes[] = "Recorridos del día: {$totalRecorridos}";
@@ -1280,22 +1343,15 @@ class PdfService
                 }
             }
 
-            // Firma de recibido (coordinador): la del último día con firma; respaldo
-            // a la firma del funcionario de cualquier fila del reporte.
+            // Firma de recibido (coordinador logístico): la del último día con
+            // certificación. Si no certificó, la casilla queda pendiente; no se
+            // sustituye por la firma del funcionario (sería otro rol).
             $firmaRecibidoPie = null;
             foreach ($hojasDias->reverse()->values() as $hojaDia) {
                 $cand = $base64Images["recibido_{$hojaDia->id}"] ?? null;
                 if (! empty($cand)) {
                     $firmaRecibidoPie = $cand;
                     break;
-                }
-            }
-            if (empty($firmaRecibidoPie)) {
-                foreach ($dias as $d) {
-                    if (! empty($d['firma_funcionario'])) {
-                        $firmaRecibidoPie = $d['firma_funcionario'];
-                        break;
-                    }
                 }
             }
 
@@ -1311,11 +1367,13 @@ class PdfService
                 'periodo' => $periodo,
                 'es_historial' => false,
                 'placa' => $placa,
+                'numero_interno' => $numeroInterno,
                 'area' => $area,
                 'clase' => $clase,
                 'nit' => $nit,
                 'empresa' => $empresa,
                 'dias' => $dias,
+                'totales' => $resultadoFilas['totales'],
                 'observaciones' => implode(' | ', $obsPartes),
                 'firma_conductor' => $firmaConductorPie,
                 'firma_recibido' => $firmaRecibidoPie,
@@ -1339,7 +1397,7 @@ class PdfService
             $data = $this->conMarca($data, $company, 'planilla_diaria', $logoModel);
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
-            $pdf->setPaper('letter', 'portrait');
+            $pdf->setPaper('letter', 'landscape');
             $this->sellarPaginado($pdf);
 
             $fileName = self::nombreArchivo('Planilla de Control Diaria', $placa ?? 'Vehículo', $date->format('d-m-Y'));
@@ -1420,6 +1478,7 @@ class PdfService
             // Datos generales basados en el último servicio o del vehículo
             $lastSheet = $sheets->last();
             $placa = $vehicle->vehicle_license_plate;
+            $numeroInterno = $vehicle->internal_number;
             $area = $lastSheet ? $lastSheet->official_name_and_surname : 'N/A';
             $clase = $vehicle->vehicleClass?->name ?? 'N/A';
 
@@ -1472,16 +1531,16 @@ class PdfService
                 $clavesHoja[$sheet->id] = $uniqueKey;
 
                 $sheetSignatures = $allSignatures->get($sheet->id, collect());
-                $firmaFuncModel = $sheetSignatures->first(); // Funcionario que recibe
-                $firmaCondModel = $sheetSignatures->get(1); // Conductor de la hoja
+                $firmaFuncModel = ServiceControlSheetSignatures::porRol($sheetSignatures, Signature::ROL_FUNCIONARIO, 0);
+                $firmaCondModel = ServiceControlSheetSignatures::porRol($sheetSignatures, Signature::ROL_CONDUCTOR, 1);
 
                 // Si el día no tiene firmas propias pero pertenece a un servicio multi-día,
                 // buscar las firmas del registro padre
                 if ($firmaFuncModel === null && $sheet->parent_uuid) {
                     $parentId = $sheets->firstWhere('uuid', $sheet->parent_uuid)?->id;
                     if ($parentId && $allSignatures->has($parentId)) {
-                        $firmaFuncModel = $allSignatures->get($parentId)->first();
-                        $firmaCondModel = $allSignatures->get($parentId)->get(1);
+                        $firmaFuncModel = ServiceControlSheetSignatures::porRol($allSignatures->get($parentId), Signature::ROL_FUNCIONARIO, 0);
+                        $firmaCondModel = ServiceControlSheetSignatures::porRol($allSignatures->get($parentId), Signature::ROL_CONDUCTOR, 1);
                     }
 
                     // Si el padre no está en el mes consultado, buscar sus firmas directamente
@@ -1495,8 +1554,8 @@ class PdfService
                                 ->get();
 
                             if ($parentSigs->isNotEmpty()) {
-                                $firmaFuncModel = $parentSigs->first();
-                                $firmaCondModel = $parentSigs->get(1);
+                                $firmaFuncModel = ServiceControlSheetSignatures::porRol($parentSigs, Signature::ROL_FUNCIONARIO, 0);
+                                $firmaCondModel = ServiceControlSheetSignatures::porRol($parentSigs, Signature::ROL_CONDUCTOR, 1);
                             }
                         }
                     }
@@ -1509,17 +1568,40 @@ class PdfService
                     $signatureModelsToLoad["firma_cond_{$uniqueKey}"] = $firmaCondModel;
                 }
 
+                // Coordinador de la hoja (certificación administrativa). Se usa
+                // en el pie y como respaldo de la firma de la fila.
+                $coordHojaModel = ServiceControlSheetSignatures::porRol(
+                    $allCoordinatorSignatures->get($sheet->id, collect()),
+                    Signature::ROL_COORDINADOR,
+                    0,
+                );
+                if ($coordHojaModel === null && $sheet->parent_uuid) {
+                    $parentId = $sheets->firstWhere('uuid', $sheet->parent_uuid)?->id;
+                    if ($parentId) {
+                        $coordHojaModel = ServiceControlSheetSignatures::porRol(
+                            $allCoordinatorSignatures->get($parentId, collect()),
+                            Signature::ROL_COORDINADOR,
+                            0,
+                        );
+                    }
+                }
+                if ($coordHojaModel) {
+                    $signatureModelsToLoad["firma_coord_{$uniqueKey}"] = $coordHojaModel;
+                }
+
                 // Recorridos de esta hoja (desde la precarga, sin N+1)
                 $routes = $routesBySheet->get($sheet->uuid, collect());
                 foreach ($routes as $route) {
                     $claveRecorrido = "rec_{$uniqueKey}_{$route->id}";
                     $clavesRuta[$route->id] = $claveRecorrido;
                     $grupoFirmas = $routeSignaturesByRoute->get($route->id) ?? collect();
-                    if ($grupoFirmas->get(0)) {
-                        $signatureModelsToLoad["firma_func_{$claveRecorrido}"] = $grupoFirmas->get(0);
+                    $firmaFuncionarioRuta = ServiceControlSheetSignatures::porRol($grupoFirmas, Signature::ROL_FUNCIONARIO, 0);
+                    $firmaConductorRuta = ServiceControlSheetSignatures::porRol($grupoFirmas, Signature::ROL_CONDUCTOR, 1);
+                    if ($firmaFuncionarioRuta) {
+                        $signatureModelsToLoad["firma_func_{$claveRecorrido}"] = $firmaFuncionarioRuta;
                     }
-                    if ($grupoFirmas->get(1)) {
-                        $signatureModelsToLoad["firma_conduit_{$claveRecorrido}"] = $grupoFirmas->get(1);
+                    if ($firmaConductorRuta) {
+                        $signatureModelsToLoad["firma_conduit_{$claveRecorrido}"] = $firmaConductorRuta;
                     }
                 }
             }
@@ -1535,8 +1617,7 @@ class PdfService
             if ($lastSheetWithSignatures) {
                 $lastSignatures = $allSignatures->get($lastSheetWithSignatures->id, collect());
                 if ($lastSignatures->isNotEmpty()) {
-                    $signatureModelsToLoad['firma_recibido_mensual_respaldo'] = $lastSignatures->first();
-                    $signatureModelsToLoad['firma_conductor_mensual'] = $lastSignatures->get(1);
+                    $signatureModelsToLoad['firma_conductor_mensual'] = ServiceControlSheetSignatures::porRol($lastSignatures, Signature::ROL_CONDUCTOR, 1);
                 }
             }
 
@@ -1547,7 +1628,7 @@ class PdfService
             if ($lastSheetWithCoordinator) {
                 $coordSigs = $allCoordinatorSignatures->get($lastSheetWithCoordinator->id, collect());
                 if ($coordSigs->isNotEmpty()) {
-                    $signatureModelsToLoad['firma_recibido_mensual'] = $coordSigs->first();
+                    $signatureModelsToLoad['firma_recibido_mensual'] = ServiceControlSheetSignatures::porRol($coordSigs, Signature::ROL_COORDINADOR, 0);
                 }
             }
 
@@ -1556,16 +1637,24 @@ class PdfService
             $base64Images = $this->getBase64Parallel($filesToLoad);
 
             // Resolver firmas por hoja y por recorrido desde el lote único.
-            // La firma del conductor no se usa en el listado: solo va en el pie.
+            // La firma del conductor va en la columna CONDUCTOR ASIGNADO y en el pie.
             $firmaHojaMensual = [];
             foreach ($clavesHoja as $sheetId => $uniqueKey) {
                 $firmaHojaMensual[$sheetId] = $base64Images["firma_func_{$uniqueKey}"] ?? null;
+            }
+            $firmaCoordinadorMensual = [];
+            foreach ($clavesHoja as $sheetId => $uniqueKey) {
+                $firmaCoordinadorMensual[$sheetId] = $base64Images["firma_coord_{$uniqueKey}"] ?? null;
+            }
+            $firmaConductorMensualPorHoja = [];
+            foreach ($clavesHoja as $sheetId => $uniqueKey) {
+                $firmaConductorMensualPorHoja[$sheetId] = $base64Images["firma_cond_{$uniqueKey}"] ?? null;
             }
             $firmasRutaMensual = [];
             foreach ($clavesRuta as $routeId => $claveRecorrido) {
                 $firmasRutaMensual[$routeId] = [
                     'funcionario' => $base64Images["firma_func_{$claveRecorrido}"] ?? null,
-                    'conductor' => null,
+                    'conductor' => $base64Images["firma_conduit_{$claveRecorrido}"] ?? null,
                 ];
             }
 
@@ -1577,18 +1666,21 @@ class PdfService
                 firmasRuta: fn ($h, $r) => $firmasRutaMensual[$r->id] ?? ['funcionario' => null, 'conductor' => null],
                 numeroEntero: false,
                 conRutasDetalle: false,
+                firmaCoordinador: fn ($s) => $firmaCoordinadorMensual[$s->id] ?? null,
+                firmaConductor: fn ($s) => $firmaConductorMensualPorHoja[$s->id] ?? null,
             ));
             $dias = $resultadoFilas['dias'];
 
             // Construir observaciones consolidadas del mes: peajes + total recorridos
-            $totalPeajes = $sheets->sum('number_of_tolls');
-            $valorPeajes = $sheets->sum('total_toll_value');
+            $peajesMes = $this->consolidarPeajes($sheets, fn ($hoja) => $routesBySheet->get($hoja->uuid, collect()));
+            $totalPeajes = $peajesMes['tolls'];
+            $valorPeajes = $peajesMes['valor'];
             $obsPartes = [];
             if ($soloFinalizados) {
                 $obsPartes[] = 'Solo días FINALIZADOS (cerrados)';
             }
-            if ($totalPeajes > 0) {
-                $obsPartes[] = "Total Peajes del Mes: {$totalPeajes} | Valor Consolidado: $ {$valorPeajes}";
+            if ($totalPeajes > 0 || $valorPeajes > 0) {
+                $obsPartes[] = "Total Peajes del Mes: {$totalPeajes} | Valor Consolidado: $ ".number_format($valorPeajes, 0, ',', '.');
             }
             $totalRecorridos = $routesBySheet->sum(fn ($grupo) => $grupo->count());
             if ($totalRecorridos > 0) {
@@ -1622,18 +1714,10 @@ class PdfService
                     }
                 }
             }
+            // Pie derecho: SOLO la firma del coordinador logístico. Sin firma de
+            // coordinador la casilla queda pendiente; no se reemplaza por la del
+            // funcionario ni por la de una fila.
             $firmaRecibidoMensual = $base64Images['firma_recibido_mensual'] ?? null;
-            if (empty($firmaRecibidoMensual)) {
-                $firmaRecibidoMensual = $base64Images['firma_recibido_mensual_respaldo'] ?? null;
-            }
-            if (empty($firmaRecibidoMensual)) {
-                foreach ($dias as $d) {
-                    if (! empty($d['firma_funcionario'])) {
-                        $firmaRecibidoMensual = $d['firma_funcionario'];
-                        break;
-                    }
-                }
-            }
 
             $data = [
                 'logo' => $logoDataMensual['logo'],
@@ -1643,11 +1727,13 @@ class PdfService
                 'es_historial' => $esHistorial,
                 'solo_finalizados' => $soloFinalizados,
                 'placa' => $placa,
+                'numero_interno' => $numeroInterno,
                 'area' => $area,
                 'clase' => $clase,
                 'nit' => $nit,
                 'empresa' => $empresa,
                 'dias' => $dias,
+                'totales' => $resultadoFilas['totales'],
                 'observaciones' => $obs,
                 'firma_conductor' => $firmaConductorMensual,
                 'firma_recibido' => $firmaRecibidoMensual,
@@ -1658,7 +1744,7 @@ class PdfService
             $data = $this->conMarca($data, $company, 'planilla_mensual', $logoModel);
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
-            $pdf->setPaper('letter', 'portrait');
+            $pdf->setPaper('letter', 'landscape');
             $this->sellarPaginado($pdf);
 
             $fileName = self::nombreArchivo(
@@ -1693,7 +1779,7 @@ class PdfService
 
             $query = ServiceDeliveryControlSheet::query()
                 ->where('is_active', false)
-                ->with(['project', 'routes', 'internalControl.vehicle', 'subcontractedControl'])
+                ->with(['project', 'routes', 'internalControl.vehicle.vehicleClass', 'subcontractedControl.vehicleClass'])
                 ->orderBy('service_date', 'asc');
 
             if ($companyUuid) {
@@ -1766,15 +1852,18 @@ class PdfService
             $sigModels = [];
             foreach ($sheets as $sh) {
                 $g = $allSignatures->get($sh->id, collect());
-                if ($g->first()) {
-                    $sigModels["ff_{$sh->id}"] = $g->first();
+                $firmaFuncionarioHoja = ServiceControlSheetSignatures::porRol($g, Signature::ROL_FUNCIONARIO, 0);
+                $firmaConductorHoja = ServiceControlSheetSignatures::porRol($g, Signature::ROL_CONDUCTOR, 1);
+                if ($firmaFuncionarioHoja) {
+                    $sigModels["ff_{$sh->id}"] = $firmaFuncionarioHoja;
                 }
-                if ($g->get(1)) {
-                    $sigModels["fc_{$sh->id}"] = $g->get(1);
+                if ($firmaConductorHoja) {
+                    $sigModels["fc_{$sh->id}"] = $firmaConductorHoja;
                 }
                 $gc = $allCoordinator->get($sh->id, collect());
-                if ($gc->first()) {
-                    $sigModels["rc_{$sh->id}"] = $gc->first();
+                $firmaCoordinadorHoja = ServiceControlSheetSignatures::porRol($gc, Signature::ROL_COORDINADOR, 0);
+                if ($firmaCoordinadorHoja) {
+                    $sigModels["rc_{$sh->id}"] = $firmaCoordinadorHoja;
                 }
             }
             $base64Sigs = $this->getBase64Parallel(array_merge(['logo2' => null], $sigModels));
@@ -1790,16 +1879,23 @@ class PdfService
                 firmaHoja: fn ($s) => $base64Sigs["ff_{$s->id}"] ?? null,
                 firmasRuta: function ($hoja, $route) use ($routeSigs) {
                     $grupoFirmas = $routeSigs->get($route->id, collect());
-                    $firmaRec = null;
-                    if ($grupoFirmas->first()) {
-                        $paralelo = $this->getBase64Parallel(['fr' => $grupoFirmas->first()]);
-                        $firmaRec = $paralelo['fr'] ?? null;
+                    $modelos = [];
+                    $firmaFuncionarioRuta = ServiceControlSheetSignatures::porRol($grupoFirmas, Signature::ROL_FUNCIONARIO, 0);
+                    if ($firmaFuncionarioRuta) {
+                        $modelos['fr'] = $firmaFuncionarioRuta;
                     }
+                    $firmaConductorRuta = ServiceControlSheetSignatures::porRol($grupoFirmas, Signature::ROL_CONDUCTOR, 1);
+                    if ($firmaConductorRuta) {
+                        $modelos['fc'] = $firmaConductorRuta;
+                    }
+                    $base64 = empty($modelos) ? [] : $this->getBase64Parallel($modelos);
 
-                    return ['funcionario' => $firmaRec, 'conductor' => null];
+                    return ['funcionario' => $base64['fr'] ?? null, 'conductor' => $base64['fc'] ?? null];
                 },
                 numeroEntero: false,
                 conRutasDetalle: false,
+                firmaCoordinador: fn ($s) => $base64Sigs["rc_{$s->id}"] ?? null,
+                firmaConductor: fn ($s) => $base64Sigs["fc_{$s->id}"] ?? null,
             ));
             $dias = $resultadoFilas['dias'];
 
@@ -1811,8 +1907,9 @@ class PdfService
                 'mensual' => 'MENSUAL '.($filtros['year'] ?? '').'-'.($filtros['month'] ?? ''),
             ];
             $firmaCond = collect($base64Sigs)->first(fn ($v, $k) => str_starts_with($k, 'fc_') && ! empty($v));
-            $firmaRec = collect($base64Sigs)->first(fn ($v, $k) => str_starts_with($k, 'rc_') && ! empty($v))
-                ?? collect(array_column($dias, 'firma_funcionario'))->first(fn ($v) => ! empty($v));
+            // Pie derecho: solo la firma del coordinador logístico. Sin ella, la
+            // casilla queda pendiente (no se usa la firma del funcionario).
+            $firmaRec = collect($base64Sigs)->first(fn ($v, $k) => str_starts_with($k, 'rc_') && ! empty($v));
 
             // El encabezado muestra TODOS los proyectos del rango, no solo el de
             // la primera planilla: un rango puede cruzar varios proyectos.
@@ -1822,6 +1919,15 @@ class PdfService
                 ? $proyectosDistintos->first()
                 : 'VARIOS ('.$proyectosDistintos->count().'): '.$proyectosDistintos->implode(' / ');
 
+            // Un rango puede cruzar varios vehículos: la cabecera no debe mostrar
+            // los datos del primero como si fueran de todo el reporte.
+            $placasDistintas = $sheets->map(fn ($s) => $s->vehicle_license_plate)->filter()->unique()->values();
+            $internosDistintos = $sheets->map(fn ($s) => $s->internalControl?->vehicle?->internal_number)->filter()->unique()->values();
+            $clasesDistintas = $sheets->map(fn ($s) => $this->claseDeHoja($s))->reject(fn ($c) => $c === 'N/A')->unique()->values();
+            $valorDeCabecera = fn ($valores) => $valores->count() === 1
+                ? $valores->first()
+                : ($valores->isEmpty() ? 'N/A' : 'VARIOS');
+
             $data = [
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
@@ -1829,12 +1935,14 @@ class PdfService
                 'periodo' => ($etiquetas[$tipo] ?? 'REPORTE').' — SOLO DÍAS FINALIZADOS',
                 'es_historial' => false,
                 'solo_finalizados' => true,
-                'placa' => $sheets->first()->vehicle_license_plate ?? 'VARIOS',
+                'placa' => $valorDeCabecera($placasDistintas),
+                'numero_interno' => $valorDeCabecera($internosDistintos),
                 'area' => $sheets->last()->official_name_and_surname ?? 'N/A',
-                'clase' => 'N/A',
+                'clase' => $valorDeCabecera($clasesDistintas),
                 'nit' => $company?->document_number ?? 'N/A',
                 'empresa' => $empresaTransportadora,
                 'dias' => $dias,
+                'totales' => $resultadoFilas['totales'],
                 'observaciones' => 'Reporte '.strtoupper($tipo).' | Días cerrados: '.$sheets->count().' | Filas: '.count($dias).($truncado ? ' | MOSTRANDO 500 DE '.$totalPlanillas : ''),
                 'firma_conductor' => $firmaCond,
                 'firma_recibido' => $firmaRec,
@@ -1845,7 +1953,7 @@ class PdfService
             $data = $this->conMarca($data, $company, 'planilla_filtrada', $logoModel);
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
-            $pdf->setPaper('letter', 'portrait');
+            $pdf->setPaper('letter', 'landscape');
             $this->sellarPaginado($pdf);
 
             return [
