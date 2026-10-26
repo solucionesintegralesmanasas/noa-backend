@@ -957,7 +957,9 @@ class PdfService
         $superBase64 = file_exists($superPath) ? base64_encode(file_get_contents($superPath)) : null;
         $transporBase64 = file_exists($transporPath) ? base64_encode(file_get_contents($transporPath)) : null;
 
-        $receiptNumber = $charge->charge_internal_id ?? $uuid;
+        // El recibo se identifica con la referencia de pago del cargo (14 dígitos);
+        // el UUID queda solo como último recurso para no imprimir un identificador interno.
+        $receiptNumber = $charge->payment_reference ?: $uuid;
         $qrData = "Recibo: {$receiptNumber} | Fecha: ".($charge->payment_date ? $charge->payment_date->format('Y-m-d') : 'N/A')." | Valor: {$charge->amount}";
         $renderer = new ImageRenderer(
             new RendererStyle(120),
@@ -981,7 +983,9 @@ class PdfService
                 'document_number' => $charge->company ? $charge->company->legal_representative_document_number : 'N/A',
                 'document_number_expedition_place' => $charge->company && $charge->company->municipality ? $charge->company->municipality->name : 'N/A',
                 'company_name' => $charge->company ? $charge->company->business_name : 'N/A',
-                'company_document_number' => $charge->company ? $charge->company->nit : 'N/A',
+                'company_document_number' => $charge->company
+                    ? trim($charge->company->document_number.($charge->company->verification_digit !== null ? '-'.$charge->company->verification_digit : ''))
+                    : 'N/A',
                 'vehicle_license_plate' => $charge->vehicle ? $charge->vehicle->vehicle_license_plate : 'N/A',
                 'vehicle_model' => $charge->vehicle ? $charge->vehicle->model : 'N/A',
                 'vehicle_brand' => ($charge->vehicle && $charge->vehicle->brand) ? $charge->vehicle->brand->description : 'N/A',
@@ -993,7 +997,12 @@ class PdfService
         ];
 
         $view = 'pdf.contracts.admin-charge';
-        $filename = self::nombreArchivo('Constancia de Administración', $charge->charge_internal_id ?? $uuid);
+        // El documento es un "Recibo de Caja": el nombre del archivo debe coincidir
+        // con el título de la plantilla y llevar la fecha, como el resto de PDFs.
+        $fechaRecibo = $charge->payment_date
+            ? $charge->payment_date->format('Y-m-d')
+            : $charge->created_at->format('Y-m-d');
+        $filename = self::nombreArchivo('Recibo de Caja', $receiptNumber, $fechaRecibo);
 
         $data['data'] = $this->conMarca($data['data'], $charge->company, 'recibo_administracion', $logoModel);
         // La plantilla lee $data['...'] (nivel anidado): se exponen también arriba para el membrete.

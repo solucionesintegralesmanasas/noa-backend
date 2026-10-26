@@ -183,6 +183,8 @@ class AffiliateAdminChargeService extends BaseService
                 'payment_method',
                 'concept',
                 'amount',
+                'currency_code',
+                'late_fee_percentage',
                 'status',
                 'payment_date',
                 'period_date',
@@ -195,9 +197,11 @@ class AffiliateAdminChargeService extends BaseService
             ->with([
                 'company',
                 'company.municipality:id,name',
-                'vehicle:uuid,vehicle_license_plate,type_of_service,model,passenger_capacity,brand_uuid,third_party_uuid',
+                'vehicle:uuid,vehicle_license_plate,internal_number,type_of_service,model,line,passenger_capacity,vehicle_class_uuid,brand_uuid,third_party_uuid',
                 'vehicle.brand:uuid,description',
-                'vehicle.thirdParty:uuid,document_number,company_name,first_name,last_name,address,email,phone',
+                'vehicle.vehicleClass:uuid,description',
+                'vehicle.thirdParty:uuid,document_number,company_name,first_name,last_name,address,email,phone,municipality_uuid',
+                'vehicle.thirdParty.municipality:id,name',
             ])
             ->where('uuid', $uuid)
             ->first();
