@@ -251,7 +251,7 @@ class ThirdPartyService extends BaseService
         $record = $this->findByUuid($uuid);
 
         if ($record) {
-            $record->load('branch:uuid,name', 'idCardIssuePlace:uuid,name');
+            $record->load('branch:uuid,name', 'idCardIssuePlace:uuid,name', 'birthPlace:uuid,name');
             $this->appendLinkedRoles($record);
         }
 
@@ -297,6 +297,8 @@ class ThirdPartyService extends BaseService
                 'address' => $data['address'] ?? null,
                 'municipality_uuid' => $data['municipality_uuid'],
                 'branch_uuid' => $data['branch_uuid'] ?? null,
+                'birth_place_uuid' => $data['birth_place_uuid'] ?? null,
+                'birth_date' => $data['birth_date'] ?? null,
                 'id_card_issue_place_uuid' => $data['id_card_issue_place_uuid'] ?? null,
                 'id_card_issue_date' => $data['id_card_issue_date'] ?? null,
                 'sex' => $data['sex'] ?? null,
@@ -605,6 +607,10 @@ class ThirdPartyService extends BaseService
                 'address' => $data['address'] ?? $record->address,
                 'municipality_uuid' => $data['municipality_uuid'] ?? $record->municipality_uuid,
                 'branch_uuid' => array_key_exists('branch_uuid', $data) ? $data['branch_uuid'] : $record->branch_uuid,
+                'birth_place_uuid' => array_key_exists('birth_place_uuid', $data)
+                    ? $data['birth_place_uuid'] : $record->birth_place_uuid,
+                'birth_date' => array_key_exists('birth_date', $data)
+                    ? $data['birth_date'] : $record->birth_date,
                 'id_card_issue_place_uuid' => array_key_exists('id_card_issue_place_uuid', $data)
                     ? $data['id_card_issue_place_uuid'] : $record->id_card_issue_place_uuid,
                 'id_card_issue_date' => array_key_exists('id_card_issue_date', $data)

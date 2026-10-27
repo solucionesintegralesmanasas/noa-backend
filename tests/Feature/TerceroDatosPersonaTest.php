@@ -139,9 +139,11 @@ class TerceroDatosPersonaTest extends TestCase
             ->firstWhere('field', $campo)['messages'] ?? [];
     }
 
-    public function test_crear_persona_natural_persiste_y_devuelve_los_cinco_datos(): void
+    public function test_crear_persona_natural_persiste_y_devuelve_los_datos_de_persona(): void
     {
         $datos = $this->datosBase() + [
+            'birth_place_uuid' => $this->ciudad,
+            'birth_date' => '1985-04-12',
             'id_card_issue_place_uuid' => $this->ciudad,
             'id_card_issue_date' => '2005-06-15',
             'sex' => 'F',
@@ -157,6 +159,8 @@ class TerceroDatosPersonaTest extends TestCase
             ->where('document_number', $datos['document_number'])
             ->first();
 
+        $this->assertSame($this->ciudad, $fila->birth_place_uuid);
+        $this->assertSame('1985-04-12', (string) $fila->birth_date);
         $this->assertSame($this->ciudad, $fila->id_card_issue_place_uuid);
         $this->assertSame('2005-06-15', (string) $fila->id_card_issue_date);
         $this->assertSame('F', $fila->sex);
@@ -164,6 +168,8 @@ class TerceroDatosPersonaTest extends TestCase
         $this->assertSame('O+', $fila->blood_type);
 
         // El registro devuelto expone los datos para la ficha y el formulario.
+        $this->assertStringStartsWith('1985-04-12', (string) $r->json('data.birth_date'));
+        $this->assertSame($this->ciudad, $r->json('data.birth_place_uuid'));
         $r->assertJsonFragment([
             'sex' => 'F',
             'marital_status' => 'SOLTERO',
@@ -185,6 +191,8 @@ class TerceroDatosPersonaTest extends TestCase
             ->where('document_number', $datos['document_number'])
             ->first();
 
+        $this->assertNull($fila->birth_place_uuid);
+        $this->assertNull($fila->birth_date);
         $this->assertNull($fila->id_card_issue_place_uuid);
         $this->assertNull($fila->id_card_issue_date);
         $this->assertNull($fila->sex);
@@ -200,6 +208,8 @@ class TerceroDatosPersonaTest extends TestCase
 
         $rechazados = $this->camposRechazados($r);
 
+        $this->assertContains('birth_place_uuid', $rechazados);
+        $this->assertContains('birth_date', $rechazados);
         $this->assertContains('id_card_issue_place_uuid', $rechazados);
         $this->assertContains('id_card_issue_date', $rechazados);
         $this->assertContains('sex', $rechazados);
@@ -211,6 +221,8 @@ class TerceroDatosPersonaTest extends TestCase
     public function test_valores_fuera_de_las_listas_rechazados(): void
     {
         $datos = $this->datosBase() + [
+            'birth_place_uuid' => $this->ciudad,
+            'birth_date' => '1990-01-01',
             'id_card_issue_place_uuid' => $this->ciudad,
             'id_card_issue_date' => '2005-06-15',
             'sex' => 'X',
@@ -232,6 +244,8 @@ class TerceroDatosPersonaTest extends TestCase
     public function test_la_fecha_de_expedicion_futura_rechazada(): void
     {
         $datos = $this->datosBase() + [
+            'birth_place_uuid' => $this->ciudad,
+            'birth_date' => '1990-01-01',
             'id_card_issue_place_uuid' => $this->ciudad,
             'id_card_issue_date' => now()->addDay()->toDateString(),
             'sex' => 'M',
@@ -248,9 +262,50 @@ class TerceroDatosPersonaTest extends TestCase
         );
     }
 
+    public function test_la_fecha_de_nacimiento_debe_ser_anterior_a_hoy(): void
+    {
+        $datos = $this->datosBase() + [
+            'birth_place_uuid' => $this->ciudad,
+            'birth_date' => now()->toDateString(),
+            'id_card_issue_place_uuid' => $this->ciudad,
+            'id_card_issue_date' => '2010-01-01',
+            'sex' => 'M',
+            'marital_status' => 'CASADO',
+            'blood_type' => 'A-',
+        ];
+
+        $r = $this->comoAdmin()->postJson('/api/v1/third-parties', $datos);
+
+        $r->assertStatus(422);
+        $this->assertStringContainsString(
+            'debe ser anterior a hoy',
+            implode(' ', $this->mensajesDe($r, 'birth_date'))
+        );
+    }
+
+    public function test_el_lugar_de_nacimiento_debe_ser_una_ciudad_existente(): void
+    {
+        $datos = $this->datosBase() + [
+            'birth_place_uuid' => (string) Str::uuid(),
+            'birth_date' => '1990-01-01',
+            'id_card_issue_place_uuid' => $this->ciudad,
+            'id_card_issue_date' => '2005-06-15',
+            'sex' => 'M',
+            'marital_status' => 'CASADO',
+            'blood_type' => 'A-',
+        ];
+
+        $r = $this->comoAdmin()->postJson('/api/v1/third-parties', $datos);
+
+        $r->assertStatus(422);
+        $this->assertContains('birth_place_uuid', $this->camposRechazados($r));
+    }
+
     public function test_el_lugar_de_expedicion_debe_ser_una_ciudad_existente(): void
     {
         $datos = $this->datosBase() + [
+            'birth_place_uuid' => $this->ciudad,
+            'birth_date' => '1990-01-01',
             'id_card_issue_place_uuid' => (string) Str::uuid(),
             'id_card_issue_date' => '2005-06-15',
             'sex' => 'M',
@@ -267,6 +322,8 @@ class TerceroDatosPersonaTest extends TestCase
     public function test_la_edicion_actualiza_y_la_parcial_no_borra_los_datos(): void
     {
         $datos = $this->datosBase() + [
+            'birth_place_uuid' => $this->ciudad,
+            'birth_date' => '1980-08-20',
             'id_card_issue_place_uuid' => $this->ciudad,
             'id_card_issue_date' => '1998-02-11',
             'sex' => 'M',
@@ -282,7 +339,7 @@ class TerceroDatosPersonaTest extends TestCase
             ->value('uuid');
 
         // Edición parcial (sin person_type ni datos de persona): las obligatorias
-        // del flujo (sucursal, correo, municipio) van; los cinco datos no se
+        // del flujo (sucursal, correo, municipio) van; los datos no se
         // tocan ni se borran.
         $this->comoAdmin()->putJson('/api/v1/third-parties/'.$uuid, [
             'branch_uuid' => $datos['branch_uuid'],
@@ -295,6 +352,8 @@ class TerceroDatosPersonaTest extends TestCase
 
         $fila = DB::table('third_parties')->where('uuid', $uuid)->first();
 
+        $this->assertSame($this->ciudad, $fila->birth_place_uuid);
+        $this->assertSame('1980-08-20', (string) $fila->birth_date);
         $this->assertSame($this->ciudad, $fila->id_card_issue_place_uuid);
         $this->assertSame('1998-02-11', (string) $fila->id_card_issue_date);
         $this->assertSame('M', $fila->sex);
@@ -306,6 +365,8 @@ class TerceroDatosPersonaTest extends TestCase
         $this->comoAdmin()->putJson('/api/v1/third-parties/'.$uuid, [
             'person_type' => 'NATURAL',
             'branch_uuid' => $datos['branch_uuid'],
+            'birth_place_uuid' => $otraCiudad,
+            'birth_date' => '1982-12-05',
             'id_card_issue_place_uuid' => $otraCiudad,
             'id_card_issue_date' => '2001-10-30',
             'sex' => 'M',
@@ -315,6 +376,8 @@ class TerceroDatosPersonaTest extends TestCase
 
         $fila = DB::table('third_parties')->where('uuid', $uuid)->first();
 
+        $this->assertSame($otraCiudad, $fila->birth_place_uuid);
+        $this->assertSame('1982-12-05', (string) $fila->birth_date);
         $this->assertSame($otraCiudad, $fila->id_card_issue_place_uuid);
         $this->assertSame('2001-10-30', (string) $fila->id_card_issue_date);
         $this->assertSame('CASADO', $fila->marital_status);

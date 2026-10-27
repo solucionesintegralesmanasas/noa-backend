@@ -36,6 +36,18 @@ trait ValidaDatosPersona
         $esNatural = $this->input('person_type') === 'NATURAL';
 
         return [
+            'birth_place_uuid' => [
+                'nullable',
+                Rule::requiredIf($esNatural),
+                'uuid',
+                Rule::exists('cities', 'uuid'),
+            ],
+            'birth_date' => [
+                'nullable',
+                Rule::requiredIf($esNatural),
+                'date',
+                'before:today',
+            ],
             'id_card_issue_place_uuid' => [
                 'nullable',
                 Rule::requiredIf($esNatural),
@@ -72,6 +84,9 @@ trait ValidaDatosPersona
     protected function mensajesDatosPersona(): array
     {
         return [
+            'birth_place_uuid.required' => 'El lugar de nacimiento es obligatorio para personas naturales.',
+            'birth_date.required' => 'La fecha de nacimiento es obligatoria para personas naturales.',
+            'birth_date.before' => 'La fecha de nacimiento debe ser anterior a hoy.',
             'id_card_issue_place_uuid.required' => 'El lugar de expedición de la cédula es obligatorio para personas naturales.',
             'id_card_issue_date.required' => 'La fecha de expedición de la cédula es obligatoria para personas naturales.',
             'id_card_issue_date.before_or_equal' => 'La fecha de expedición de la cédula no puede ser posterior a hoy.',
@@ -90,6 +105,8 @@ trait ValidaDatosPersona
     protected function atributosDatosPersona(): array
     {
         return [
+            'birth_place_uuid' => 'Lugar de nacimiento',
+            'birth_date' => 'Fecha de nacimiento',
             'id_card_issue_place_uuid' => 'Lugar de expedición de la cédula',
             'id_card_issue_date' => 'Fecha de expedición de la cédula',
             'sex' => 'Sexo',

@@ -107,6 +107,8 @@ class TerceroSucursalTest extends TestCase
             'email' => Str::random(8).'@tercero.test',
             'municipality_uuid' => $this->city,
             'branch_uuid' => $this->branch,
+            'birth_place_uuid' => $this->city,
+            'birth_date' => '1990-01-01',
             'id_card_issue_place_uuid' => $this->city,
             'id_card_issue_date' => '2010-05-20',
             'sex' => 'F',
