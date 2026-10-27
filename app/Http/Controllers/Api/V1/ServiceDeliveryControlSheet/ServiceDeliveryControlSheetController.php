@@ -65,7 +65,21 @@ class ServiceDeliveryControlSheetController extends Controller
             $soloCerradas = $request->has('solo_cerradas')
                 ? filter_var($request->query('solo_cerradas'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false
                 : false;
-            $data = $this->serviceDeliveryControlSheetService->getAllServiceDeliveryControlSheetsWithPagination($perPage, $page, $search, $companyUuid, $projectUuid, $soloCerradas, filter_var($request->query('agrupar_proyecto'), FILTER_VALIDATE_BOOLEAN));
+            $estadoFiltro = $request->query('estado_filtro');
+            $sortBy = $request->query('sort_by');
+            $sortOrder = (string) $request->query('sort_order', 'desc');
+            $data = $this->serviceDeliveryControlSheetService->getAllServiceDeliveryControlSheetsWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                $projectUuid,
+                $soloCerradas,
+                filter_var($request->query('agrupar_proyecto'), FILTER_VALIDATE_BOOLEAN),
+                $estadoFiltro,
+                $sortBy,
+                $sortOrder
+            );
 
             return $this->successResponse($data, 'Listado paginado recuperado con éxito.');
         } catch (\Throwable $e) {
@@ -75,28 +89,37 @@ class ServiceDeliveryControlSheetController extends Controller
 
     #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/project-summary',
-        summary: 'Resumen global de evidencia diaria de un proyecto',
+        summary: 'Resumen global de evidencia diaria de un proyecto o de todos los proyectos',
         operationId: 'getProjectServiceDeliveryEvidenceSummary',
         tags: ['ServiceDeliveryControlSheet'],
         parameters: [
-            new OA\Parameter(name: 'project_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'all', in: 'query', required: false, schema: new OA\Schema(type: 'boolean')),
         ],
         responses: [
-            new OA\Response(response: 200, description: 'Resumen de días y evidencia del proyecto.'),
+            new OA\Response(response: 200, description: 'Resumen de días y evidencia del proyecto o listado de proyectos.'),
             new OA\Response(response: 422, description: 'UUID de proyecto inválido.'),
         ]
     )]
     public function projectSummary(Request $request): JsonResponse
     {
         try {
-            $validated = $request->validate([
-                'project_uuid' => ['required', 'uuid', 'exists:projects,uuid'],
-            ]);
+            if ($request->filled('project_uuid')) {
+                $validated = $request->validate([
+                    'project_uuid' => ['required', 'uuid', 'exists:projects,uuid'],
+                ]);
 
-            $summary = $this->serviceDeliveryControlSheetService
-                ->getProjectEvidenceSummary($validated['project_uuid']);
+                $summary = $this->serviceDeliveryControlSheetService
+                    ->getProjectEvidenceSummary($validated['project_uuid']);
 
-            return $this->successResponse($summary, 'Resumen de evidencia del proyecto recuperado.');
+                return $this->successResponse($summary, 'Resumen de evidencia del proyecto recuperado.');
+            }
+
+            $companyUuid = $request->query('company_uuid');
+            $thirdPartyUuid = $request->query('third_party_uuid');
+            $overview = $this->serviceDeliveryControlSheetService->getProjectsOverview($companyUuid, $thirdPartyUuid);
+
+            return $this->successResponse($overview, 'Resumen de proyectos recuperado con éxito.');
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

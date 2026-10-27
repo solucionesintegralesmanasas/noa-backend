@@ -282,4 +282,67 @@ class EvidenciaListadoTest extends TestCase
         $this->assertSame('CERRADA', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_CERTIFICADA));
         $this->assertSame('CERRADA', $evidencia->controlStatus(ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION));
     }
+
+    public function test_resumen_proyectos_en_lote_agrega_metricas_por_proyecto(): void
+    {
+        $proj1 = (string) Str::uuid();
+        $proj2 = (string) Str::uuid();
+
+        $this->insertarPlanilla([
+            'uuid' => 'p1-sheet',
+            'project_uuid' => $proj1,
+            'service_date' => '2026-10-01',
+            'start_time' => '07:00:00',
+            'end_time' => '17:00:00',
+            'starting_kilometer' => '100',
+            'ending_kilometer' => '150',
+            'day_kind' => 'disponibilidad',
+            'availability_reason' => 'Reserva',
+            'is_active' => false,
+        ]);
+
+        $this->insertarPlanilla([
+            'uuid' => 'p2-sheet',
+            'project_uuid' => $proj2,
+            'service_date' => '2026-10-02',
+            'is_active' => true,
+        ]);
+
+        $lote = app(PcpEvidence::class)->resumenProyectosEnLote([$proj1, $proj2]);
+
+        $this->assertSame(1, $lote[$proj1]['total_planillas']);
+        $this->assertSame(1, $lote[$proj1]['total_dias']);
+        $this->assertSame(1, $lote[$proj1]['cerrados']);
+        $this->assertSame(100, $lote[$proj1]['porcentaje_al_dia']);
+
+        $this->assertSame(1, $lote[$proj2]['total_planillas']);
+        $this->assertSame(1, $lote[$proj2]['en_curso']);
+    }
+
+    public function test_estado_filtro_separa_en_curso_con_pendientes_y_cerradas(): void
+    {
+        $abiertaId = $this->insertarPlanilla([
+            'uuid' => 'sheet-abierta',
+            'service_date' => '2026-10-10',
+            'is_active' => true,
+        ]);
+        $excepcionId = $this->insertarPlanilla([
+            'uuid' => 'sheet-excepcion',
+            'service_date' => '2026-10-11',
+            'is_active' => false,
+            'exception_reason' => 'Cierre autorizado por tormenta',
+        ]);
+
+        $service = app(ServiceDeliveryControlSheetService::class);
+
+        $enCurso = $service->getAllServiceDeliveryControlSheetsWithPagination(15, 1, '', null, null, false, false, 'en_curso');
+        $this->assertSame([$abiertaId], $enCurso->getCollection()->pluck('id')->all());
+
+        $conPendientes = $service->getAllServiceDeliveryControlSheetsWithPagination(15, 1, '', null, null, false, false, 'con_pendientes');
+        $this->assertContains($abiertaId, $conPendientes->getCollection()->pluck('id')->all());
+        $this->assertNotContains($excepcionId, $conPendientes->getCollection()->pluck('id')->all());
+
+        $cerradas = $service->getAllServiceDeliveryControlSheetsWithPagination(15, 1, '', null, null, false, false, 'cerradas');
+        $this->assertSame([$excepcionId], $cerradas->getCollection()->pluck('id')->all());
+    }
 }
