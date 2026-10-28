@@ -107,6 +107,8 @@ class DigestVencimientosTest extends TestCase
             'notification_email' => self::DESTINO,
         ]);
 
+        request()->attributes->set('current_company_uuid', $empresa);
+
         return $empresa;
     }
 

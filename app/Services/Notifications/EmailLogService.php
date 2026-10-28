@@ -11,6 +11,7 @@ use App\Models\SystemConfiguration;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Services\BaseService;
+use App\Traits\BelongsToCompany;
 use App\Utils\OwnCompany;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
@@ -53,19 +54,21 @@ class EmailLogService extends BaseService
      */
     public function notifyExpiringDocuments(): void
     {
-        $configs = SystemConfiguration::query()
-            ->where('activate_notifications', true)
-            ->where('notify_by_email', true)
-            ->whereNotNull('notification_email')
-            ->get();
+        BelongsToCompany::withoutCompanyScope(function () {
+            $configs = SystemConfiguration::query()
+                ->where('activate_notifications', true)
+                ->where('notify_by_email', true)
+                ->whereNotNull('notification_email')
+                ->get();
 
-        foreach ($configs as $config) {
-            try {
-                $this->procesarEmpresa($config);
-            } catch (\Exception $e) {
-                Log::error("Error procesando digest de vencimientos para la empresa {$config->company_uuid}: ".$e->getMessage());
+            foreach ($configs as $config) {
+                try {
+                    $this->procesarEmpresa($config);
+                } catch (\Exception $e) {
+                    Log::error("Error procesando digest de vencimientos para la empresa {$config->company_uuid}: ".$e->getMessage());
+                }
             }
-        }
+        });
     }
 
     /**
