@@ -46,7 +46,16 @@ class EconomicActivityController extends Controller
             $page = (int) $request->query('page', '1');
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid');
-            $data = $this->economicActivityService->getAllEconomicActivitiesWithPagination($perPage, $page, $search, $companyUuid);
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order', 'asc');
+            $data = $this->economicActivityService->getAllEconomicActivitiesWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                is_string($sortBy) ? $sortBy : null,
+                is_string($sortOrder) ? $sortOrder : 'asc'
+            );
 
             return $this->successResponse($data, 'Listado de actividades recuperado.');
         } catch (\Throwable $e) {

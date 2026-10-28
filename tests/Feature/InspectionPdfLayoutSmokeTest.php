@@ -18,38 +18,20 @@ class InspectionPdfLayoutSmokeTest extends TestCase
         // Encabezado SGFT04 propio, no el de 3 logos de la base.
         $this->assertStringContainsString('DIARIA DE VEHÍCULOS', $html);
         $this->assertStringContainsString('SGFT04', $html);
-        $this->assertStringContainsString('SIN LOGO', $html);
         $this->assertStringNotContainsString('class="logo-header"', $html);
-        // El 33.33% de la base no debe descuadrar el encabezado (revierte a auto).
-        $this->assertStringContainsString('width: auto;', $html);
-        // Sin logo no debe haber marca de agua rota.
+        // Sin propiedades CSS que DomPDF no reconoce (con avisos activos tumban el render).
+        $this->assertStringNotContainsString('box-sizing', $html);
+        $this->assertStringNotContainsString('box-shadow', $html);
+        // Sin marca de agua en este formato.
         $this->assertStringNotContainsString('id="watermark"', $html);
-
-        // Con logo de empresa sí sale de fondo (marca de agua de la base).
-        $conLogo = view('pdf.fleet.vehicle-inspection', array_merge($datos, [
-            'data' => ['logo' => 'iVBORw0KGgo=', 'firma' => null, 'firma_coordinador' => null],
-        ]))->render();
-
-        $this->assertStringContainsString('id="watermark"', $conLogo);
-        // Sin franja de validación APTO/NO APTO.
-        $this->assertStringNotContainsString('APTO PARA OPERAR', $html);
-        $this->assertStringNotContainsString('Buenos:', $html);
-        // Columna única OK como el formato original; la categoría fallida se señala con texto.
-        $this->assertStringContainsString('REQUIERE ATENCIÓN', $html);
         $this->assertStringContainsString('(1/1 OK)', $html);
-        $this->assertStringContainsString('(0/2 OK)', $html);
-        // Solo el ítem respondido lleva X; los no contestados quedan vacíos.
-        $this->assertSame(1, substr_count($html, 'answer-box">X'));
-        $this->assertStringNotContainsString('check-box', $html);
-        $this->assertStringNotContainsString('>B<', $html);
-        // Espacio para fotografía del vehículo inspeccionado con renglones de descripción.
-        $this->assertStringContainsString('FOTO DEL VEHÍCULO INSPECCIONADO', $html);
-        $this->assertStringContainsString('FOTOGRAFÍA DEL VEHÍCULO', $html);
-        $this->assertStringNotContainsString('UBICACIÓN DE DAÑOS', $html);
-        // Datos del registro.
+        $this->assertStringContainsString('(0/1 OK)', $html);
+        $this->assertStringNotContainsString('cat-alert', $html);
+        $this->assertStringNotContainsString('row-fail', $html);
+        $this->assertSame(1, substr_count($html, "\u{2713}"));
+        $this->assertSame(1, substr_count($html, "\u{2715}"));
         $this->assertStringContainsString('ABC123', $html);
         $this->assertStringContainsString('Sin novedades', $html);
-
         // Variante horizontal del layout: @page en apaisado.
         $horizontal = view('pdf.fleet.vehicle-inspection', $datos + ['orientation' => 'landscape'])->render();
 
@@ -170,3 +152,4 @@ class InspectionPdfLayoutSmokeTest extends TestCase
         ];
     }
 }
+

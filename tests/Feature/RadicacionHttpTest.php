@@ -315,4 +315,35 @@ class RadicacionHttpTest extends TestCase
         $respuesta->assertNotFound();
         $respuesta->assertJson(['success' => false]);
     }
+
+    public function test_el_indice_unico_de_base_de_datos_impide_duplicados_de_codigo_en_la_misma_empresa(): void
+    {
+        $otraEmpresa = $this->insertar('companies', ['business_name' => 'Segunda Empresa', 'is_active' => true]);
+
+        // Primera inserción en la empresa
+        $this->insertar('procedures', [
+            'company_uuid' => $this->empresa,
+            'procedure_code' => 'EXP-DB-UNIQUE',
+            'link_type' => 'CAMBIO_DE_EMPRESA',
+            'procedure_type' => 'INCLUSION_DE_POLIZAS',
+        ]);
+
+        // Inserción en OTRA empresa con el mismo código es permitida
+        $segunda = $this->insertar('procedures', [
+            'company_uuid' => $otraEmpresa,
+            'procedure_code' => 'EXP-DB-UNIQUE',
+            'link_type' => 'CAMBIO_DE_EMPRESA',
+            'procedure_type' => 'INCLUSION_DE_POLIZAS',
+        ]);
+        $this->assertNotNull($segunda);
+
+        // Inserción duplicada en la misma empresa es rechazada a nivel de BD
+        $this->expectException(\Illuminate\Database\QueryException::class);
+        $this->insertar('procedures', [
+            'company_uuid' => $this->empresa,
+            'procedure_code' => 'EXP-DB-UNIQUE',
+            'link_type' => 'CAMBIO_DE_EMPRESA',
+            'procedure_type' => 'INCLUSION_DE_POLIZAS',
+        ]);
+    }
 }

@@ -17,7 +17,7 @@ use Illuminate\Validation\Rule;
  */
 class UpdateThirdPartyRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaDatosPersona;
 
     /**
      * Determina si el usuario está autorizado para realizar esta solicitud.
@@ -77,6 +77,7 @@ class UpdateThirdPartyRequest extends FormRequest
                 : ['nullable', 'uuid'],
             'tax_regime' => ['sometimes', 'required', 'string', 'in:48,49,47,05,42'],
             'tax_responsibility_uuid' => ['sometimes', 'required', 'uuid', 'exists:tax_responsibilities,uuid'],
+            ...$this->reglasDatosPersona(),
             'bank_account_number' => ['nullable', 'string', 'max:50'],
             'bank_account_type' => ['nullable', 'string', 'in:AHORROS,CORRIENTE,MONEDA_EXTRANJERA'],
             'bank_name' => ['nullable', 'string', 'max:100'],
@@ -117,6 +118,7 @@ class UpdateThirdPartyRequest extends FormRequest
     {
         return [
             'document_number.unique' => 'Ya existe un tercero registrado con este número de documento para la empresa y tipo de documento seleccionados.',
+            ...$this->mensajesDatosPersona(),
         ];
     }
 
@@ -139,6 +141,7 @@ class UpdateThirdPartyRequest extends FormRequest
             'address' => 'Dirección',
             'municipality_uuid' => 'Municipio',
             'branch_uuid' => 'Sucursal',
+            ...$this->atributosDatosPersona(),
             'tax_regime' => 'Régimen tributario',
             'tax_responsibility_uuid' => 'Responsabilidad fiscal',
             'bank_account_number' => 'Número de cuenta bancaria',

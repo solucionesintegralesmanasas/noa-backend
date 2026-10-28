@@ -38,6 +38,11 @@ use Illuminate\Support\Facades\DB;
 class FuecService extends BaseService
 {
     /**
+     * Columnas propias del FUEC que participan en la búsqueda libre del listado.
+     *
+     * Las columnas visibles que viven en relaciones (placa del vehículo y datos del
+     * contratante) se buscan en {@see aplicarBusqueda()}, no aquí.
+     *
      * @var array<string>
      */
     protected array $searchableFields = [
@@ -46,6 +51,9 @@ class FuecService extends BaseService
         'contract_number_display',
         'origin_route',
         'destination_route',
+        'status',
+        'verification_code',
+        'issue_date',
     ];
 
     public function __construct(
@@ -85,6 +93,15 @@ class FuecService extends BaseService
             'contractor:uuid,company_name,document_number',
         ]);
 
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
+
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
         }
@@ -100,17 +117,7 @@ class FuecService extends BaseService
             });
         }
 
-        if (! empty($search) && ! empty($this->searchableFields)) {
-            $query->where(function ($q) use ($search) {
-                foreach ($this->searchableFields as $index => $field) {
-                    if ($index === 0) {
-                        $q->where($field, 'like', "%{$search}%");
-                    } else {
-                        $q->orWhere($field, 'like', "%{$search}%");
-                    }
-                }
-            });
-        }
+        $this->aplicarBusqueda($query, $search);
 
         $columns = [
             'uuid',
@@ -152,11 +159,109 @@ class FuecService extends BaseService
     }
 
     /**
+     * Aplica la búsqueda libre del listado de FUEC.
+     *
+     * Cubre todas las columnas que ve el usuario: N° FUEC (los 4 dígitos visibles y el
+     * número completo de 23 en `request_number`), placa e interno del vehículo,
+     * contratante (nombre y documento), fecha de expedición, origen, destino y estado.
+     * Varios términos separados por espacios se combinan con AND: cada uno debe aparecer
+     * en alguna columna, así «ABC123 Contratista» acota en vez de ampliar el resultado.
+     */
+    private function aplicarBusqueda(Builder $query, string $search): void
+    {
+        $terminos = $this->terminosDeBusqueda($search);
+
+        if ($terminos === []) {
+            return;
+        }
+
+        $query->where(function (Builder $outer) use ($terminos) {
+            foreach ($terminos as $termino) {
+                $outer->where(function (Builder $q) use ($termino) {
+                    $patron = $this->patronLike($termino);
+
+                    foreach ($this->searchableFields as $field) {
+                        $q->orWhere('fuec.'.$field, 'like', $patron);
+                    }
+
+                    $q->orWhereHas('contractor', function (Builder $contractor) use ($patron) {
+                        $contractor->where('contractors.company_name', 'like', $patron)
+                            ->orWhere('contractors.document_number', 'like', $patron);
+                    });
+
+                    $q->orWhereHas('vehicle', function (Builder $vehicle) use ($patron) {
+                        $vehicle->where('vehicles.vehicle_license_plate', 'like', $patron)
+                            ->orWhere('vehicles.internal_number', 'like', $patron);
+                    });
+
+                    $fecha = $this->fechaBuscada($termino);
+                    if ($fecha !== null) {
+                        $q->orWhereDate('fuec.issue_date', $fecha);
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Divide la búsqueda en términos utilizables (sin vacíos, sin duplicados y con tope
+     * de cinco para no armar consultas desmedidas desde la barra de búsqueda).
+     *
+     * @return array<int, string>
+     */
+    private function terminosDeBusqueda(string $search): array
+    {
+        $terminos = preg_split('/\s+/u', trim($search)) ?: [];
+        $terminos = array_filter($terminos, fn (string $termino) => $termino !== '');
+
+        return array_slice(array_values(array_unique($terminos)), 0, 5);
+    }
+
+    /**
+     * Patrón LIKE que respeta los comodines que el usuario escriba: `%` y `_` se
+     * escapan para que una búsqueda como «100%» no se convierta en «todo».
+     */
+    private function patronLike(string $termino): string
+    {
+        return '%'.addcslashes($termino, '%_\\').'%';
+    }
+
+    /**
+     * Convierte el término a fecha ISO cuando está escrito en alguno de los formatos
+     * habituales del formulario (AAAA-MM-DD, DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA).
+     */
+    private function fechaBuscada(string $termino): ?string
+    {
+        foreach (['Y-m-d', 'd/m/Y', 'd-m-Y', 'd.m.Y'] as $formato) {
+            try {
+                $fecha = Carbon::createFromFormat('!'.$formato, $termino);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if ($fecha instanceof Carbon && $fecha->format($formato) === $termino) {
+                return $fecha->toDateString();
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Método getAllFuecs.
      */
     public function getAllFuecs(?string $companyUuid = null, ?string $thirdPartyUuid = null): Collection
     {
         $query = $this->query();
+
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
@@ -487,8 +592,11 @@ class FuecService extends BaseService
     public function updateFuec(string $uuid, array $data): Model
     {
         return $this->transaction(function () use ($uuid, $data) {
-            /** @var Fuec $record */
-            $record = Fuec::query()->where('uuid', $uuid)->firstOrFail();
+            /** @var Fuec|null $record */
+            $record = $this->findByUuid($uuid);
+            if (! $record) {
+                throw (new ModelNotFoundException)->setModel(Fuec::class, [$uuid]);
+            }
 
             // Sincronizar contratista si se proporciona
             if (isset($data['contractor']) && is_array($data['contractor'])) {

@@ -43,6 +43,11 @@ class DriverLocationController extends Controller
         try {
             $validated = $request->validated();
             $data = $validated['location'];
+            // La sesión viaja en la raíz del payload: sin esto el servicio no puede
+            // reactivar la sesión pausada del conductor ni dirigir el punto a ella.
+            if (! empty($validated['session_uuid'])) {
+                $data['session_uuid'] = $validated['session_uuid'];
+            }
             $company = $request->user()->companies()->first();
             $data['company_uuid'] = $company?->uuid;
             $data['third_party_uuid'] = $data['third_party_uuid']

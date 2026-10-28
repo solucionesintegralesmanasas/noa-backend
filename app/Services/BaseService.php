@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Traits\BelongsToCompany;
 use App\Traits\HasFiles;
 use App\Utils\Logger;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -95,6 +96,7 @@ abstract class BaseService
      */
     private const TABLAS_AISLADAS_POR_AFILIADO = [
         'vehicles', 'vehicle_documents', 'operation_cards', 'vehicle_inspections', 'owners_drivers',
+        'third_parties', 'contractors', 'fuec', 'procedures',
     ];
 
     /**
@@ -148,7 +150,7 @@ abstract class BaseService
      * puede abrir por UUID registros de otros afiliados de su empresa; cerrarlo requiere su propio spec.
      * Sin empresa resoluble el acceso se cierra (no se devuelve nada) en vez de quedar abierto.
      */
-    protected function aislarPorAfiliado(Builder $query): void
+    public function aislarPorAfiliado(Builder $query): void
     {
         $user = Auth::user();
         if (! $user || ! $user->hasRole('AFILIADO') || ! in_array($this->model->getTable(), self::TABLAS_AISLADAS_POR_AFILIADO, true)) {
@@ -306,6 +308,53 @@ abstract class BaseService
     protected array $searchableFields = [];
 
     /**
+     * Propiedad que las clases hijas pueden definir para indicar
+     * por qué campos se puede ordenar el listado (lista blanca).
+     *
+     * Formato:
+     *  - 'campo_visible' => 'tabla.columna'                       → ORDER BY directo.
+     *  - 'campo_visible' => Closure(Builder $query, string $dir)  → caso especial
+     *    (relaciones, subconsultas). El closure debe limitarse a aplicar el orden
+     *    sobre el builder recibido, sin lanzar consultas adicionales.
+     *
+     * El campo visible es el que envía el frontend en `sort_by`; cualquier valor
+     * fuera de esta lista se ignora.
+     *
+     * @var array<string, string|Closure>
+     */
+    protected array $sortableFields = [];
+
+    /**
+     * Aplica el orden solicitado si el campo está en la lista blanca del servicio.
+     *
+     * La dirección inválida o ausente cae a ascendente. Cuando el campo ordenado
+     * no es la clave primaria se añade un desempate por clave para que la
+     * paginación sea determinista (sin filas repetidas ni omitidas entre páginas).
+     */
+    protected function applySorting(Builder $query, ?string $sortBy, ?string $sortOrder): void
+    {
+        if ($sortBy === null || $sortBy === '' || ! array_key_exists($sortBy, $this->sortableFields)) {
+            return;
+        }
+
+        $direction = strtolower((string) $sortOrder) === 'desc' ? 'desc' : 'asc';
+        $definition = $this->sortableFields[$sortBy];
+
+        if ($definition instanceof Closure) {
+            $definition($query, $direction);
+        } else {
+            $query->orderBy($definition, $direction);
+        }
+
+        // El desempate se toma del modelo del builder (no de $this->model): así la pieza
+        // sirve también cuando el listado se arma sobre otro modelo.
+        $primaryKey = $query->getModel()->getQualifiedKeyName();
+        if ($definition !== $primaryKey) {
+            $query->orderBy($primaryKey);
+        }
+    }
+
+    /**
      * Búsqueda avanzada con filtros dinámicos y soporte para multi-tenancy.
      *
      * @param  array  $filters  Filtros a aplicar.
@@ -367,7 +416,9 @@ abstract class BaseService
         string $search = '',
         ?string $companyUuid = null,
         array $relations = [],
-        array $columns = ['*']
+        array $columns = ['*'],
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with($relations);
 
@@ -386,6 +437,8 @@ abstract class BaseService
                 }
             });
         }
+
+        $this->applySorting($query, $sortBy, $sortOrder);
 
         return $query->paginate($perPage, $columns, 'page', $page);
     }
@@ -579,6 +632,16 @@ abstract class BaseService
                         } else {
                             $query->whereRaw('1 = 0');
                         }
+                    }
+                } elseif ($table === 'procedures') {
+                    if ($user->hasRole('AFILIADO')) {
+                        $query->where(function ($q) use ($affiliateUuid) {
+                            $q->where('procedures.third_party_uuid', $affiliateUuid)
+                                ->orWhereHas('vehicle', function ($vq) use ($affiliateUuid) {
+                                    $vq->where('vehicles.third_party_uuid', $affiliateUuid)
+                                        ->orWhereHas('owners', fn ($o) => $o->where('third_party_uuid', $affiliateUuid));
+                                });
+                        });
                     }
                 } elseif (in_array('third_party_uuid', $fillable)) {
                     $query->where($table . '.third_party_uuid', $affiliateUuid);

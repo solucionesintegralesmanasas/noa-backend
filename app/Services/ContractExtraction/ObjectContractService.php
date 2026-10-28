@@ -33,6 +33,15 @@ class ObjectContractService extends BaseService
      */
     protected array $searchableFields = ['name'];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'name' => 'objects_contracts.name',
+            'description' => 'objects_contracts.description',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new ObjectsContract;
@@ -45,9 +54,18 @@ class ObjectContractService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid);
+        return $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
     }
 
     /**

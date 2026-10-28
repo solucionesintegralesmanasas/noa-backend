@@ -15,6 +15,7 @@ use BaconQrCode\Writer;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -65,20 +66,30 @@ class FuelRequestService extends BaseService
         ?string $notes = null
     ): FuelRequest {
         return $this->transaction(function () use ($vehicleUuid, $driverUuid, $usuario, $companyUuid, $notes) {
-            $vehiculo = \App\Models\Vehicle::withoutGlobalScopes()
+            // Con scopes (empresa y sede del contexto): un vehículo ajeno no
+            // existe aquí; antes el lookup pelado permitía crear solicitudes
+            // para el vehículo de otra empresa.
+            $vehiculo = \App\Models\Vehicle::query()
                 ->with(['company', 'brand', 'vehicleClass'])
                 ->where('uuid', $vehicleUuid)
                 ->first();
 
             if (! $vehiculo) {
-                throw new \InvalidArgumentException('El vehículo no existe.');
+                throw new \InvalidArgumentException('El vehículo no pertenece a la empresa o sede activa.');
             }
 
+            // La empresa es la del contexto (o la pasada por flujos internos);
+            // sin ninguna no se crea: antes caía a la empresa del vehículo y
+            // un flujo interno con un uuid arbitrario podía crear la
+            // solicitud en cualquier empresa.
             $empresa = $companyUuid
-                ?? request()->attributes->get('current_company_uuid')
-                ?? $vehiculo->company_uuid;
+                ?? request()->attributes->get('current_company_uuid');
 
-            if ($empresa && $vehiculo->company_uuid !== $empresa) {
+            if (! $empresa) {
+                throw new \InvalidArgumentException('No hay una empresa activa para crear la solicitud.');
+            }
+
+            if ($vehiculo->company_uuid !== $empresa) {
                 throw new \InvalidArgumentException('El vehículo no pertenece a la empresa activa.');
             }
 
@@ -220,16 +231,22 @@ class FuelRequestService extends BaseService
 
     public function expirarVencidas(?string $companyUuid = null): int
     {
-        $query = FuelRequest::withoutGlobalScopes()
-            ->where('status', 'APROBADA')
-            ->whereNotNull('expires_at')
-            ->where('expires_at', '<', now());
+        // Sin empresa explícita se usa la del contexto: el traspaso
+        // APROBADA→VENCIDA es una escritura y no debe tocar empresas ajenas
+        // (antes, listar o mostrar sin empresa vencía TODAS las empresas).
+        // Sin empresa resolvable no opera (devuelve 0).
+        $companyUuid ??= request()->attributes->get('current_company_uuid');
 
-        if ($companyUuid) {
-            $query->where('company_uuid', $companyUuid);
+        if (! $companyUuid) {
+            return 0;
         }
 
-        return $query->update(['status' => 'VENCIDA', 'updated_at' => now()]);
+        return FuelRequest::withoutGlobalScopes()
+            ->where('company_uuid', $companyUuid)
+            ->where('status', 'APROBADA')
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<', now())
+            ->update(['status' => 'VENCIDA', 'updated_at' => now()]);
     }
 
     // ─── Consultas ─────────────────────────────────────────────────────────
@@ -388,6 +405,14 @@ class FuelRequestService extends BaseService
     private function bloquear(string $uuid): FuelRequest
     {
         $companyUuid = request()->attributes->get('current_company_uuid');
+
+        // Falla cerrado: sin empresa activa nadie gestiona solicitudes, salvo
+        // un SUPERADMIN que opera en cualquier empresa. El `when()` anterior
+        // dejaba que un flujo interno sin contexto aprobara una solicitud
+        // ajena.
+        if (! $companyUuid && ! Auth::user()?->hasRole('SUPERADMIN')) {
+            throw new \InvalidArgumentException('Sin empresa activa no se pueden gestionar solicitudes de tanqueo.');
+        }
 
         $solicitud = FuelRequest::withoutGlobalScopes()
             ->where('uuid', $uuid)

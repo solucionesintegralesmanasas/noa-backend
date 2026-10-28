@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Services\ContractExtraction;
 
 use App\Models\Contractor;
+use App\Models\Fuec;
 use App\Services\BaseService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de Contratistas.
@@ -50,6 +53,15 @@ class ContractorService extends BaseService
     ): LengthAwarePaginator {
         $query = $this->query();
 
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
+
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
         }
@@ -70,15 +82,66 @@ class ContractorService extends BaseService
             });
         }
 
-        return $query->paginate($perPage, ['*'], 'page', $page);
+        return $this->conObjetoDeContrato($query->paginate($perPage, ['*'], 'page', $page));
+    }
+
+    /**
+     * Adjunta a cada contratista de la página el objeto del contrato de su último FUEC.
+     *
+     * La pantalla de registro de FUEC precarga los datos al digitar el número de
+     * documento y el objeto del contrato vive en `fuecs`, no en `contractors`:
+     * una consulta de máximo por contratista + una de los objetos, sin N+1.
+     */
+    private function conObjetoDeContrato(LengthAwarePaginator $contratistas): LengthAwarePaginator
+    {
+        $uuids = $contratistas->getCollection()->pluck('uuid')->all();
+
+        if ($uuids === []) {
+            return $contratistas;
+        }
+
+        $ultimoFuec = DB::table('fuec')
+            ->selectRaw('contractor_uuid, MAX(id) as id')
+            ->whereIn('contractor_uuid', $uuids)
+            ->groupBy('contractor_uuid')
+            ->pluck('id', 'contractor_uuid');
+
+        if ($ultimoFuec->isEmpty()) {
+            return $contratistas;
+        }
+
+        $objetos = DB::table('fuec')
+            ->whereIn('id', $ultimoFuec->values())
+            ->pluck('object_contract_uuid', 'contractor_uuid');
+
+        $contratistas->getCollection()->each(function (Contractor $contratante) use ($objetos): void {
+            $contratante->object_contract_uuid = $objetos[$contratante->uuid] ?? null;
+        });
+
+        return $contratistas;
     }
 
     /**
      * Método getAllContractors.
      */
-    public function getAllContractors(): Collection
+    public function getAllContractors(?string $companyUuid = null): Collection
     {
-        return $this->all();
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
+
+        $query = $this->query();
+
+        if ($companyUuid) {
+            $this->applyCompanyFilter($query, $companyUuid);
+        }
+
+        return $query->get();
     }
 
     /**
@@ -118,8 +181,12 @@ class ContractorService extends BaseService
     public function updateContractor(string $uuid, array $data): Model
     {
         return $this->transaction(function () use ($uuid, $data) {
-            /** @var Contractor $record */
-            $record = Contractor::query()->where('uuid', $uuid)->firstOrFail();
+            /** @var Contractor|null $record */
+            $record = $this->findByUuid($uuid);
+            if (! $record) {
+                throw (new ModelNotFoundException)->setModel(Contractor::class, [$uuid]);
+            }
+
             $record->update([
                 'company_uuid' => $data['company_uuid'] ?? $record->company_uuid,
                 'document_type_uuid' => $data['document_type_uuid'] ?? $record->document_type_uuid,
@@ -160,8 +227,12 @@ class ContractorService extends BaseService
     public function toggleContractorStatus(string $uuid): Model
     {
         return $this->transaction(function () use ($uuid) {
-            /** @var Contractor $record */
-            $record = Contractor::query()->where('uuid', $uuid)->firstOrFail();
+            /** @var Contractor|null $record */
+            $record = $this->findByUuid($uuid);
+            if (! $record) {
+                throw (new ModelNotFoundException)->setModel(Contractor::class, [$uuid]);
+            }
+
             $record->update([
                 'status' => $record->status === 1 ? 0 : 1,
             ]);

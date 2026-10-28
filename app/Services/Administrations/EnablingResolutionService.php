@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Services\Administrations;
 
+use App\Models\Company;
 use App\Models\EnablingResolution;
 use App\Services\BaseService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
@@ -33,6 +35,32 @@ class EnablingResolutionService extends BaseService
      */
     protected array $searchableFields = ['resolution_number'];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'company.business_name' => fn (Builder $query, string $direction) => $query->orderBy(
+                Company::query()
+                    ->select('business_name')
+                    ->whereColumn('companies.uuid', 'enabling_resolutions.company_uuid')
+                    ->take(1),
+                $direction
+            ),
+            'company' => fn (Builder $query, string $direction) => $query->orderBy(
+                Company::query()
+                    ->select('business_name')
+                    ->whereColumn('companies.uuid', 'enabling_resolutions.company_uuid')
+                    ->take(1),
+                $direction
+            ),
+            'resolution_number' => 'enabling_resolutions.resolution_number',
+            'number_fuec' => 'enabling_resolutions.number_fuec',
+            'territorial_code' => 'enabling_resolutions.territorial_code',
+            'resolution_date' => 'enabling_resolutions.resolution_date',
+            'status' => 'enabling_resolutions.status',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new EnablingResolution;
@@ -50,9 +78,19 @@ class EnablingResolutionService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        $paginator = $this->getPaginatedData($perPage, $page, $search, $companyUuid, self::RELATIONS);
+        $paginator = $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: self::RELATIONS,
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
 
         // Optimización de payload in-place
         $paginator->getCollection()->transform(fn ($er) => [

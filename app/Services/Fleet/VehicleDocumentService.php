@@ -8,11 +8,15 @@ use App\Exceptions\GeneralException;
 use App\Models\VehicleDocument;
 use App\Models\Vehicle;
 use App\Services\BaseService;
+use App\Services\Notifications\EmailLogService;
 use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de DocumentoVehiculo.
@@ -32,6 +36,26 @@ class VehicleDocumentService extends BaseService
      */
     protected array $searchableFields = ['policy_number', 'issuing_entity'];
 
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->sortableFields = [
+            'policy_number' => 'vehicle_documents.policy_number',
+            'document_type' => 'vehicle_documents.document_type',
+            'vehicle.vehicle_license_plate' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('vehicles')
+                    ->select('vehicles.vehicle_license_plate')
+                    ->whereColumn('vehicles.uuid', 'vehicle_documents.vehicle_uuid')
+                    ->limit(1),
+                $direction
+            ),
+            'issuing_entity' => 'vehicle_documents.issuing_entity',
+            'expiry_date' => 'vehicle_documents.expiry_date',
+            'status' => 'vehicle_documents.status',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new VehicleDocument;
@@ -47,7 +71,9 @@ class VehicleDocumentService extends BaseService
         ?string $companyUuid = null,
         ?string $documentType = null,
         ?string $thirdPartyUuid = null,
-        ?string $vehicleUuid = null
+        ?string $vehicleUuid = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with(['vehicle.thirdParty']);
 
@@ -68,7 +94,7 @@ class VehicleDocumentService extends BaseService
         if ($documentType) {
             $types = explode(',', $documentType);
             if (count($types) > 1) {
-                return $this->getGroupedVehicleDocumentPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $types);
+                return $this->getGroupedVehicleDocumentPagination($perPage, $page, $search, $companyUuid, $thirdPartyUuid, $types, $sortBy, $sortOrder);
             }
             $query->where('document_type', $documentType);
         }
@@ -83,6 +109,8 @@ class VehicleDocumentService extends BaseService
                 });
             });
         }
+
+        $this->applySorting($query, $sortBy, $sortOrder);
 
         $columns = [
             'uuid',
@@ -111,7 +139,9 @@ class VehicleDocumentService extends BaseService
         string $search,
         ?string $companyUuid,
         ?string $thirdPartyUuid,
-        array $types
+        array $types,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $vehicleQuery = Vehicle::query()
             ->whereExists(function ($q) use ($types, $companyUuid) {
@@ -140,6 +170,13 @@ class VehicleDocumentService extends BaseService
                             });
                     });
             });
+        }
+
+        $dir = strtolower((string) $sortOrder) === 'desc' ? 'desc' : 'asc';
+        if ($sortBy === 'vehicle.vehicle_license_plate' || $sortBy === 'vehicle_license_plate') {
+            $vehicleQuery->orderBy('vehicle_license_plate', $dir);
+        } else {
+            $vehicleQuery->orderBy('vehicle_license_plate', 'asc');
         }
 
         $vehicles = $vehicleQuery->paginate($perPage, ['uuid', 'vehicle_license_plate'], 'page', $page);
@@ -271,7 +308,7 @@ class VehicleDocumentService extends BaseService
     {
         $this->asegurarQueElVehiculoAdmite($data['vehicle_uuid'] ?? null, $data['document_type'] ?? null);
 
-        return $this->transaction(function () use ($data) {
+        $document = $this->transaction(function () use ($data) {
             // Marcar documentos anteriores del mismo tipo como INACTIVA
             VehicleDocument::where('vehicle_uuid', $data['vehicle_uuid'])
                 ->where('document_type', $data['document_type'])
@@ -310,6 +347,12 @@ class VehicleDocumentService extends BaseService
 
             return $document;
         });
+
+        // Disparador inmediato: si el documento se registra ya vencido (o vence
+        // hoy), se avisa por correo sin esperar a la franja del digest.
+        app(EmailLogService::class)->notifyExpiredNowSafe($document);
+
+        return $document;
     }
 
     /**
@@ -317,8 +360,13 @@ class VehicleDocumentService extends BaseService
      */
     public function updateVehicleDocument(string $uuid, array $data): Model
     {
-        return $this->transaction(function () use ($uuid, $data) {
+        $vencimientoAnterior = null;
+
+        $document = $this->transaction(function () use ($uuid, $data, &$vencimientoAnterior) {
             $record = $this->findByUuid($uuid);
+            $vencimientoAnterior = $record->expiry_date
+                ? Carbon::parse($record->expiry_date)->startOfDay()
+                : null;
 
             // Solo si cambia el vehículo o el tipo: el historial existente se puede seguir editando.
             $vehiculo = $data['vehicle_uuid'] ?? $record->vehicle_uuid;
@@ -356,6 +404,12 @@ class VehicleDocumentService extends BaseService
 
             return $record->fresh();
         });
+
+        // Disparador inmediato: solo cuando el documento pasa de vigente a
+        // vencido (o vence hoy) con esta edición; si ya estaba vencido no repite.
+        app(EmailLogService::class)->notifyExpiredNowSafe($document, $vencimientoAnterior);
+
+        return $document;
     }
 
     /**

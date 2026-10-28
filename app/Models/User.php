@@ -18,7 +18,69 @@ use Spatie\Permission\Traits\HasRoles;
 
 class User extends Authenticatable implements TwoFactorAuthenticatable
 {
-    use HasApiTokens, HasFactory, HasRoles, HasUuid, LogsActivity, Notifiable, TwoFactorAuthentication;
+    use HasApiTokens, HasFactory, HasUuid, LogsActivity, Notifiable, TwoFactorAuthentication;
+    use HasRoles {
+        hasRole as spatieHasRole;
+    }
+
+    /**
+     * Mapa de alias canónicos de roles para evitar discrepancias de vocabulario (Issue #1).
+     * Mapea alias comunes ('administrador', 'admin', 'super-admin') a sus nombres oficiales.
+     */
+    public const ROLE_ALIASES = [
+        'ADMINISTRADOR' => 'ADMIN_EMPRESA',
+        'ADMIN' => 'ADMIN_EMPRESA',
+        'ADMIN_EMPRESA' => 'ADMIN_EMPRESA',
+        'ADMINEMPRESA' => 'ADMIN_EMPRESA',
+        'SUPER_ADMIN' => 'SUPERADMIN',
+        'SUPER-ADMIN' => 'SUPERADMIN',
+        'SUPERADMIN' => 'SUPERADMIN',
+    ];
+
+    /**
+     * Normaliza un nombre de rol a su identificador canónico del sistema.
+     */
+    public static function normalizeRoleName(string $role): string
+    {
+        $normalized = strtoupper(trim(str_replace(['-', ' '], '_', $role)));
+        $sinGuiones = strtoupper(trim(str_replace(['-', '_', ' '], '', $role)));
+
+        return self::ROLE_ALIASES[$sinGuiones] ?? (self::ROLE_ALIASES[$normalized] ?? $normalized);
+    }
+
+    /**
+     * Sobrescribe hasRole de Spatie para soportar alias canónicos (Issue #1).
+     * Garantiza que hasRole('administrador'), hasRole('admin') y hasRole('ADMIN_EMPRESA')
+     * resuelvan exactamente lo mismo.
+     *
+     * @param string|int|array|\Spatie\Permission\Contracts\Role|\Illuminate\Support\Collection $roles
+     * @param string|null $guard
+     * @return bool
+     */
+    public function hasRole($roles, string $guard = null): bool
+    {
+        if (is_string($roles)) {
+            $canonical = self::normalizeRoleName($roles);
+            if ($this->spatieHasRole($canonical, $guard)) {
+                return true;
+            }
+            return $canonical !== $roles && $this->spatieHasRole($roles, $guard);
+        }
+
+        if (is_array($roles) || $roles instanceof \Illuminate\Support\Collection) {
+            $normalizedRoles = collect($roles)->flatMap(function ($r) {
+                if (is_string($r)) {
+                    $canon = self::normalizeRoleName($r);
+                    return $canon !== $r ? [$canon, $r] : [$r];
+                }
+                return [$r];
+            })->unique()->all();
+
+            return $this->spatieHasRole($normalizedRoles, $guard);
+        }
+
+        return $this->spatieHasRole($roles, $guard);
+    }
 
     protected string $guard_name = 'api';
 

@@ -32,6 +32,16 @@ class VehicleClassService extends BaseService
      */
     protected array $searchableFields = ['class_code_class', 'description'];
 
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->sortableFields = [
+            'class_code_class' => 'vehicle_class.class_code_class',
+            'description' => 'vehicle_class.description',
+        ];
+    }
+
     protected function getModelInstance(): Model
     {
         return new VehicleClass;
@@ -44,9 +54,11 @@ class VehicleClassService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, [], ['uuid', 'class_code_class', 'description']);
+        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, [], ['uuid', 'class_code_class', 'description'], $sortBy, $sortOrder);
     }
 
     /**

@@ -43,6 +43,8 @@ class ThirdPartyController extends Controller
             new OA\Parameter(name: 'company_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'search', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
             new OA\Parameter(name: 'type', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['is_customer', 'is_supplier', 'is_employee', 'is_affiliate', 'is_driver', 'is_others'])),
+            new OA\Parameter(name: 'sort_by', in: 'query', required: false, description: 'Campo visible de la columna (lista blanca del servicio).', schema: new OA\Schema(type: 'string', enum: ['document_number', 'trade_name', 'email', 'branch.name', 'is_active'])),
+            new OA\Parameter(name: 'sort_order', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['asc', 'desc'], default: 'asc')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
@@ -58,8 +60,18 @@ class ThirdPartyController extends Controller
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid');
             $type = $request->query('type');
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order');
 
-            $data = $this->thirdPartyService->getAllThirdPartiesWithPagination($perPage, $page, $search, $companyUuid, $type);
+            $data = $this->thirdPartyService->getAllThirdPartiesWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                $type,
+                is_string($sortBy) ? $sortBy : null,
+                is_string($sortOrder) ? $sortOrder : null
+            );
 
             return $this->successResponse($data, 'Listado paginado de Tercero recuperado con éxito.');
         } catch (\Throwable $e) {
@@ -250,6 +262,11 @@ class ThirdPartyController extends Controller
                     new OA\Property(property: 'address', type: 'string', nullable: true),
                     new OA\Property(property: 'municipality_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'branch_uuid', type: 'string', format: 'uuid', description: 'Sucursal del tercero (obligatoria en la práctica)'),
+                    new OA\Property(property: 'id_card_issue_place_uuid', type: 'string', format: 'uuid', nullable: true, description: 'Ciudad de expedición de la cédula (obligatoria para persona NATURAL)'),
+                    new OA\Property(property: 'id_card_issue_date', type: 'string', format: 'date', nullable: true, description: 'Fecha de expedición de la cédula (obligatoria para persona NATURAL)'),
+                    new OA\Property(property: 'sex', type: 'string', enum: ['M', 'F', 'O'], nullable: true, description: 'Sexo (obligatorio para persona NATURAL)'),
+                    new OA\Property(property: 'marital_status', type: 'string', enum: ['SOLTERO', 'CASADO', 'UNION_LIBRE', 'SEPARADO', 'DIVORCIADO', 'VIUDO'], nullable: true, description: 'Estado civil (obligatorio para persona NATURAL)'),
+                    new OA\Property(property: 'blood_type', type: 'string', enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], nullable: true, description: 'Grupo sanguíneo (obligatorio para persona NATURAL)'),
                     new OA\Property(property: 'tax_regime', type: 'string'),
                     new OA\Property(property: 'tax_responsibility_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'bank_account_number', type: 'string', nullable: true),
@@ -325,6 +342,11 @@ class ThirdPartyController extends Controller
                     new OA\Property(property: 'address', type: 'string', nullable: true),
                     new OA\Property(property: 'municipality_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'branch_uuid', type: 'string', format: 'uuid', description: 'Sucursal del tercero (obligatoria en la práctica)'),
+                    new OA\Property(property: 'id_card_issue_place_uuid', type: 'string', format: 'uuid', nullable: true, description: 'Ciudad de expedición de la cédula (obligatoria para persona NATURAL)'),
+                    new OA\Property(property: 'id_card_issue_date', type: 'string', format: 'date', nullable: true, description: 'Fecha de expedición de la cédula (obligatoria para persona NATURAL)'),
+                    new OA\Property(property: 'sex', type: 'string', enum: ['M', 'F', 'O'], nullable: true, description: 'Sexo (obligatorio para persona NATURAL)'),
+                    new OA\Property(property: 'marital_status', type: 'string', enum: ['SOLTERO', 'CASADO', 'UNION_LIBRE', 'SEPARADO', 'DIVORCIADO', 'VIUDO'], nullable: true, description: 'Estado civil (obligatorio para persona NATURAL)'),
+                    new OA\Property(property: 'blood_type', type: 'string', enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], nullable: true, description: 'Grupo sanguíneo (obligatorio para persona NATURAL)'),
                     new OA\Property(property: 'tax_regime', type: 'string'),
                     new OA\Property(property: 'tax_responsibility_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'bank_account_number', type: 'string', nullable: true),

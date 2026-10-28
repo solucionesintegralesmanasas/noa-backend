@@ -71,6 +71,8 @@ class ServiceControlSheetRowsTest extends TestCase
             firmasRuta: $extras['firmasRuta'] ?? fn ($hoja, $route) => ['funcionario' => 'BASE64_RUTA', 'conductor' => null],
             numeroEntero: $extras['numeroEntero'] ?? true,
             conRutasDetalle: $extras['conRutasDetalle'] ?? true,
+            firmaCoordinador: $extras['firmaCoordinador'] ?? null,
+            firmaConductor: $extras['firmaConductor'] ?? null,
         );
     }
 
@@ -109,6 +111,64 @@ class ServiceControlSheetRowsTest extends TestCase
         $this->assertSame('BASE64_HOJA', $resultado['dias'][0]['firma_funcionario']);
     }
 
+    public function test_sin_firma_de_funcionario_la_fila_usa_la_del_coordinador(): void
+    {
+        $hoja = $this->hoja([], [$this->ruta()]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones([
+            'firmaHoja' => fn () => null,
+            'firmasRuta' => fn () => ['funcionario' => null, 'conductor' => null],
+            'firmaCoordinador' => fn () => 'BASE64_COORDINADOR',
+        ]));
+
+        $this->assertSame('BASE64_COORDINADOR', $resultado['dias'][0]['firma_funcionario']);
+    }
+
+    public function test_la_firma_del_funcionario_tiene_prioridad_sobre_la_del_coordinador(): void
+    {
+        $hoja = $this->hoja([], [$this->ruta()]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones([
+            'firmaCoordinador' => fn () => 'BASE64_COORDINADOR',
+        ]));
+
+        $this->assertSame('BASE64_RUTA', $resultado['dias'][0]['firma_funcionario']);
+    }
+
+    public function test_la_fila_muestra_la_firma_del_conductor_del_recorrido(): void
+    {
+        $hoja = $this->hoja([], [$this->ruta()]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones([
+            'firmasRuta' => fn () => ['funcionario' => 'BASE64_RUTA', 'conductor' => 'BASE64_CONDUCTOR_RUTA'],
+            'firmaConductor' => fn () => 'BASE64_CONDUCTOR_HOJA',
+        ]));
+
+        $this->assertSame('BASE64_CONDUCTOR_RUTA', $resultado['dias'][0]['firma_conductor_recorrido']);
+    }
+
+    public function test_sin_firma_de_conductor_del_recorrido_usa_la_de_la_hoja(): void
+    {
+        $hoja = $this->hoja([], [$this->ruta()]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones([
+            'firmaConductor' => fn () => 'BASE64_CONDUCTOR_HOJA',
+        ]));
+
+        $this->assertSame('BASE64_CONDUCTOR_HOJA', $resultado['dias'][0]['firma_conductor_recorrido']);
+    }
+
+    public function test_disponibilidad_tambien_muestra_la_firma_del_conductor(): void
+    {
+        $hoja = $this->hoja(['day_kind' => 'disponibilidad', 'daily_route' => null], []);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones([
+            'firmaConductor' => fn () => 'BASE64_CONDUCTOR_HOJA',
+        ]));
+
+        $this->assertSame('BASE64_CONDUCTOR_HOJA', $resultado['dias'][0]['firma_conductor_recorrido']);
+    }
+
     public function test_disponibilidad_imprime_motivo_y_sin_firma_funcionario(): void
     {
         $hoja = $this->hoja([
@@ -140,6 +200,35 @@ class ServiceControlSheetRowsTest extends TestCase
         $this->assertSame('05', $texto['dias'][0]['numero']);
     }
 
+    public function test_totales_se_suman_por_hoja_y_no_por_recorrido(): void
+    {
+        // Dos hojas; la primera con dos recorridos. El consolidado debe contar
+        // 2 días y sumar horas/km una sola vez por hoja (no por fila).
+        $hojaUno = $this->hoja([
+            'id' => 1,
+            'total_hours' => Carbon::parse('2026-09-20 11:30:00'),
+            'starting_kilometer' => '10000',
+            'ending_kilometer' => '10300',
+        ], [$this->ruta(['id' => 1]), $this->ruta(['id' => 2])]);
+        $hojaDos = $this->hoja([
+            'id' => 2,
+            'service_date' => '2026-09-21',
+            'is_active' => true,
+            'total_hours' => Carbon::parse('2026-09-21 08:00:00'),
+            'starting_kilometer' => '10300',
+            'ending_kilometer' => '10450',
+        ]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hojaUno, $hojaDos], $this->opciones());
+
+        $this->assertCount(3, $resultado['dias']);
+        $this->assertSame(2, $resultado['totales']['dias']);
+        $this->assertSame(1, $resultado['totales']['dias_cerrados']);
+        $this->assertSame(19 * 60 + 30, $resultado['totales']['horas_minutos']);
+        $this->assertSame('19:30', $resultado['totales']['horas']);
+        $this->assertSame(450.0, $resultado['totales']['km']);
+    }
+
     public function test_novedad_excusa_hora_y_km_sin_borrar_firmas(): void
     {
         $hoja = $this->hoja([], [$this->ruta([
@@ -156,5 +245,79 @@ class ServiceControlSheetRowsTest extends TestCase
         $this->assertSame('10300', $fila['km_final']);
         $this->assertSame('300', $fila['km_total']);
         $this->assertStringContainsString('Novedad: Vía cerrada por derrumbe', $fila['detalle_cierre']);
+    }
+
+    public function test_km_total_se_calcula_por_tramo_y_no_acumulado(): void
+    {
+        // Hoja 900 → 1200 con dos recorridos que cierran en 1000 y 1200.
+        $hoja = $this->hoja([
+            'starting_kilometer' => '900',
+            'ending_kilometer' => '1200',
+        ], [
+            $this->ruta(['id' => 1, 'ending_kilometer' => '1000']),
+            $this->ruta(['id' => 2, 'ending_kilometer' => '1200']),
+        ]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones());
+
+        $this->assertSame('900', $resultado['dias'][0]['km_inicial']);
+        $this->assertSame('1000', $resultado['dias'][0]['km_final']);
+        $this->assertSame('100', $resultado['dias'][0]['km_total']);
+        $this->assertSame('1000', $resultado['dias'][1]['km_inicial']);
+        $this->assertSame('1200', $resultado['dias'][1]['km_final']);
+        $this->assertSame('200', $resultado['dias'][1]['km_total']);
+        $this->assertSame(300.0, $resultado['totales']['km']);
+    }
+
+    public function test_turno_mayor_a_24_horas_no_rompe_el_pdf(): void
+    {
+        $hoja = $this->hoja(['id' => 2, 'is_active' => true]);
+        $hoja->setRawAttributes(array_merge($hoja->getAttributes(), ['total_hours' => '25:30:00']));
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones());
+
+        $this->assertSame('25:30', $resultado['dias'][0]['total_hours']);
+        $this->assertSame((25 * 60) + 30, $resultado['totales']['horas_minutos']);
+        $this->assertSame('25:30', $resultado['totales']['horas']);
+    }
+
+    public function test_kilometraje_invertido_no_muestra_negativos(): void
+    {
+        $hoja = $this->hoja([
+            'starting_kilometer' => '1200',
+            'ending_kilometer' => '900',
+        ]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones());
+
+        $this->assertSame('0', $resultado['dias'][0]['km_total']);
+        $this->assertSame(0.0, $resultado['totales']['km']);
+    }
+
+    public function test_el_descanso_conserva_su_calculo_actual(): void
+    {
+        // 06:00–18:00 con 11:00 trabajadas: 1 hora de descanso (la semántica
+        // del descanso calculado no se cambia en esta corrección).
+        $hoja = $this->hoja();
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones());
+
+        $this->assertSame('12:00', $resultado['dias'][0]['descanso_inicio']);
+        $this->assertSame('13:00', $resultado['dias'][0]['descanso_fin']);
+    }
+
+    public function test_kilometraje_con_separador_de_miles_se_interpreta_bien(): void
+    {
+        $hoja = $this->hoja([
+            'starting_kilometer' => '12.000',
+            'ending_kilometer' => '12.345',
+        ]);
+
+        $resultado = app(ServiceControlSheetRows::class)->armarDias([$hoja], $this->opciones());
+
+        $this->assertSame('12000', $resultado['dias'][0]['km_inicial']);
+        $this->assertSame('12345', $resultado['dias'][0]['km_final']);
+        $this->assertSame('345', $resultado['dias'][0]['km_total']);
+        $this->assertSame(345.0, $resultado['totales']['km']);
     }
 }

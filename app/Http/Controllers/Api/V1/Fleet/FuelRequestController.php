@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\Fleet;
 use App\Http\Controllers\Controller;
 use App\Models\FuelRequest;
 use App\Models\User;
+use App\Models\Vehicle;
 use App\Services\Fleet\FuelRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,7 +62,18 @@ class FuelRequestController extends Controller
     {
         try {
             $data = $request->validate([
-                'vehicle_uuid' => ['required', 'uuid', 'exists:vehicles,uuid'],
+                // Con scopes: un vehículo de otra empresa o sede no existe
+                // aquí. Antes solo comprobaba `exists` pelado y el servicio
+                // era el único control (falla abierta sin contexto).
+                'vehicle_uuid' => [
+                    'required',
+                    'uuid',
+                    function (string $atributo, mixed $valor, \Closure $fallo) {
+                        if (! Vehicle::query()->where('uuid', (string) $valor)->exists()) {
+                            $fallo('El vehículo no pertenece a la empresa o sede activa.');
+                        }
+                    },
+                ],
                 'driver_uuid' => ['nullable', 'uuid', 'exists:third_parties,uuid'],
                 'notes' => ['nullable', 'string', 'max:500'],
             ]);

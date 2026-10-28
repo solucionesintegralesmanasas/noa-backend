@@ -10,10 +10,13 @@ use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use App\Services\Fleet\DriverLicenseService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 
@@ -45,6 +48,22 @@ class ThirdPartyService extends BaseService
         protected DriverLicenseService $driverLicenseService
     ) {
         parent::__construct();
+
+        $this->sortableFields = [
+            'document_number' => 'third_parties.document_number',
+            'trade_name' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::raw("COALESCE(NULLIF(third_parties.trade_name, ''), NULLIF(third_parties.company_name, ''), CONCAT(third_parties.first_name, ' ', third_parties.last_name))"),
+                $direction
+            ),
+            'email' => 'third_parties.email',
+            'branch.name' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('branches')
+                    ->select('branches.name')
+                    ->whereColumn('branches.uuid', 'third_parties.branch_uuid'),
+                $direction
+            ),
+            'is_active' => 'third_parties.is_active',
+        ];
     }
 
     /**
@@ -63,7 +82,9 @@ class ThirdPartyService extends BaseService
         int $page = 1,
         string $search = '',
         ?string $companyUuid = null,
-        ?string $type = null
+        ?string $type = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query()->with(['driverLicenses', 'branch:uuid,name']);
 
@@ -96,10 +117,13 @@ class ThirdPartyService extends BaseService
             $query->where($type, true);
         }
 
+        $this->applySorting($query, $sortBy, $sortOrder);
+
         $paginator = $query->paginate($perPage, [
             'uuid',
             'document_number',
             'nit_check_digit',
+            'trade_name',
             'company_name',
             'first_name',
             'last_name',
@@ -141,7 +165,11 @@ class ThirdPartyService extends BaseService
             return [
                 'uuid' => $tp->uuid,
                 'document_number' => $tp->document_number,
-                'full_name' => $tp->company_name ?: "{$tp->first_name} {$tp->last_name}",
+                'trade_name' => $tp->trade_name,
+                'company_name' => $tp->company_name,
+                'first_name' => $tp->first_name,
+                'last_name' => $tp->last_name,
+                'full_name' => $tp->trade_name ?: ($tp->company_name ?: trim("{$tp->first_name} {$tp->last_name}")),
                 'email' => $tp->email,
                 'phone' => $tp->phone,
                 'branch_uuid' => $tp->branch_uuid,
@@ -224,7 +252,7 @@ class ThirdPartyService extends BaseService
         $record = $this->findByUuid($uuid);
 
         if ($record) {
-            $record->load('branch:uuid,name');
+            $record->load('branch:uuid,name', 'idCardIssuePlace:uuid,name', 'birthPlace:uuid,name');
             $this->appendLinkedRoles($record);
         }
 
@@ -270,6 +298,13 @@ class ThirdPartyService extends BaseService
                 'address' => $data['address'] ?? null,
                 'municipality_uuid' => $data['municipality_uuid'],
                 'branch_uuid' => $data['branch_uuid'] ?? null,
+                'birth_place_uuid' => $data['birth_place_uuid'] ?? null,
+                'birth_date' => $data['birth_date'] ?? null,
+                'id_card_issue_place_uuid' => $data['id_card_issue_place_uuid'] ?? null,
+                'id_card_issue_date' => $data['id_card_issue_date'] ?? null,
+                'sex' => $data['sex'] ?? null,
+                'marital_status' => $data['marital_status'] ?? null,
+                'blood_type' => $data['blood_type'] ?? null,
                 'tax_regime' => $data['tax_regime'],
                 'tax_responsibility_uuid' => $data['tax_responsibility_uuid'],
                 'bank_account_number' => $data['bank_account_number'] ?? null,
@@ -554,7 +589,7 @@ class ThirdPartyService extends BaseService
             $record = $this->findByUuid($uuid);
 
             if (! $record) {
-                throw new \RuntimeException('ThirdParty not found.');
+                throw (new ModelNotFoundException)->setModel(ThirdParty::class, [$uuid]);
             }
 
             $this->asegurarCorreoLibreDeOtroTercero((string) ($data['email'] ?? $record->email), (string) $record->company_uuid, $record->uuid);
@@ -573,6 +608,17 @@ class ThirdPartyService extends BaseService
                 'address' => $data['address'] ?? $record->address,
                 'municipality_uuid' => $data['municipality_uuid'] ?? $record->municipality_uuid,
                 'branch_uuid' => array_key_exists('branch_uuid', $data) ? $data['branch_uuid'] : $record->branch_uuid,
+                'birth_place_uuid' => array_key_exists('birth_place_uuid', $data)
+                    ? $data['birth_place_uuid'] : $record->birth_place_uuid,
+                'birth_date' => array_key_exists('birth_date', $data)
+                    ? $data['birth_date'] : $record->birth_date,
+                'id_card_issue_place_uuid' => array_key_exists('id_card_issue_place_uuid', $data)
+                    ? $data['id_card_issue_place_uuid'] : $record->id_card_issue_place_uuid,
+                'id_card_issue_date' => array_key_exists('id_card_issue_date', $data)
+                    ? $data['id_card_issue_date'] : $record->id_card_issue_date,
+                'sex' => array_key_exists('sex', $data) ? $data['sex'] : $record->sex,
+                'marital_status' => array_key_exists('marital_status', $data) ? $data['marital_status'] : $record->marital_status,
+                'blood_type' => array_key_exists('blood_type', $data) ? $data['blood_type'] : $record->blood_type,
                 'tax_regime' => $data['tax_regime'] ?? $record->tax_regime,
                 'tax_responsibility_uuid' => $data['tax_responsibility_uuid'] ?? $record->tax_responsibility_uuid,
                 'bank_account_number' => $data['bank_account_number'] ?? $record->bank_account_number,
@@ -627,7 +673,7 @@ class ThirdPartyService extends BaseService
     public function deleteThirdParty(string $uuid): void
     {
         if (! $this->delete($uuid)) {
-            throw new \RuntimeException('Failed to delete ThirdParty.');
+            throw (new ModelNotFoundException)->setModel(ThirdParty::class, [$uuid]);
         }
     }
 
@@ -637,7 +683,7 @@ class ThirdPartyService extends BaseService
     public function toggleStatusThirdParty(string $uuid): Model
     {
         if (! $this->toggleStatus($uuid, 'is_active')) {
-            throw new \RuntimeException('Failed to toggle status for ThirdParty.');
+            throw (new ModelNotFoundException)->setModel(ThirdParty::class, [$uuid]);
         }
 
         return $this->findByUuid($uuid);
@@ -655,6 +701,7 @@ class ThirdPartyService extends BaseService
                 'company.media',
                 'documentType',
                 'municipality.department',
+                'idCardIssuePlace:uuid,name',
                 'branch:uuid,name',
                 'driverLicenses' => function ($q) {
                     $q->orderBy('created_at', 'desc');
@@ -664,6 +711,8 @@ class ThirdPartyService extends BaseService
                     $q->orderByDesc('start_date');
                 },
             ]);
+
+        $this->aislarPorAfiliado($query);
 
         $record = $query->where('uuid', $thirdPartyUuid)->firstOrFail();
 

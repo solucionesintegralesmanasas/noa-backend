@@ -49,6 +49,12 @@ class ServiceDeliveryControlSheetService extends BaseService
         'daily_route',
     ];
 
+    protected array $sortableFields = [
+        'vehicle_license_plate',
+        'start_date',
+        'service_date',
+    ];
+
     protected function getModelInstance(): Model
     {
         return new ServiceDeliveryControlSheet;
@@ -60,7 +66,11 @@ class ServiceDeliveryControlSheetService extends BaseService
         string $search = '',
         ?string $companyUuid = null,
         ?string $projectUuid = null,
-        bool $soloCerradas = false
+        bool $soloCerradas = false,
+        bool $agruparPorProyecto = false,
+        ?string $estadoFiltro = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'desc'
     ): LengthAwarePaginator {
         $query = $this->query()
             ->whereNull('parent_uuid')
@@ -75,7 +85,9 @@ class ServiceDeliveryControlSheetService extends BaseService
         // vigente.
         $query->where('retirada_de_proyecto', false);
 
-        if ($soloCerradas) {
+        $this->aplicarFiltroConductor($query, $companyUuid);
+
+        if ($estadoFiltro === 'cerradas' || ($estadoFiltro === null && $soloCerradas)) {
             // Solo fechas cerradas que imprimen PDF:
             // - Un día: padre sin hijos y con is_active=false.
             // - Multi-día: padre con al menos un hijo cerrado (aunque el padre siga parcial).
@@ -85,6 +97,50 @@ class ServiceDeliveryControlSheetService extends BaseService
                     $qq->where('is_active', false)
                         ->whereDoesntHave('children', fn ($c) => $c->where('is_active', true));
                 })->orWhereHas('children', fn ($c) => $c->where('is_active', false));
+            });
+        } elseif ($estadoFiltro === 'en_curso') {
+            $query->where(function ($q) {
+                $q->where('is_active', true)
+                    ->orWhereHas('children', fn ($c) => $c->where('is_active', true));
+            });
+        } elseif ($estadoFiltro === 'con_pendientes') {
+            $subconsultaCertificado = static function ($sub, string $columnaId): void {
+                $sub->selectRaw('1')
+                    ->from('signatures')
+                    ->whereColumn('signatures.entity_id', $columnaId)
+                    ->where('signatures.entity_type', PcpEvidence::ENTITY_COORDINADOR)
+                    ->where('signatures.signer_role', Signature::ROL_COORDINADOR)
+                    ->where('signatures.status', Signature::STATUS_VIGENTE);
+            };
+
+            $query->where(function ($q) use ($subconsultaCertificado) {
+                // Caso 1: Planilla de un solo día (sin hijos)
+                $q->where(function ($single) use ($subconsultaCertificado) {
+                    $single->whereDoesntHave('children')
+                        ->where(function ($cond) use ($subconsultaCertificado) {
+                            $cond->where('is_active', true)
+                                ->orWhere(function ($closed) use ($subconsultaCertificado) {
+                                    $closed->where(fn ($ex) => $ex->whereNull('exception_reason')->orWhere('exception_reason', ''))
+                                        ->where(function ($inc) use ($subconsultaCertificado) {
+                                            $inc->whereNull('end_time')
+                                                ->orWhereNull('ending_kilometer')
+                                                ->orWhereNotExists(fn ($sub) => $subconsultaCertificado($sub, 'service_delivery_control_sheet.id'));
+                                        });
+                                });
+                        });
+                })
+                // Caso 2: Planilla multi-día (con hijos) -> al menos un hijo con pendientes
+                ->orWhereHas('children', function ($child) use ($subconsultaCertificado) {
+                    $child->where('is_active', true)
+                        ->orWhere(function ($closed) use ($subconsultaCertificado) {
+                            $closed->where(fn ($ex) => $ex->whereNull('exception_reason')->orWhere('exception_reason', ''))
+                                ->where(function ($inc) use ($subconsultaCertificado) {
+                                    $inc->whereNull('end_time')
+                                        ->orWhereNull('ending_kilometer')
+                                        ->orWhereNotExists(fn ($sub) => $subconsultaCertificado($sub, 'service_delivery_control_sheet.id'));
+                                });
+                        });
+                });
             });
         }
 
@@ -107,7 +163,42 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
                 // Buscar también por nombre de proyecto
                 $q->orWhereHas('project', fn ($pq) => $pq->where('project_name', 'like', "%{$search}%"));
+                // ...por placa y conductor (vehículo interno o subcontratado).
+                $q->orWhereHas('internalControl', function ($ic) use ($search) {
+                    $ic->whereHas('vehicle', fn ($v) => $v->where('vehicle_license_plate', 'like', "%{$search}%"))
+                        ->orWhereHas('thirdParty', fn ($t) => $t->where('first_name', 'like', "%{$search}%")
+                            ->orWhere('last_name', 'like', "%{$search}%")
+                            ->orWhere('company_name', 'like', "%{$search}%")
+                            ->orWhere('trade_name', 'like', "%{$search}%"));
+                });
+                $q->orWhereHas('subcontractedControl', fn ($sc) => $sc->where('vehicle_license_plate', 'like', "%{$search}%")
+                    ->orWhere('driver_name_and_surname', 'like', "%{$search}%"));
             });
+        }
+
+        $direction = strtolower($sortOrder) === 'asc' ? 'ASC' : 'DESC';
+
+        if ($sortBy !== null && in_array($sortBy, $this->sortableFields, true)) {
+            if ($sortBy === 'vehicle_license_plate') {
+                $query->orderByRaw(
+                    "COALESCE(
+                        (SELECT v.vehicle_license_plate FROM service_internal_controls sic JOIN vehicles v ON v.uuid = sic.vehicle_uuid WHERE sic.service_delivery_control_sheet_uuid = service_delivery_control_sheet.uuid LIMIT 1),
+                        (SELECT sics.vehicle_license_plate FROM service_internal_controls_subcontracted sics WHERE sics.service_delivery_control_sheet_uuid = service_delivery_control_sheet.uuid LIMIT 1)
+                    ) {$direction}"
+                );
+            } else {
+                $query->orderByRaw("COALESCE(service_delivery_control_sheet.start_date, service_delivery_control_sheet.service_date) {$direction}");
+            }
+        } elseif ($agruparPorProyecto) {
+            // Agrupación por proyecto: la paginación es del servidor, así que el orden
+            // por nombre de proyecto mantiene juntas las filas de cada grupo.
+            $query->orderBy(Project::query()->select('project_name')
+                ->whereColumn('projects.uuid', 'service_delivery_control_sheet.project_uuid')
+                ->limit(1))
+                ->orderByDesc('service_delivery_control_sheet.service_date');
+        } else {
+            $query->orderByRaw('COALESCE(service_delivery_control_sheet.start_date, service_delivery_control_sheet.service_date) DESC')
+                ->orderByDesc('service_delivery_control_sheet.id');
         }
 
         $paginator = $query->paginate($perPage, ['*'], 'page', $page);
@@ -130,14 +221,151 @@ class ServiceDeliveryControlSheetService extends BaseService
         return $this->evidencia->resumenProyecto($projectUuid);
     }
 
+    /**
+     * Resumen en lote de todos los proyectos activos de la empresa/conductor.
+     * Alimenta el selector/switcher de tarjetas de proyectos sin disparar N peticiones.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function getProjectsOverview(?string $companyUuid = null, ?string $thirdPartyUuid = null): array
+    {
+        $resolvedThirdParty = $thirdPartyUuid ?? $this->conductorThirdPartyUuid($companyUuid);
+        if ($resolvedThirdParty === null) {
+            return [];
+        }
+
+        $projectQuery = Project::query()
+            ->withCount(['driverVehicleAssignments as assignments_count' => fn ($q) => $q->active()])
+            ->orderBy('project_name');
+
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid')
+                ?? Auth::user()?->companies()->first()?->uuid;
+        }
+
+        if ($companyUuid) {
+            $projectQuery->where('company_uuid', $companyUuid);
+        }
+
+        if ($resolvedThirdParty !== false) {
+            $projectQuery->whereHas('driverVehicleAssignments', fn ($q) => $q->active()->where('third_party_uuid', $resolvedThirdParty));
+        }
+
+        $projects = $projectQuery->get([
+            'uuid',
+            'company_uuid',
+            'project_name',
+            'start_date',
+            'completion_date',
+            'project_value',
+            'purchase_order',
+        ]);
+
+        if ($projects->isEmpty()) {
+            return [];
+        }
+
+        $projectUuids = $projects->pluck('uuid')->all();
+        $filtroConductor = null;
+        if ($resolvedThirdParty !== false) {
+            $filtroConductor = function ($q) use ($resolvedThirdParty) {
+                $q->where(function ($sub) use ($resolvedThirdParty) {
+                    $sub->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $resolvedThirdParty))
+                        ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $resolvedThirdParty));
+                });
+            };
+        }
+
+        $summaries = $this->evidencia->resumenProyectosEnLote($projectUuids, $filtroConductor);
+
+        return $projects->map(function (Project $p) use ($summaries) {
+            $summary = $summaries[$p->uuid] ?? [
+                'total_planillas' => 0,
+                'total_dias' => 0,
+                'cerrados' => 0,
+                'en_curso' => 0,
+                'evidencia_incompleta' => 0,
+                'pendiente_certificacion' => 0,
+                'excepciones' => 0,
+                'certificados' => 0,
+                'porcentaje_al_dia' => 100,
+            ];
+
+            return [
+                'uuid' => $p->uuid,
+                'company_uuid' => $p->company_uuid,
+                'project_name' => $p->project_name,
+                'start_date' => $p->start_date?->toDateString(),
+                'completion_date' => $p->completion_date?->toDateString(),
+                'assignments_count' => (int) ($p->assignments_count ?? 0),
+                'summary' => $summary,
+            ];
+        })->all();
+    }
+
     public function getAllServiceDeliveryControlSheets(): Collection
     {
         // SPEC-009: igual que el listado paginado, excluye las retiradas.
-        return $this->query()
+        $query = $this->query()
             ->whereNull('parent_uuid')
             ->where('retirada_de_proyecto', false)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl'])
-            ->get();
+            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+
+        $this->aplicarFiltroConductor($query);
+
+        return $query->get();
+    }
+
+    /**
+     * Si el usuario autenticado es CONDUCTOR (y no un rol administrativo/afiliado),
+     * restringe las planillas a las suyas: aquellas cuyo control interno (o el de
+     * alguno de sus días hijos) está asignado a su tercero. Sin tercero asociado
+     * no devuelve nada.
+     */
+    private function aplicarFiltroConductor($query, ?string $companyUuid = null): void
+    {
+        $thirdPartyUuid = $this->conductorThirdPartyUuid($companyUuid);
+
+        if ($thirdPartyUuid === false) {
+            return;
+        }
+
+        if ($thirdPartyUuid === null) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
+        $query->where(function ($q) use ($thirdPartyUuid) {
+            $q->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid));
+        });
+    }
+
+    /**
+     * @return string|null|false false = el usuario no está limitado como conductor;
+     *                           null = es conductor pero sin tercero asociado.
+     */
+    private function conductorThirdPartyUuid(?string $companyUuid = null): string|null|false
+    {
+        $user = Auth::user();
+
+        if (! $user || ! method_exists($user, 'hasRole') || ! $user->hasRole('CONDUCTOR')
+            || $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA', 'EMPLEADO', 'AFILIADO'])) {
+            return false;
+        }
+
+        $thirdPartyUuid = request()->attributes->get('current_third_party_uuid');
+
+        if (! $thirdPartyUuid) {
+            $companyUser = ($companyUuid
+                    ? $user->companies()->where('company_user.company_uuid', $companyUuid)->first()
+                    : null)
+                ?? $user->companies()->first();
+            $thirdPartyUuid = $companyUser?->pivot?->third_party_uuid;
+        }
+
+        return $thirdPartyUuid ?: null;
     }
 
     /**
@@ -195,9 +423,24 @@ class ServiceDeliveryControlSheetService extends BaseService
 
     public function getServiceDeliveryControlSheetByUuid(string $uuid): ?Model
     {
-        return ServiceDeliveryControlSheet::where('uuid', $uuid)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl'])
-            ->first();
+        $query = ServiceDeliveryControlSheet::where('uuid', $uuid)
+            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+
+        $thirdPartyUuid = $this->conductorThirdPartyUuid();
+        if ($thirdPartyUuid !== false) {
+            $query->where(function ($q) use ($thirdPartyUuid) {
+                if ($thirdPartyUuid === null) {
+                    $q->whereRaw('1 = 0');
+
+                    return;
+                }
+                $q->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                    ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                    ->orWhereHas('parent.children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid));
+            });
+        }
+
+        return $query->first();
     }
 
     /**

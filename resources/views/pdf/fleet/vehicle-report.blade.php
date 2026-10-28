@@ -5,7 +5,7 @@
     <title>Reporte de Vehículos</title>
     <style>
         @page { size: letter portrait; margin: 8mm; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; }
         body { font-family: Arial, Helvetica, sans-serif; font-size: 7.5pt; color: #000; background: #fff; }
         h1 { font-size: 13pt; margin-bottom: 2mm; }
         .meta { font-size: 8pt; color: #444; margin-bottom: 4mm; }

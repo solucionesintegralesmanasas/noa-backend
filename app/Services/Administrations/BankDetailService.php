@@ -50,6 +50,18 @@ class BankDetailService extends BaseService
      */
     protected array $searchableFields = ['bank_name'];
 
+    public function __construct()
+    {
+        parent::__construct();
+        $this->sortableFields = [
+            'bank_name' => 'bank_details.bank_name',
+            'account_number' => 'bank_details.account_number',
+            'account_type' => 'bank_details.account_type',
+            'account_holder' => 'bank_details.account_holder',
+            'is_active' => 'bank_details.is_active',
+        ];
+    }
+
     /**
      * Método getAllBankDetailsWithPagination.
      */
@@ -57,9 +69,19 @@ class BankDetailService extends BaseService
         int $perPage = 15,
         int $page = 1,
         string $search = '',
-        ?string $companyUuid = null
+        ?string $companyUuid = null,
+        ?string $sortBy = null,
+        string $sortOrder = 'asc'
     ): LengthAwarePaginator {
-        return $this->getPaginatedData($perPage, $page, $search, $companyUuid, self::RELATIONS);
+        return $this->getPaginatedData(
+            perPage: $perPage,
+            page: $page,
+            search: $search,
+            companyUuid: $companyUuid,
+            relations: self::RELATIONS,
+            sortBy: $sortBy,
+            sortOrder: $sortOrder
+        );
     }
 
     /**

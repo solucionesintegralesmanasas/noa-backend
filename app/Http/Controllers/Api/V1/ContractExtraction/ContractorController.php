@@ -73,10 +73,11 @@ class ContractorController extends Controller
             new OA\Response(response: 200, description: 'Operación realizada con éxito.'),
         ]
     )]
-    public function list(): JsonResponse
+    public function list(Request $request): JsonResponse
     {
         try {
-            $data = $this->contractorService->getAllContractors();
+            $companyUuid = $request->query('company_uuid');
+            $data = $this->contractorService->getAllContractors($companyUuid);
 
             return $this->successResponse($data, 'Catálogo de Contratistas recuperado con éxito.');
         } catch (\Throwable $e) {

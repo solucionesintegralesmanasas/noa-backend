@@ -219,7 +219,7 @@ final class PcpEvidence
      */
     public function resumenProyecto(string $projectUuid): array
     {
-        $summary = [
+        $summary = $this->resumenProyectosEnLote([$projectUuid])[$projectUuid] ?? [
             'total_dias' => 0,
             'cerrados' => 0,
             'en_curso' => 0,
@@ -228,18 +228,58 @@ final class PcpEvidence
             'excepciones' => 0,
             'certificados' => 0,
         ];
+        unset($summary['total_planillas'], $summary['porcentaje_al_dia']);
+
+        return $summary;
+    }
+
+    /**
+     * Resumen en lote para múltiples proyectos en bloques de consultas constantes.
+     *
+     * @param  array<int, string>  $projectUuids
+     * @param  (\Closure(\Illuminate\Database\Eloquent\Builder): void)|null  $filtroAdicional
+     * @return array<string, array{total_planillas: int, total_dias: int, cerrados: int, en_curso: int, evidencia_incompleta: int, pendiente_certificacion: int, excepciones: int, certificados: int, porcentaje_al_dia: int}>
+     */
+    public function resumenProyectosEnLote(array $projectUuids, ?\Closure $filtroAdicional = null): array
+    {
+        $summaries = [];
+        foreach ($projectUuids as $uuid) {
+            $summaries[$uuid] = [
+                'total_planillas' => 0,
+                'total_dias' => 0,
+                'cerrados' => 0,
+                'en_curso' => 0,
+                'evidencia_incompleta' => 0,
+                'pendiente_certificacion' => 0,
+                'excepciones' => 0,
+                'certificados' => 0,
+                'porcentaje_al_dia' => 100,
+            ];
+        }
+
+        if (empty($projectUuids)) {
+            return $summaries;
+        }
 
         $query = ServiceDeliveryControlSheet::query()
             ->whereNull('parent_uuid')
-            ->where('project_uuid', $projectUuid)
-            // SPEC-009: el resumen refleja la asignación vigente del proyecto,
-            // igual que el listado; las hojas retiradas no cuentan.
+            ->whereIn('project_uuid', $projectUuids)
             ->where('retirada_de_proyecto', false)
             ->with(['routes', 'children.routes'])
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => fn ($q) => $q->where('is_active', true)]);
 
-        $query->chunkById(100, function ($parents) use (&$summary): void {
+        if ($filtroAdicional !== null) {
+            $filtroAdicional($query);
+        }
+
+        $query->chunkById(100, function ($parents) use (&$summaries): void {
+            foreach ($parents as $parent) {
+                if (isset($summaries[$parent->project_uuid])) {
+                    $summaries[$parent->project_uuid]['total_planillas']++;
+                }
+            }
+
             $units = $parents->flatMap(
                 fn (ServiceDeliveryControlSheet $parent) => $parent->children->isNotEmpty()
                     ? $parent->children
@@ -249,30 +289,46 @@ final class PcpEvidence
             $planillaIds = $units->pluck('id')->all();
             $routeIds = $units->flatMap(fn ($unit) => $unit->routes->pluck('id'))->all();
             $mapa = $this->mapaFirmas($planillaIds, $routeIds);
+            $parentProjectMap = $parents->pluck('project_uuid', 'uuid')->all();
 
             foreach ($units as $unit) {
+                $projectUuid = $unit->project_uuid ?? ($unit->parent_uuid ? ($parentProjectMap[$unit->parent_uuid] ?? null) : null);
+                if (! $projectUuid || ! isset($summaries[$projectUuid])) {
+                    continue;
+                }
+
                 $pending = $this->calcularPendientes($unit, $unit->routes, $mapa);
                 $operationalPending = $this->pendientesOperativos($pending);
                 $operationallyComplete = $operationalPending === [];
                 $certified = (bool) ($mapa['coordinador'][$unit->id] ?? false);
                 $state = $this->estado($unit, $certified, $operationallyComplete);
 
-                $summary['total_dias']++;
-                $unit->is_active ? $summary['en_curso']++ : $summary['cerrados']++;
+                $summaries[$projectUuid]['total_dias']++;
+                $unit->is_active ? $summaries[$projectUuid]['en_curso']++ : $summaries[$projectUuid]['cerrados']++;
 
                 if ($state === ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION) {
-                    $summary['excepciones']++;
+                    $summaries[$projectUuid]['excepciones']++;
                 } elseif (! $operationallyComplete) {
-                    $summary['evidencia_incompleta']++;
+                    $summaries[$projectUuid]['evidencia_incompleta']++;
                 } elseif (! $unit->is_active && ! $certified) {
-                    $summary['pendiente_certificacion']++;
+                    $summaries[$projectUuid]['pendiente_certificacion']++;
                 } elseif ($state === ServiceDeliveryControlSheet::ESTADO_CERTIFICADA) {
-                    $summary['certificados']++;
+                    $summaries[$projectUuid]['certificados']++;
                 }
             }
         }, 'id');
 
-        return $summary;
+        foreach ($summaries as $uuid => &$res) {
+            if ($res['total_dias'] > 0) {
+                $diasAlDia = max(0, $res['total_dias'] - $res['evidencia_incompleta']);
+                $res['porcentaje_al_dia'] = (int) round(($diasAlDia / $res['total_dias']) * 100);
+            } else {
+                $res['porcentaje_al_dia'] = 100;
+            }
+        }
+        unset($res);
+
+        return $summaries;
     }
 
     /**

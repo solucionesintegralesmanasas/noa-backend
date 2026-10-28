@@ -33,7 +33,7 @@ class VehicleReportController extends Controller
             new OA\Parameter(name: 'filter_type', in: 'query', required: true, schema: new OA\Schema(type: 'string', enum: ['affiliate', 'operation_card', 'document', 'project', 'maintenance', 'driver', 'agreement'])),
             new OA\Parameter(name: 'third_party_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
-            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 15)),
+            new OA\Parameter(name: 'per_page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 10)),
             new OA\Parameter(name: 'page', in: 'query', required: false, schema: new OA\Schema(type: 'integer', default: 1)),
             new OA\Parameter(name: 'search', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],
@@ -46,7 +46,7 @@ class VehicleReportController extends Controller
     {
         try {
             $filtros = $request->reportFilters($request->attributes->get('current_company_uuid'));
-            $perPage = (int) ($request->query('per_page', 15));
+            $perPage = (int) ($request->query('per_page', 10));
             $page = (int) ($request->query('page', 1));
             $data = $this->reportService->paginateReport($filtros, $perPage, $page);
 

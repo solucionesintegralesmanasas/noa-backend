@@ -312,7 +312,7 @@ trait HasFiles
                 $url = $exists ? $mediaItem->getUrl() : '';
             } catch (\Throwable $e) {
                 report($e);
-                $url = null;
+                $url = '';
             }
             $type = $mediaItem->collection_name;
 

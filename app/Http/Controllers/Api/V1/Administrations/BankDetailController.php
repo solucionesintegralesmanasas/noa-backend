@@ -44,7 +44,16 @@ class BankDetailController extends Controller
             $page = (int) $request->query('page', '1');
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid');
-            $data = $this->bankDetailService->getAllBankDetailsWithPagination($perPage, $page, $search, $companyUuid);
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order', 'asc');
+            $data = $this->bankDetailService->getAllBankDetailsWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                is_string($sortBy) ? $sortBy : null,
+                is_string($sortOrder) ? $sortOrder : 'asc'
+            );
 
             return $this->successResponse($data, 'Listado de cuentas bancarias recuperado.');
         } catch (\Throwable $e) {

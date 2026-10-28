@@ -88,7 +88,7 @@ class FuelLogController extends Controller
             $thirdPartyUuid = $request->query('third_party_uuid') ?? $request->input('filter.third_party_uuid');
             $limit = max(1, min(1000, (int) $request->query('limit', '500')));
 
-            $data = $this->fuelStatusService->fleetStatus(
+            $data = $this->fuelStatusService->estadoDeFlota(
                 $companyUuid ? (string) $companyUuid : null,
                 $thirdPartyUuid ? (string) $thirdPartyUuid : null,
                 $limit

@@ -36,6 +36,26 @@ class VehicleInspectionService extends BaseService
         private readonly InspectionResultService $resultService
     ) {
         parent::__construct();
+
+        $this->sortableFields = [
+            'inspection_date' => 'vehicle_inspections.inspection_date',
+            'inspector_name' => 'vehicle_inspections.inspector_name',
+            'mileage' => 'vehicle_inspections.mileage',
+            'vehicle.vehicle_license_plate' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('vehicles')
+                    ->select('vehicles.vehicle_license_plate')
+                    ->whereColumn('vehicles.uuid', 'vehicle_inspections.vehicle_uuid')
+                    ->limit(1),
+                $direction
+            ),
+            'driver.first_name' => fn (Builder $query, string $direction) => $query->orderBy(
+                DB::table('third_parties')
+                    ->select('third_parties.first_name')
+                    ->whereColumn('third_parties.uuid', 'vehicle_inspections.driver_uuid')
+                    ->limit(1),
+                $direction
+            ),
+        ];
     }
 
     protected function getModelInstance(): Model
@@ -65,7 +85,9 @@ class VehicleInspectionService extends BaseService
         ?string $companyUuid = null,
         ?string $thirdPartyUuid = null,
         ?string $vehicleUuid = null,
-        ?string $driverUuid = null
+        ?string $driverUuid = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = null
     ): LengthAwarePaginator {
         // Optimizamos la consulta para la tabla de Vue:
         // No cargamos los 'inspectionResults' y seleccionamos solo las columnas requeridas
@@ -137,9 +159,14 @@ class VehicleInspectionService extends BaseService
             });
         }
 
-        $paginator = $query->orderBy('inspection_date', 'desc')
-            ->orderBy('created_at', 'desc')
-            ->paginate($perPage, ['*'], 'page', $page);
+        if ($sortBy !== null && $sortBy !== '' && array_key_exists($sortBy, $this->sortableFields)) {
+            $this->applySorting($query, $sortBy, $sortOrder);
+        } else {
+            $query->orderBy('vehicle_inspections.inspection_date', 'desc')
+                ->orderBy('vehicle_inspections.created_at', 'desc');
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
 
         // Precalcula el kilometraje total de cada vehículo en una sola consulta para evitar N+1 queries
         $vehicleUuids = $paginator->getCollection()->pluck('vehicle_uuid')->filter()->unique()->toArray();

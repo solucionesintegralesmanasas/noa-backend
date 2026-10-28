@@ -9,8 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Request;
-
-// use App\Exceptions\CompanyNotFoundException;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * @mixin Model
@@ -20,25 +19,91 @@ use Illuminate\Support\Facades\Request;
  */
 trait BelongsToCompany
 {
+    /**
+     * Ejecuta una operación en un contexto explícitamente exento de la restricción de empresa
+     * (por ejemplo: sincronizaciones globales de cron, procesamiento entre empresas o inicializaciones del sistema).
+     *
+     * @template T
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    public static function withoutCompanyScope(callable $callback)
+    {
+        $previous = TenantScopeContext::$bypass;
+        TenantScopeContext::$bypass = true;
+
+        try {
+            return $callback();
+        } finally {
+            TenantScopeContext::$bypass = $previous;
+        }
+    }
+
+    /**
+     * Determina si la ejecución actual está autorizada para consultar sin contexto de empresa.
+     */
+    public static function isExemptFromCompanyContext(): bool
+    {
+        // 1. Bypass explícito en código compartido
+        if (TenantScopeContext::$bypass) {
+            return true;
+        }
+
+        // 2. Si la petición HTTP tiene la marca de exención explícita
+        $request = Request::instance();
+        if ($request && $request->attributes->get('exempt_from_company_context', false)) {
+            return true;
+        }
+
+        // 3. Rutas públicas legítimas (firmadas, validación de FUEC, cron web)
+        if ($request && ($request->is('api/v1/public/*', 'public/*'))) {
+            return true;
+        }
+
+        // 4. Consola CLI en producción/operación real (NO en testing, para que los tests evalúen el comportamiento real)
+        if (app()->runningInConsole() && ! app()->runningUnitTests()) {
+            return true;
+        }
+
+        return false;
+    }
+
     protected static function bootBelongsToCompany(): void
     {
         static::addGlobalScope('company', function (Builder $builder) {
+            // 1. Si el flujo está explícitamente exento, NUNCA restringir (incluso si hay un company_uuid en request)
+            if (self::isExemptFromCompanyContext()) {
+                self::registrarConsultaSinEmpresa($builder->getModel());
+
+                return;
+            }
+
             $companyUuid = self::resolveCurrentCompanyUuid();
 
             if ($companyUuid) {
                 $builder->where($builder->getModel()->getTable().'.company_uuid', $companyUuid);
             } else {
-                // Sin contexto de empresa el scope NO filtra (falla abierto). Todavía no se bloquea
-                // porque rutas públicas (inspección/planilla firmadas, validación de FUEC) y el cron
-                // dependen de esto. Se registra para medir qué flujos son y poder cerrarlo con una
-                // lista explícita de excepciones (ver AGENTS.md, "Multi-tenant").
-                self::registrarConsultaSinEmpresa($builder->getModel());
+                // FALLA CERRADO (Issue #2): Sin contexto de empresa en flujo no exento.
+                // 1. Candado en base de datos: consulta imposible (1 = 0) para nunca filtrar datos ajenos.
+                $builder->whereRaw('1 = 0');
+
+                // 2. Bloquear con excepción HTTP 403 Forbidden
+                self::bloquearConsultaSinEmpresa($builder->getModel());
             }
         });
 
         static::creating(function (Model $model) {
             if (empty($model->company_uuid) && $model->isFillable('company_uuid')) {
-                $model->company_uuid = self::resolveCurrentCompanyUuid();
+                if (self::isExemptFromCompanyContext()) {
+                    return;
+                }
+
+                $companyUuid = self::resolveCurrentCompanyUuid();
+                if ($companyUuid) {
+                    $model->company_uuid = $companyUuid;
+                } else {
+                    throw new AccessDeniedHttpException('No se puede crear '.class_basename($model).' sin contexto de empresa.');
+                }
             }
         });
 
@@ -82,6 +147,25 @@ trait BelongsToCompany
                 'origen' => $origen,
                 'metodo' => app()->runningInConsole() ? null : Request::method(),
             ]);
+    }
+
+    /**
+     * Bloquea la consulta sin contexto de empresa arrojando 403 Forbidden (Issue #2).
+     *
+     * @throws AccessDeniedHttpException
+     */
+    protected static function bloquearConsultaSinEmpresa(Model $modelo): void
+    {
+        $origen = app()->runningInConsole() ? 'consola' : Request::path();
+        Log::warning('Consulta bloqueada: falta contexto de empresa en ' . $modelo::class, [
+            'modelo' => $modelo::class,
+            'origen' => $origen,
+            'metodo' => app()->runningInConsole() ? null : Request::method(),
+        ]);
+
+        throw new AccessDeniedHttpException(
+            'Acceso denegado: se requiere un contexto de empresa válido para consultar ' . class_basename($modelo) . '.'
+        );
     }
 
     protected static function resolveCurrentCompanyUuid(): ?string

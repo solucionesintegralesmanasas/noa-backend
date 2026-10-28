@@ -22,7 +22,7 @@ class VehicleReportRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'filter_type' => 'required|in:'.implode(',', VehicleReportService::FILTER_TYPES),
+            'filter_type' => 'nullable|in:'.implode(',', VehicleReportService::FILTER_TYPES),
             'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
             'project_uuid' => 'nullable|uuid|exists:projects,uuid',
             'document_type' => 'nullable|in:SOAT,RCC,RCE,RTM',
@@ -44,17 +44,9 @@ class VehicleReportRequest extends FormRequest
 
     public function withValidator($validator): void
     {
-        $validator->after(function ($validator) {
-            $type = $this->input('filter_type');
-            match ($type) {
-                VehicleReportService::FILTER_AFFILIATE,
-                VehicleReportService::FILTER_DRIVER => $this->requireField($validator, 'third_party_uuid'),
-                VehicleReportService::FILTER_PROJECT => $this->requireField($validator, 'project_uuid'),
-                VehicleReportService::FILTER_OPERATION_CARD => $this->requireField($validator, 'affiliated_company'),
-                VehicleReportService::FILTER_AGREEMENT => $this->requireField($validator, 'contracting_entity_name'),
-                default => null,
-            };
-        });
+        // La presencia de filter_type sin valor subordinado no debe fallar con 422:
+        // si el valor subordinado no está provisto, el servicio simplemente no
+        // restringe por ese criterio (o el filtro de tarjeta opera solo por estado).
     }
 
     protected function requireField($validator, string $field): void

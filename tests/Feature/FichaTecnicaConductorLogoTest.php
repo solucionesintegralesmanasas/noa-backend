@@ -65,7 +65,7 @@ class FichaTecnicaConductorLogoTest extends TestCase
         $this->assertStringStartsWith('data:image/', $membrete);
     }
 
-    public function test_la_ficha_del_conductor_pinta_el_logo_en_encabezado_y_fondo(): void
+    public function test_la_ficha_del_conductor_pinta_el_logo_en_el_encabezado(): void
     {
         $driverUuid = $this->insertar('third_parties', [
             'company_uuid' => $this->empresa->uuid,
@@ -96,7 +96,34 @@ class FichaTecnicaConductorLogoTest extends TestCase
 
         $uri = 'data:image/png;base64,'.$images['logo'];
 
-        $this->assertSame(2, substr_count($html, $uri), 'El logo va en el encabezado y en la marca de agua');
-        $this->assertStringContainsString('id="watermark"', $html);
+        $this->assertSame(1, substr_count($html, $uri), 'El logo va en el encabezado institucional');
+        $this->assertStringContainsString('class="logo-empresa"', $html);
+        $this->assertStringNotContainsString('id="watermark"', $html, 'El diseño original no lleva marca de agua');
+    }
+
+    /**
+     * Reproduce el camino real del endpoint (PdfService con APP_DEBUG): una
+     * propiedad CSS no soportada por DomPDF se convierte en excepción y el
+     * endpoint responde 500. El 2026-10-22 pasó con `box-sizing`.
+     */
+    public function test_el_endpoint_de_la_ficha_no_falla_por_advertencias_de_dompdf(): void
+    {
+        $driverUuid = $this->insertar('third_parties', [
+            'company_uuid' => $this->empresa->uuid,
+            'document_number' => '1020304050',
+            'first_name' => 'LUIS RAFAEL',
+            'last_name' => 'OVIEDO ROMERO',
+            'is_driver' => true,
+            'is_active' => true,
+        ]);
+
+        $respuesta = $this->pdf->generateTechnicalSheetPdf(
+            app(\App\Services\ThirdParties\ThirdPartyService::class),
+            $this->empresa->uuid,
+            $driverUuid
+        );
+
+        $this->assertSame(200, $respuesta->getStatusCode());
+        $this->assertStringContainsString('application/pdf', (string) $respuesta->headers->get('content-type'));
     }
 }

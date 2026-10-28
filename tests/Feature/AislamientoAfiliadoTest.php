@@ -54,7 +54,7 @@ class AislamientoAfiliadoTest extends TestCase
     {
         parent::setUp();
         config(['authorization.enforce' => false]);
-        foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history', 'reports.vehicles.index', 'reports.vehicles.export-excel', 'reports.vehicles.export-pdf'] as $p) {
+        foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history', 'reports.vehicles.index', 'reports.vehicles.export-excel', 'reports.vehicles.export-pdf', 'third_parties.index', 'third_parties.profile', 'contractors.index', 'fuec.index', 'fuec.profile'] as $p) {
             Permission::findOrCreate($p, 'api');
         }
 
@@ -116,7 +116,7 @@ class AislamientoAfiliadoTest extends TestCase
         setPermissionsTeamId(null);
         $user->assignRole(Role::findOrCreate($rol, 'api'));
         if ($rol === 'AFILIADO') {
-            foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history'] as $p) {
+            foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history', 'third_parties.index', 'third_parties.profile', 'contractors.index', 'fuec.index', 'fuec.profile'] as $p) {
                 $user->givePermissionTo($p);
             }
         } else {
@@ -169,7 +169,18 @@ class AislamientoAfiliadoTest extends TestCase
             'latitude' => 3.4516, 'longitude' => -76.5320, 'recorded_at' => now(),
         ]);
 
-        return compact('vehiculo', 'documento', 'tarjeta', 'inspeccion', 'conductor', 'licencia', 'vinculo');
+        $contratista = $this->insertar('contractors', [
+            'company_uuid' => $empresa, 'vehicle_uuid' => $vehiculo, 'document_number' => '900'.$prefijo,
+            'company_name' => 'Cliente '.$prefijo, 'status' => 1,
+        ]);
+        $fuec = $this->insertar('fuec', [
+            'company_uuid' => $empresa, 'vehicle_uuid' => $vehiculo, 'contractor_uuid' => $contratista,
+            'request_number' => 'REQ-'.$prefijo.'-'.Str::random(8),
+            'number_fuec' => '1234', 'status' => 'ACTIVO', 'issue_date' => now()->toDateString(),
+            'origin_route' => 'Cali', 'destination_route' => 'Yumbo',
+        ]);
+
+        return compact('vehiculo', 'documento', 'tarjeta', 'inspeccion', 'conductor', 'licencia', 'vinculo', 'contratista', 'fuec');
     }
 
     private function como(User $usuario, string $empresa): self
@@ -447,5 +458,137 @@ class AislamientoAfiliadoTest extends TestCase
         $this->assertContains($this->datos['A']['vehiculo'], $uuids);
         $this->assertContains($this->datos['B']['vehiculo'], $uuids);
         $this->assertNotContains($this->datos['F']['vehiculo'], $uuids, 'Otra empresa');
+    }
+
+    // ── Aislamiento de Terceros, FUEC y Contratistas (Issue #4) ─────────────────
+
+    public function test_el_afiliado_no_abre_tercero_ajeno_por_uuid_responde_404(): void
+    {
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        // Puede ver a sí mismo y a su conductor vinculado
+        $this->getJson('/api/v1/third-parties/'.$this->terceroA)->assertOk();
+        $this->getJson('/api/v1/third-parties/'.$this->datos['A']['conductor'])->assertOk();
+
+        // No puede ver a otro afiliado ni a conductores de otro afiliado
+        $this->assertSame(404, $this->getJson('/api/v1/third-parties/'.$this->terceroB)->status(), 'Tercero de otro afiliado debe responder 404');
+        $this->assertSame(404, $this->getJson('/api/v1/third-parties/'.$this->datos['B']['conductor'])->status(), 'Conductor de otro afiliado debe responder 404');
+        $this->assertSame(404, $this->getJson('/api/v1/third-parties/'.$this->terceroF)->status(), 'Tercero de otra empresa debe responder 404');
+    }
+
+    public function test_el_afiliado_no_edita_ni_elimina_tercero_ajeno(): void
+    {
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $sucursal = $this->insertar('branches', ['company_uuid' => $this->empresaE, 'name' => 'Sede E']);
+        $rPut = $this->putJson('/api/v1/third-parties/'.$this->terceroB, [
+            'company_name' => 'HACKEADO S.A.S',
+            'person_type' => 'JURIDICA',
+            'branch_uuid' => $sucursal,
+        ]);
+        $this->assertContains($rPut->status(), [403, 404], 'PUT de tercero ajeno debe responder 404 o 403');
+        $this->assertSame('OTRO AFILIADO S.A.S', DB::table('third_parties')->where('uuid', $this->terceroB)->value('company_name'), 'La fila ajena cambió');
+
+        $rDel = $this->deleteJson('/api/v1/third-parties/'.$this->terceroB);
+        $this->assertContains($rDel->status(), [403, 404], 'DELETE de tercero ajeno debe responder 404 o 403');
+        $this->assertTrue(DB::table('third_parties')->where('uuid', $this->terceroB)->exists(), 'El tercero ajeno se borró');
+    }
+
+    public function test_el_afiliado_no_abre_ficha_tecnica_de_conductor_ajeno(): void
+    {
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $this->getJson('/api/v1/third-parties/'.$this->datos['A']['conductor'].'/technical-sheet')->assertOk();
+        $this->assertSame(404, $this->getJson('/api/v1/third-parties/'.$this->datos['B']['conductor'].'/technical-sheet')->status(), 'Ficha técnica de conductor ajeno');
+    }
+
+    public function test_el_afiliado_solo_lista_sus_contratistas_y_fuec(): void
+    {
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $contratistas = $this->uuids($this->getJson('/api/v1/contract-extract/contractors?company_uuid='.$this->empresaE));
+        $this->assertContains($this->datos['A']['contratista'], $contratistas, 'Debe ver su contratista');
+        $this->assertNotContains($this->datos['B']['contratista'], $contratistas, 'No debe ver el contratista ajeno');
+
+        $fuecs = $this->uuids($this->getJson('/api/v1/contract-extract/fuecs?company_uuid='.$this->empresaE));
+        $this->assertContains($this->datos['A']['fuec'], $fuecs, 'Debe ver su FUEC');
+        $this->assertNotContains($this->datos['B']['fuec'], $fuecs, 'No debe ver el FUEC ajeno');
+
+        $conductoresCatalogo = $this->uuids($this->getJson('/api/v1/third-parties/list?type=is_driver&company_uuid='.$this->empresaE));
+        $this->assertContains($this->datos['A']['conductor'], $conductoresCatalogo);
+        $this->assertNotContains($this->datos['B']['conductor'], $conductoresCatalogo, 'Catálogo de conductores aislado');
+
+        $afiliadosCatalogo = $this->uuids($this->getJson('/api/v1/third-parties/list?type=is_affiliate&company_uuid='.$this->empresaE));
+        $this->assertContains($this->terceroA, $afiliadosCatalogo);
+        $this->assertNotContains($this->terceroB, $afiliadosCatalogo, 'Catálogo de afiliados aislado');
+    }
+
+    public function test_el_afiliado_no_abre_fuec_ni_contratista_ajenos_por_uuid(): void
+    {
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $this->getJson('/api/v1/contract-extract/contractors/'.$this->datos['A']['contratista'])->assertOk();
+        $this->assertSame(404, $this->getJson('/api/v1/contract-extract/contractors/'.$this->datos['B']['contratista'])->status(), 'Contratista ajeno');
+
+        $this->getJson('/api/v1/contract-extract/fuecs/'.$this->datos['A']['fuec'])->assertOk();
+        $this->assertSame(404, $this->getJson('/api/v1/contract-extract/fuecs/'.$this->datos['B']['fuec'])->status(), 'FUEC ajeno');
+    }
+
+    // ── Aislamiento de Radicación TO para AFILIADO cuando aplique (Issue #7) ────
+
+    public function test_el_afiliado_con_permiso_de_radicacion_solo_ve_sus_expedientes(): void
+    {
+        Permission::findOrCreate('radicacion_to.index', 'api');
+        setPermissionsTeamId(null);
+        $this->afiliadoA->givePermissionTo('radicacion_to.index');
+
+        $expedienteA = $this->insertar('procedures', [
+            'company_uuid' => $this->empresaE,
+            'vehicle_uuid' => $this->datos['A']['vehiculo'],
+            'procedure_code' => 'RAD-AFI-A',
+            'link_type' => 'CAMBIO_DE_EMPRESA',
+            'procedure_type' => 'INCLUSION_DE_POLIZAS',
+            'status' => 'EN_PROCESO',
+        ]);
+
+        $expedienteB = $this->insertar('procedures', [
+            'company_uuid' => $this->empresaE,
+            'vehicle_uuid' => $this->datos['B']['vehiculo'],
+            'procedure_code' => 'RAD-AFI-B',
+            'link_type' => 'CAMBIO_DE_EMPRESA',
+            'procedure_type' => 'INCLUSION_DE_POLIZAS',
+            'status' => 'EN_PROCESO',
+        ]);
+
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $r = $this->getJson('/api/v1/procedure/radicacion/expedientes?company_uuid='.$this->empresaE);
+        $r->assertOk();
+        $uuids = $this->uuids($r);
+
+        $this->assertContains($expedienteA, $uuids, 'Debe ver su propio expediente de radicación');
+        $this->assertNotContains($expedienteB, $uuids, 'No debe ver el expediente de otro afiliado');
+
+        $this->getJson('/api/v1/procedure/radicacion/'.$expedienteA.'/detalle')->assertOk();
+        $this->assertSame(404, $this->getJson('/api/v1/procedure/radicacion/'.$expedienteB.'/detalle')->status(), 'Detalle ajeno debe responder 404');
+        $this->assertSame(404, $this->getJson('/api/v1/procedure/radicacion/'.$expedienteB.'/ruta')->status(), 'Ruta ajena debe responder 404');
+    }
+
+    public function test_el_afiliado_no_edita_fuec_ni_contratista_ajenos(): void
+    {
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $rPutContractor = $this->putJson('/api/v1/contract-extract/contractors/'.$this->datos['B']['contratista'], [
+            'company_name' => 'CONTRATISTA HACKEADO',
+        ]);
+        $this->assertContains($rPutContractor->status(), [403, 404], 'PUT de contratista ajeno debe responder 404 o 403');
+
+        $rToggleContractor = $this->patchJson('/api/v1/contract-extract/contractors/'.$this->datos['B']['contratista'].'/toggle-status');
+        $this->assertContains($rToggleContractor->status(), [403, 404], 'Toggle de contratista ajeno debe responder 404 o 403');
+
+        $rPutFuec = $this->putJson('/api/v1/contract-extract/fuecs/'.$this->datos['B']['fuec'], [
+            'object_contract' => 'MODIFICADO ILEGALMENTE',
+        ]);
+        $this->assertContains($rPutFuec->status(), [403, 404], 'PUT de FUEC ajeno debe responder 404 o 403');
     }
 }

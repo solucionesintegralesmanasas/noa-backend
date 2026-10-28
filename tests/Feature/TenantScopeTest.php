@@ -12,11 +12,16 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use ReflectionProperty;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Tests\TestCase;
 
 /**
- * Scope multi-tenant (BelongsToCompany): con contexto filtra por empresa; sin contexto no filtra
- * (falla abierto, a propósito por ahora) pero deja constancia en el log para poder cerrarlo.
+ * Issue #2: Scope multi-tenant (BelongsToCompany) con fallo cerrado.
+ * - Con contexto de empresa: filtra exclusivamente los registros de esa empresa.
+ * - Sin contexto de empresa (flujo no exento): falla cerrado arrojando 403 / AccessDeniedHttpException
+ *   y aplicando un candado SQL imposible (1 = 0) para nunca devolver datos de todas las empresas.
+ * - Flujos legítimos exentos (cron, webcron, rutas públicas firmadas, withoutCompanyScope):
+ *   permiten la consulta sin bloquear.
  */
 class TenantScopeTest extends TestCase
 {
@@ -25,16 +30,21 @@ class TenantScopeTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Limpiar request attributes entre pruebas
+        request()->attributes->remove('current_company_uuid');
+        request()->attributes->remove('exempt_from_company_context');
+
         // La deduplicación de advertencias es por proceso: se limpia para que cada prueba sea independiente.
         $registro = new ReflectionProperty(Vehicle::class, 'sinEmpresaRegistradas');
         $registro->setValue(null, []);
     }
 
-    private function vehiculo(string $empresa, string $placa): void
+    private function vehiculo(string $empresa, string $placa): Vehicle
     {
         Schema::disableForeignKeyConstraints();
+        $uuid = (string) Str::uuid();
         DB::table('vehicles')->insert([
-            'uuid' => (string) Str::uuid(),
+            'uuid' => $uuid,
             'company_uuid' => $empresa,
             'vehicle_license_plate' => $placa,
             'is_active' => true,
@@ -42,6 +52,8 @@ class TenantScopeTest extends TestCase
             'updated_at' => now(),
         ] + $this->relleno());
         Schema::enableForeignKeyConstraints();
+
+        return Vehicle::withoutGlobalScopes()->where('uuid', $uuid)->firstOrFail();
     }
 
     /** Columnas obligatorias de vehicles sin valor por defecto. */
@@ -80,19 +92,38 @@ class TenantScopeTest extends TestCase
         $this->assertSame(['AAA111'], Vehicle::query()->pluck('vehicle_license_plate')->all());
     }
 
-    public function test_sin_contexto_no_filtra_pero_lo_registra_una_sola_vez(): void
+    public function test_sin_contexto_de_empresa_bloquea_con_403_y_no_devuelve_datos_de_todas_las_empresas(): void
     {
         $this->vehiculo((string) Str::uuid(), 'AAA111');
         $this->vehiculo((string) Str::uuid(), 'BBB222');
 
-        Log::shouldReceive('channel')->andReturnSelf();
-        Log::shouldReceive('warning')
-            ->once()
-            ->withArgs(fn (string $mensaje, array $contexto) => str_contains($mensaje, 'sin contexto de empresa')
-                && $contexto['modelo'] === Vehicle::class);
+        $this->expectException(AccessDeniedHttpException::class);
+        $this->expectExceptionMessage('Acceso denegado: se requiere un contexto de empresa válido');
+
+        // Sin contexto de empresa debe fallar cerrado arrojando excepción 403
+        Vehicle::query()->get();
+    }
+
+    public function test_flujos_exentos_mediante_without_company_scope_pueden_consultar(): void
+    {
+        $this->vehiculo((string) Str::uuid(), 'AAA111');
+        $this->vehiculo((string) Str::uuid(), 'BBB222');
+
+        $resultados = BelongsToCompany::withoutCompanyScope(function () {
+            return Vehicle::query()->get();
+        });
+
+        $this->assertCount(2, $resultados);
+    }
+
+    public function test_flujos_con_marca_explicita_de_exencion_pueden_consultar(): void
+    {
+        $this->vehiculo((string) Str::uuid(), 'AAA111');
+        $this->vehiculo((string) Str::uuid(), 'BBB222');
+
+        request()->attributes->set('exempt_from_company_context', true);
 
         $this->assertCount(2, Vehicle::query()->get());
-        $this->assertCount(2, Vehicle::query()->get()); // segunda consulta: no vuelve a registrar
     }
 
     public function test_el_trait_sigue_aplicado_a_los_modelos_de_negocio(): void

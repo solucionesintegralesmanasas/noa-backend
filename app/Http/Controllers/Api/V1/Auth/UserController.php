@@ -59,8 +59,17 @@ class UserController extends Controller
             $page = (int) $request->query('page', '1');
             $search = (string) $request->query('search', '');
             $companyUuid = $request->query('company_uuid');
+            $sortBy = $request->query('sort_by');
+            $sortOrder = $request->query('sort_order', 'asc');
 
-            $data = $this->userService->getAllUsersWithPagination($perPage, $page, $search, $companyUuid);
+            $data = $this->userService->getAllUsersWithPagination(
+                $perPage,
+                $page,
+                $search,
+                $companyUuid,
+                is_string($sortBy) ? $sortBy : null,
+                is_string($sortOrder) ? $sortOrder : 'asc'
+            );
 
             return $this->successResponse($data, 'Listado de usuarios recuperado con éxito.');
         } catch (\Throwable $e) {

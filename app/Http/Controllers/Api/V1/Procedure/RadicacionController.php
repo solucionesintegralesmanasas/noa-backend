@@ -9,9 +9,11 @@ use App\Http\Requests\Procedure\Radicacion\GenerarTxtRequest;
 use App\Http\Requests\Procedure\Radicacion\SiguienteCodigoRadicacionRequest;
 use App\Http\Requests\Procedure\Radicacion\StoreEnlaceFirmaRequest;
 use App\Http\Requests\Procedure\Radicacion\StoreExpedienteRadicacionRequest;
+use App\Models\Procedure;
 use App\Services\Procedure\ContractSignatureService;
 use App\Services\Procedure\RadicacionDocumentoService;
 use App\Services\Procedure\RadicacionService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -29,6 +31,9 @@ class RadicacionController extends Controller
     {
         try {
             $exp = $this->radicacion->findByUuid($uuid);
+            if (! $exp) {
+                throw (new ModelNotFoundException)->setModel(Procedure::class, [$uuid]);
+            }
             $ruta = $this->radicacion->rutaPara($exp->link_type ?? 'CAMBIO_DE_EMPRESA');
 
             return $this->successResponse(['ruta' => $ruta, 'expediente' => $exp], 'Ruta de radicación.');
@@ -59,6 +64,9 @@ class RadicacionController extends Controller
     {
         try {
             $hijo = $this->radicacion->findByUuid($uuid);
+            if (! $hijo) {
+                throw (new ModelNotFoundException)->setModel(Procedure::class, [$uuid]);
+            }
 
             return $this->successResponse($this->radicacion->validarRequisitos($hijo), 'Validación de requisitos.');
         } catch (\Throwable $e) {
@@ -148,6 +156,9 @@ class RadicacionController extends Controller
         try {
             $origin = $request->validated()['origin'];
             $hijo = $this->radicacion->findByUuid($uuid);
+            if (! $hijo) {
+                throw (new ModelNotFoundException)->setModel(Procedure::class, [$uuid]);
+            }
             $val = $this->radicacion->validarRequisitos($hijo);
             if (! $val['ok']) {
                 return $this->errorResponse($val['mensaje'], 422);

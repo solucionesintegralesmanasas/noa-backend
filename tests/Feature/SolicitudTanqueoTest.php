@@ -72,6 +72,12 @@ class SolicitudTanqueoTest extends TestCase
             'is_active' => true,
         ]);
 
+        // Flujo de llamadas directas al servicio: la empresa activa vive en el
+        // contexto de la petición (lo que `SetCompanyContext` resuelve en las
+        // peticiones HTTP). Sin ella el servicio falla cerrado desde la
+        // corrección de aislamiento.
+        request()->attributes->set('current_company_uuid', $this->empresa);
+
         $this->service = app(FuelRequestService::class);
     }
 

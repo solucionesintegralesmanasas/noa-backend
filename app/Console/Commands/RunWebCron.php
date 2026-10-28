@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Services\Fleet\SocialSecurityContributionService;
 use App\Services\Notifications\EmailLogService;
 use App\Services\Notifications\NotificationsService;
+use App\Traits\BelongsToCompany;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -49,9 +50,15 @@ class RunWebCron extends Command
         try {
             Log::info('WebCron: Iniciando ejecución automática en background...');
 
-            $emailLogService->notifyExpiringDocuments();
-            $notificationsService->syncNotifications();
-            $socialSecurityContributionService->autoUpdateExpiredStatuses();
+            BelongsToCompany::withoutCompanyScope(function () use (
+                $emailLogService,
+                $notificationsService,
+                $socialSecurityContributionService
+            ) {
+                $emailLogService->notifyExpiringDocuments();
+                $notificationsService->syncNotifications();
+                $socialSecurityContributionService->autoUpdateExpiredStatuses();
+            });
 
             Log::info('WebCron: Ejecución automática completada con éxito.');
             $this->info('WebCron completado con éxito.');
