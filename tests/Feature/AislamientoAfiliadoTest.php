@@ -571,5 +571,24 @@ class AislamientoAfiliadoTest extends TestCase
 
         $this->getJson('/api/v1/procedure/radicacion/'.$expedienteA.'/detalle')->assertOk();
         $this->assertSame(404, $this->getJson('/api/v1/procedure/radicacion/'.$expedienteB.'/detalle')->status(), 'Detalle ajeno debe responder 404');
+        $this->assertSame(404, $this->getJson('/api/v1/procedure/radicacion/'.$expedienteB.'/ruta')->status(), 'Ruta ajena debe responder 404');
+    }
+
+    public function test_el_afiliado_no_edita_fuec_ni_contratista_ajenos(): void
+    {
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $rPutContractor = $this->putJson('/api/v1/contract-extract/contractors/'.$this->datos['B']['contratista'], [
+            'company_name' => 'CONTRATISTA HACKEADO',
+        ]);
+        $this->assertContains($rPutContractor->status(), [403, 404], 'PUT de contratista ajeno debe responder 404 o 403');
+
+        $rToggleContractor = $this->patchJson('/api/v1/contract-extract/contractors/'.$this->datos['B']['contratista'].'/toggle-status');
+        $this->assertContains($rToggleContractor->status(), [403, 404], 'Toggle de contratista ajeno debe responder 404 o 403');
+
+        $rPutFuec = $this->putJson('/api/v1/contract-extract/fuecs/'.$this->datos['B']['fuec'], [
+            'object_contract' => 'MODIFICADO ILEGALMENTE',
+        ]);
+        $this->assertContains($rPutFuec->status(), [403, 404], 'PUT de FUEC ajeno debe responder 404 o 403');
     }
 }

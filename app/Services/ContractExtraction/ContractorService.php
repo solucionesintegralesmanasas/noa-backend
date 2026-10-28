@@ -11,6 +11,7 @@ use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -180,8 +181,12 @@ class ContractorService extends BaseService
     public function updateContractor(string $uuid, array $data): Model
     {
         return $this->transaction(function () use ($uuid, $data) {
-            /** @var Contractor $record */
-            $record = Contractor::query()->where('uuid', $uuid)->firstOrFail();
+            /** @var Contractor|null $record */
+            $record = $this->findByUuid($uuid);
+            if (! $record) {
+                throw (new ModelNotFoundException)->setModel(Contractor::class, [$uuid]);
+            }
+
             $record->update([
                 'company_uuid' => $data['company_uuid'] ?? $record->company_uuid,
                 'document_type_uuid' => $data['document_type_uuid'] ?? $record->document_type_uuid,
@@ -222,8 +227,12 @@ class ContractorService extends BaseService
     public function toggleContractorStatus(string $uuid): Model
     {
         return $this->transaction(function () use ($uuid) {
-            /** @var Contractor $record */
-            $record = Contractor::query()->where('uuid', $uuid)->firstOrFail();
+            /** @var Contractor|null $record */
+            $record = $this->findByUuid($uuid);
+            if (! $record) {
+                throw (new ModelNotFoundException)->setModel(Contractor::class, [$uuid]);
+            }
+
             $record->update([
                 'status' => $record->status === 1 ? 0 : 1,
             ]);

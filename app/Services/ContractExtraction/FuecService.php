@@ -592,8 +592,11 @@ class FuecService extends BaseService
     public function updateFuec(string $uuid, array $data): Model
     {
         return $this->transaction(function () use ($uuid, $data) {
-            /** @var Fuec $record */
-            $record = Fuec::query()->where('uuid', $uuid)->firstOrFail();
+            /** @var Fuec|null $record */
+            $record = $this->findByUuid($uuid);
+            if (! $record) {
+                throw (new ModelNotFoundException)->setModel(Fuec::class, [$uuid]);
+            }
 
             // Sincronizar contratista si se proporciona
             if (isset($data['contractor']) && is_array($data['contractor'])) {
