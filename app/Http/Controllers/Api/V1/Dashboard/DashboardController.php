@@ -43,10 +43,8 @@ class DashboardController extends Controller
 
         $hasConductorRole = method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
         $isAdminOrSuper = method_exists($user, 'hasRole') && (
-            $user->hasRole('super-admin') ||
-            $user->hasRole('Super Admin') ||
-            $user->hasRole('ADMINISTRADOR') ||
-            $user->hasRole('admin')
+            $user->hasRole('SUPERADMIN') ||
+            $user->hasRole('ADMIN_EMPRESA')
         );
 
         if (! $hasConductorRole && ! $isAdminOrSuper) {
