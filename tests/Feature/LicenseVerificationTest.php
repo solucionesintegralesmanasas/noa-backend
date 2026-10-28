@@ -81,19 +81,26 @@ class LicenseVerificationTest extends TestCase
 
     public function test_verificar_clave_valida_fallback_offline(): void
     {
-        // Simulamos fallback offline desactivando la verificación online en verifyKey
-        // utilizando una clave en BD que se recupera vía verifyOffline
+        // Si la verificación online está deshabilitada en la licencia, debe activar el fallback offline
         $licencia = $this->crearLicencia([
             'online_verification_enabled' => false,
         ]);
 
-        // Si verifyKey() por alguna razón no valida (ej. clave no HMAC o forzado a offline),
-        // verifyOffline incrementa offline_verifications.
-        // Forzamos el camino offline llamando directamente a verifyOffline a través de verify()
-        $resultado = app(\App\Services\LicenseService::class)->verifyOffline($licencia->license_key);
+        $respuesta = $this->getJson("/api/v1/license/verify/{$licencia->license_key}");
 
-        $this->assertNotNull($resultado);
-        $this->assertSame('valid', $resultado['status']);
+        $respuesta->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'status' => 'valid',
+                'data' => [
+                    'status' => 'valid',
+                    'company_uuid' => $licencia->company_uuid,
+                    'mode' => 'offline',
+                    'offline_uses' => 1,
+                ],
+                'message' => 'Licencia verificada en modo offline',
+            ]);
+
         $this->assertSame(1, $licencia->fresh()->offline_verifications);
     }
 

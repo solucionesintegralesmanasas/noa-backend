@@ -92,6 +92,9 @@ class LicenseService
                     $short->expire();
                     return ['status' => 'expired', 'company_uuid' => $short->company_uuid];
                 }
+                if (! $short->online_verification_enabled) {
+                    return null;
+                }
                 return [
                     'status' => 'valid',
                     'company_uuid' => $short->company_uuid,
@@ -288,23 +291,7 @@ class LicenseService
                 ];
             }
 
-            if ($online['status'] === 'expired') {
-                return [
-                    'success' => false,
-                    'status' => 'expired',
-                    'error' => 'expired',
-                    'message' => 'Licencia vencida. Contacte a su administrador.',
-                ];
-            }
-
-            if ($online['status'] === 'revoked') {
-                return [
-                    'success' => false,
-                    'status' => 'revoked',
-                    'error' => 'revoked',
-                    'message' => 'Licencia revocada. Contacte a su administrador.',
-                ];
-            }
+            return $this->formatLicenseErrorResponse($online['status']);
         }
 
         // 2. Fallback offline (usando BD local si aplica)
@@ -325,23 +312,7 @@ class LicenseService
                 ];
             }
 
-            if ($offline['status'] === 'expired') {
-                return [
-                    'success' => false,
-                    'status' => 'expired',
-                    'error' => 'expired',
-                    'message' => 'Licencia vencida. Contacte a su administrador.',
-                ];
-            }
-
-            if ($offline['status'] === 'revoked') {
-                return [
-                    'success' => false,
-                    'status' => 'revoked',
-                    'error' => 'revoked',
-                    'message' => 'Licencia revocada. Contacte a su administrador.',
-                ];
-            }
+            return $this->formatLicenseErrorResponse($offline['status']);
         }
 
         // 3. Clave inválida o inexistente
@@ -350,6 +321,37 @@ class LicenseService
             'status' => 'invalid',
             'error' => 'invalid',
             'message' => 'Código de licencia inválido o no encontrado',
+        ];
+    }
+
+    /**
+     * Da formato a la respuesta de error de verificación según el estatus de la licencia.
+     */
+    private function formatLicenseErrorResponse(string $status): array
+    {
+        if ($status === 'expired') {
+            return [
+                'success' => false,
+                'status' => 'expired',
+                'error' => 'expired',
+                'message' => 'Licencia vencida. Contacte a su administrador.',
+            ];
+        }
+
+        if ($status === 'revoked') {
+            return [
+                'success' => false,
+                'status' => 'revoked',
+                'error' => 'revoked',
+                'message' => 'Licencia revocada. Contacte a su administrador.',
+            ];
+        }
+
+        return [
+            'success' => false,
+            'status' => $status,
+            'error' => $status,
+            'message' => "Licencia en estado {$status}. Contacte a su administrador.",
         ];
     }
 
