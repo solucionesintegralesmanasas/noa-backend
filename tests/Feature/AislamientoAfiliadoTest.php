@@ -533,4 +533,43 @@ class AislamientoAfiliadoTest extends TestCase
         $this->getJson('/api/v1/contract-extract/fuecs/'.$this->datos['A']['fuec'])->assertOk();
         $this->assertSame(404, $this->getJson('/api/v1/contract-extract/fuecs/'.$this->datos['B']['fuec'])->status(), 'FUEC ajeno');
     }
+
+    // ── Aislamiento de Radicación TO para AFILIADO cuando aplique (Issue #7) ────
+
+    public function test_el_afiliado_con_permiso_de_radicacion_solo_ve_sus_expedientes(): void
+    {
+        Permission::findOrCreate('radicacion_to.index', 'api');
+        setPermissionsTeamId(null);
+        $this->afiliadoA->givePermissionTo('radicacion_to.index');
+
+        $expedienteA = $this->insertar('procedures', [
+            'company_uuid' => $this->empresaE,
+            'vehicle_uuid' => $this->datos['A']['vehiculo'],
+            'procedure_code' => 'RAD-AFI-A',
+            'link_type' => 'CAMBIO_DE_EMPRESA',
+            'procedure_type' => 'INCLUSION_DE_POLIZAS',
+            'status' => 'EN_PROCESO',
+        ]);
+
+        $expedienteB = $this->insertar('procedures', [
+            'company_uuid' => $this->empresaE,
+            'vehicle_uuid' => $this->datos['B']['vehiculo'],
+            'procedure_code' => 'RAD-AFI-B',
+            'link_type' => 'CAMBIO_DE_EMPRESA',
+            'procedure_type' => 'INCLUSION_DE_POLIZAS',
+            'status' => 'EN_PROCESO',
+        ]);
+
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $r = $this->getJson('/api/v1/procedure/radicacion/expedientes?company_uuid='.$this->empresaE);
+        $r->assertOk();
+        $uuids = $this->uuids($r);
+
+        $this->assertContains($expedienteA, $uuids, 'Debe ver su propio expediente de radicación');
+        $this->assertNotContains($expedienteB, $uuids, 'No debe ver el expediente de otro afiliado');
+
+        $this->getJson('/api/v1/procedure/radicacion/'.$expedienteA.'/detalle')->assertOk();
+        $this->assertSame(404, $this->getJson('/api/v1/procedure/radicacion/'.$expedienteB.'/detalle')->status(), 'Detalle ajeno debe responder 404');
+    }
 }

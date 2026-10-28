@@ -96,7 +96,7 @@ abstract class BaseService
      */
     private const TABLAS_AISLADAS_POR_AFILIADO = [
         'vehicles', 'vehicle_documents', 'operation_cards', 'vehicle_inspections', 'owners_drivers',
-        'third_parties', 'contractors', 'fuec',
+        'third_parties', 'contractors', 'fuec', 'procedures',
     ];
 
     /**
@@ -632,6 +632,16 @@ abstract class BaseService
                         } else {
                             $query->whereRaw('1 = 0');
                         }
+                    }
+                } elseif ($table === 'procedures') {
+                    if ($user->hasRole('AFILIADO')) {
+                        $query->where(function ($q) use ($affiliateUuid) {
+                            $q->where('procedures.third_party_uuid', $affiliateUuid)
+                                ->orWhereHas('vehicle', function ($vq) use ($affiliateUuid) {
+                                    $vq->where('vehicles.third_party_uuid', $affiliateUuid)
+                                        ->orWhereHas('owners', fn ($o) => $o->where('third_party_uuid', $affiliateUuid));
+                                });
+                        });
                     }
                 } elseif (in_array('third_party_uuid', $fillable)) {
                     $query->where($table . '.third_party_uuid', $affiliateUuid);

@@ -42,8 +42,8 @@ class RadicacionFirmaTest extends TestCase
         parent::setUp();
 
         $this->empresa = $this->insertar('companies', ['business_name' => 'Expedientes TSB', 'is_active' => true]);
-        $this->padre = $this->insertar('procedures', ['company_uuid' => $this->empresa]);
-        $this->hijo = $this->insertar('procedures', ['company_uuid' => $this->empresa, 'parent_procedure_uuid' => $this->padre]);
+        $this->padre = $this->insertar('procedures', ['company_uuid' => $this->empresa, 'procedure_code' => 'EXP-PADRE-'.Str::random(6)]);
+        $this->hijo = $this->insertar('procedures', ['company_uuid' => $this->empresa, 'parent_procedure_uuid' => $this->padre, 'procedure_code' => 'EXP-HIJO-'.Str::random(6)]);
         $this->contrato = $this->insertar('service_provision_contracts', [
             'company_uuid' => $this->empresa,
             'procedure_uuid' => $this->hijo,

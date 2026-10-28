@@ -115,19 +115,19 @@ class RadicacionService extends BaseService
                 'status' => 'EN_PROCESO',
             ];
             $ruta = $this->rutaPara($data['link_type']);
-            $padre = Procedure::create($base + [
+            $padre = Procedure::create(array_merge($base, [
                 'procedure_type' => $ruta[0],
                 'current_step' => $ruta[0],
                 'global_status' => 'EN_PROCESO',
-            ]);
+            ]));
             $hijos = [];
             foreach ($ruta as $paso) {
-                $hijos[] = Procedure::create($base + [
+                $hijos[] = Procedure::create(array_merge($base, [
                     'parent_procedure_uuid' => $padre->uuid,
                     'procedure_type' => $paso,
                     'procedure_code' => $codigo.'-'.substr($paso, 0, 3),
                     'status' => $paso === $ruta[0] ? 'EN_PROCESO' : 'RECIBIDO',
-                ]);
+                ]));
             }
 
             return ['expediente' => $padre->fresh(), 'pasos' => $hijos, 'ruta' => $ruta];
@@ -263,13 +263,22 @@ class RadicacionService extends BaseService
 
     public function listarExpedientes(int $perPage = 15, int $page = 1, string $search = '', ?string $companyUuid = null): \Illuminate\Contracts\Pagination\LengthAwarePaginator
     {
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
+
         $query = Procedure::with(['vehicle:id,uuid,vehicle_license_plate,line'])
             ->where(function ($q) {
                 $q->whereNull('parent_procedure_uuid')
                     ->orWhere('parent_procedure_uuid', '');
             })->orderByDesc('created_at');
+
         if ($companyUuid) {
-            $query->where('company_uuid', $companyUuid);
+            $this->applyCompanyFilter($query, $companyUuid);
         }
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
@@ -306,7 +315,9 @@ class RadicacionService extends BaseService
 
     public function detalleExpediente(string $uuid): array
     {
-        $exp = Procedure::with('vehicle')->where('uuid', $uuid)->firstOrFail();
+        $query = Procedure::with('vehicle')->where('uuid', $uuid);
+        $this->aislarPorAfiliado($query);
+        $exp = $query->firstOrFail();
         $ruta = $this->rutaPara($exp->link_type ?? 'CAMBIO_DE_EMPRESA');
         $hijos = Procedure::where('parent_procedure_uuid', $exp->uuid)->orderBy('id')->get();
         $linea = [];
@@ -372,7 +383,9 @@ class RadicacionService extends BaseService
     {
         return $this->transaction(function () use ($hijoUuid) {
             // Bloqueo de fila: dos clics simultáneos no deben cerrar el mismo paso dos veces.
-            $hijo = Procedure::where('uuid', $hijoUuid)->lockForUpdate()->firstOrFail();
+            $query = Procedure::where('uuid', $hijoUuid)->lockForUpdate();
+            $this->aislarPorAfiliado($query);
+            $hijo = $query->firstOrFail();
             if ($hijo->status === 'COMPLETADO') {
                 abort(422, 'Este paso ya fue completado.');
             }
