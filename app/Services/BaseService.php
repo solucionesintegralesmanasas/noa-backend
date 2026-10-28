@@ -96,6 +96,7 @@ abstract class BaseService
      */
     private const TABLAS_AISLADAS_POR_AFILIADO = [
         'vehicles', 'vehicle_documents', 'operation_cards', 'vehicle_inspections', 'owners_drivers',
+        'third_parties', 'contractors', 'fuec',
     ];
 
     /**

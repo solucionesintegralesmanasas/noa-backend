@@ -13,6 +13,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -588,7 +589,7 @@ class ThirdPartyService extends BaseService
             $record = $this->findByUuid($uuid);
 
             if (! $record) {
-                throw new \RuntimeException('ThirdParty not found.');
+                throw (new ModelNotFoundException)->setModel(ThirdParty::class, [$uuid]);
             }
 
             $this->asegurarCorreoLibreDeOtroTercero((string) ($data['email'] ?? $record->email), (string) $record->company_uuid, $record->uuid);
@@ -672,7 +673,7 @@ class ThirdPartyService extends BaseService
     public function deleteThirdParty(string $uuid): void
     {
         if (! $this->delete($uuid)) {
-            throw new \RuntimeException('Failed to delete ThirdParty.');
+            throw (new ModelNotFoundException)->setModel(ThirdParty::class, [$uuid]);
         }
     }
 
@@ -682,7 +683,7 @@ class ThirdPartyService extends BaseService
     public function toggleStatusThirdParty(string $uuid): Model
     {
         if (! $this->toggleStatus($uuid, 'is_active')) {
-            throw new \RuntimeException('Failed to toggle status for ThirdParty.');
+            throw (new ModelNotFoundException)->setModel(ThirdParty::class, [$uuid]);
         }
 
         return $this->findByUuid($uuid);
@@ -710,6 +711,8 @@ class ThirdPartyService extends BaseService
                     $q->orderByDesc('start_date');
                 },
             ]);
+
+        $this->aislarPorAfiliado($query);
 
         $record = $query->where('uuid', $thirdPartyUuid)->firstOrFail();
 

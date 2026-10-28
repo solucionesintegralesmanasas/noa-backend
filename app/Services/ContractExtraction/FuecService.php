@@ -93,6 +93,15 @@ class FuecService extends BaseService
             'contractor:uuid,company_name,document_number',
         ]);
 
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
+
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
         }
@@ -244,6 +253,15 @@ class FuecService extends BaseService
     public function getAllFuecs(?string $companyUuid = null, ?string $thirdPartyUuid = null): Collection
     {
         $query = $this->query();
+
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
 
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);

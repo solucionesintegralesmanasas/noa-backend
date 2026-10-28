@@ -52,6 +52,15 @@ class ContractorService extends BaseService
     ): LengthAwarePaginator {
         $query = $this->query();
 
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
+
         if ($companyUuid) {
             $this->applyCompanyFilter($query, $companyUuid);
         }
@@ -114,9 +123,24 @@ class ContractorService extends BaseService
     /**
      * Método getAllContractors.
      */
-    public function getAllContractors(): Collection
+    public function getAllContractors(?string $companyUuid = null): Collection
     {
-        return $this->all();
+        if (! $companyUuid) {
+            $companyUuid = request()->attributes->get('current_company_uuid');
+        }
+
+        $user = \Illuminate\Support\Facades\Auth::user();
+        if (! $companyUuid && $user) {
+            $companyUuid = $user->companies()->first()?->uuid;
+        }
+
+        $query = $this->query();
+
+        if ($companyUuid) {
+            $this->applyCompanyFilter($query, $companyUuid);
+        }
+
+        return $query->get();
     }
 
     /**
