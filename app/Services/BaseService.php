@@ -150,7 +150,7 @@ abstract class BaseService
      * puede abrir por UUID registros de otros afiliados de su empresa; cerrarlo requiere su propio spec.
      * Sin empresa resoluble el acceso se cierra (no se devuelve nada) en vez de quedar abierto.
      */
-    protected function aislarPorAfiliado(Builder $query): void
+    public function aislarPorAfiliado(Builder $query): void
     {
         $user = Auth::user();
         if (! $user || ! $user->hasRole('AFILIADO') || ! in_array($this->model->getTable(), self::TABLAS_AISLADAS_POR_AFILIADO, true)) {

@@ -30,6 +30,7 @@ return new class extends Migration
             $filas = DB::table('procedures')
                 ->where('company_uuid', $dup->company_uuid)
                 ->where('procedure_code', $dup->procedure_code)
+                ->orderByRaw('CASE WHEN parent_procedure_uuid IS NULL OR parent_procedure_uuid = "" THEN 0 ELSE 1 END ASC')
                 ->orderBy('id', 'asc')
                 ->get();
 

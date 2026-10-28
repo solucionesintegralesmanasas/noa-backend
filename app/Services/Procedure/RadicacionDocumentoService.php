@@ -169,8 +169,9 @@ class RadicacionDocumentoService
      */
     public function datos(string $uuidExpediente, string $paso, string $clave): array
     {
-        $padre = Procedure::with(['company.municipality', 'city', 'territorialDirector', 'vehicle.brand', 'vehicle.vehicleClass', 'vehicle.operationCards'])
-            ->where('uuid', $uuidExpediente)->firstOrFail();
+        $query = Procedure::with(['company.municipality', 'city', 'territorialDirector', 'vehicle.brand', 'vehicle.vehicleClass', 'vehicle.operationCards']);
+        app(RadicacionService::class)->aislarPorAfiliado($query);
+        $padre = $query->where('uuid', $uuidExpediente)->firstOrFail();
 
         $hijos = Procedure::where('parent_procedure_uuid', $padre->uuid)->orderBy('id')->get();
         $hijo = $hijos->firstWhere('procedure_type', $paso);
