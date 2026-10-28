@@ -71,13 +71,17 @@ trait BelongsToCompany
     protected static function bootBelongsToCompany(): void
     {
         static::addGlobalScope('company', function (Builder $builder) {
+            // 1. Si el flujo está explícitamente exento, NUNCA restringir (incluso si hay un company_uuid en request)
+            if (self::isExemptFromCompanyContext()) {
+                self::registrarConsultaSinEmpresa($builder->getModel());
+
+                return;
+            }
+
             $companyUuid = self::resolveCurrentCompanyUuid();
 
             if ($companyUuid) {
                 $builder->where($builder->getModel()->getTable().'.company_uuid', $companyUuid);
-            } elseif (self::isExemptFromCompanyContext()) {
-                // Flujo explícitamente exento (cron, webcron, rutas públicas firmadas, bypass explícito):
-                self::registrarConsultaSinEmpresa($builder->getModel());
             } else {
                 // FALLA CERRADO (Issue #2): Sin contexto de empresa en flujo no exento.
                 // 1. Candado en base de datos: consulta imposible (1 = 0) para nunca filtrar datos ajenos.
@@ -90,11 +94,15 @@ trait BelongsToCompany
 
         static::creating(function (Model $model) {
             if (empty($model->company_uuid) && $model->isFillable('company_uuid')) {
+                if (self::isExemptFromCompanyContext()) {
+                    return;
+                }
+
                 $companyUuid = self::resolveCurrentCompanyUuid();
                 if ($companyUuid) {
                     $model->company_uuid = $companyUuid;
-                } elseif (! self::isExemptFromCompanyContext()) {
-                    throw new AccessDeniedHttpException('No se puede crear ' . class_basename($model) . ' sin contexto de empresa.');
+                } else {
+                    throw new AccessDeniedHttpException('No se puede crear '.class_basename($model).' sin contexto de empresa.');
                 }
             }
         });
