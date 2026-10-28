@@ -252,4 +252,117 @@ class LicenseService
         $license->save();
         return true;
     }
+
+    /**
+     * Unifica la verificación online con fallback offline en un solo flujo ordenado.
+     * Retorna un arreglo con estado de la operación y datos para la respuesta.
+     */
+    public function verify(string $licenseKey): array
+    {
+        $clave = trim($licenseKey);
+        if ($clave === '') {
+            return [
+                'success' => false,
+                'status' => 'invalid',
+                'error' => 'invalid',
+                'message' => 'Código de licencia inválido o no encontrado',
+            ];
+        }
+
+        // 1. Verificación primaria / online (BD o clave HMAC)
+        $online = $this->verifyKey($clave);
+        if ($online) {
+            if ($online['status'] === 'valid') {
+                $this->recordOnlineVerification($clave, $online['company_uuid']);
+
+                return [
+                    'success' => true,
+                    'status' => 'valid',
+                    'data' => [
+                        'status' => 'valid',
+                        'company_uuid' => $online['company_uuid'],
+                        'expires_at' => $online['expires_at'],
+                        'mode' => 'online_verified',
+                    ],
+                    'message' => 'Licencia verificada exitosamente',
+                ];
+            }
+
+            if ($online['status'] === 'expired') {
+                return [
+                    'success' => false,
+                    'status' => 'expired',
+                    'error' => 'expired',
+                    'message' => 'Licencia vencida. Contacte a su administrador.',
+                ];
+            }
+
+            if ($online['status'] === 'revoked') {
+                return [
+                    'success' => false,
+                    'status' => 'revoked',
+                    'error' => 'revoked',
+                    'message' => 'Licencia revocada. Contacte a su administrador.',
+                ];
+            }
+        }
+
+        // 2. Fallback offline (usando BD local si aplica)
+        $offline = $this->verifyOffline($clave);
+        if ($offline) {
+            if ($offline['status'] === 'valid') {
+                return [
+                    'success' => true,
+                    'status' => 'valid',
+                    'data' => [
+                        'status' => 'valid',
+                        'company_uuid' => $offline['company_uuid'],
+                        'expires_at' => $offline['expires_at'],
+                        'mode' => 'offline',
+                        'offline_uses' => $offline['offline_uses'],
+                    ],
+                    'message' => 'Licencia verificada en modo offline',
+                ];
+            }
+
+            if ($offline['status'] === 'expired') {
+                return [
+                    'success' => false,
+                    'status' => 'expired',
+                    'error' => 'expired',
+                    'message' => 'Licencia vencida. Contacte a su administrador.',
+                ];
+            }
+
+            if ($offline['status'] === 'revoked') {
+                return [
+                    'success' => false,
+                    'status' => 'revoked',
+                    'error' => 'revoked',
+                    'message' => 'Licencia revocada. Contacte a su administrador.',
+                ];
+            }
+        }
+
+        // 3. Clave inválida o inexistente
+        return [
+            'success' => false,
+            'status' => 'invalid',
+            'error' => 'invalid',
+            'message' => 'Código de licencia inválido o no encontrado',
+        ];
+    }
+
+    /**
+     * Obtener el detalle de una licencia por su clave.
+     */
+    public function detail(string $licenseKey): ?License
+    {
+        $clave = trim($licenseKey);
+        if ($clave === '') {
+            return null;
+        }
+
+        return License::where('license_key', $clave)->first();
+    }
 }
