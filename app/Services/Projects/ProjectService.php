@@ -8,11 +8,13 @@ use App\Models\Project;
 use App\Models\ProjectDriverVehicle;
 use App\Models\ServiceDeliveryControlSheet;
 use App\Services\BaseService;
+use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Servicio de negocio para la gestión de proyectos.
@@ -233,7 +235,9 @@ class ProjectService extends BaseService
     }
 
     /**
-     * Actualiza un proyecto y sincroniza sus asignaciones conductor-vehículo.
+     * Actualiza un proyecto, sincroniza sus asignaciones conductor-vehículo y,
+     * si cambiaron sus fechas de vigencia, propaga automáticamente las nuevas
+     * fechas a todas sus hojas de control abiertas (creando los días nuevos).
      */
     public function updateProject(string $uuid, array $data): Model
     {
@@ -243,6 +247,9 @@ class ProjectService extends BaseService
             if (! $record) {
                 throw new \RuntimeException('Project not found.');
             }
+
+            $oldStart = $record->start_date?->toDateString();
+            $oldEnd = $record->completion_date?->toDateString();
 
             $record->update([
                 'company_uuid' => $data['company_uuid'] ?? $record->company_uuid,
@@ -254,6 +261,27 @@ class ProjectService extends BaseService
             ]);
 
             $this->syncProjectAssignments($record, $data);
+
+            $newStart = $record->start_date?->toDateString();
+            $newEnd = $record->completion_date?->toDateString();
+            $cambioInicio = array_key_exists('start_date', $data) && $newStart !== null && $newStart !== $oldStart;
+            $cambioFin = array_key_exists('completion_date', $data) && $newEnd !== null && $newEnd !== $oldEnd;
+
+            if ($cambioInicio || $cambioFin) {
+                try {
+                    app(ServiceDeliveryControlSheetService::class)->syncProjectControlSheetsDates(
+                        $record,
+                        $cambioInicio ? $newStart : null,
+                        $cambioFin ? $newEnd : null
+                    );
+                } catch (ValidationException $e) {
+                    $errores = $e->errors();
+                    if (isset($errores['end_date']) && ! isset($errores['completion_date'])) {
+                        $errores['completion_date'] = $errores['end_date'];
+                    }
+                    throw ValidationException::withMessages($errores);
+                }
+            }
 
             $this->handlePurchaseOrderFile($record, $data);
 

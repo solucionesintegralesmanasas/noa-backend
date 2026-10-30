@@ -952,6 +952,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             $this->serviceInternalControlSubcontractedService->createServiceInternalControlSubcontracted([
                 'vehicle_class_uuid' => $data['vehicle_class_uuid'] ?? null,
                 'service_delivery_control_sheet_uuid' => $sheet->uuid,
+                'fuec_uuid' => $data['fuec_uuid'] ?? null,
                 'vehicle_license_plate' => $data['vehicle_license_plate'],
                 'driver_name_and_surname' => $data['driver_name_and_surname'],
                 'driver_license_number' => $data['driver_license_number'] ?? 'N/A',
@@ -1047,6 +1048,177 @@ class ServiceDeliveryControlSheetService extends BaseService
             'daily_sheets' => (int) $dailySheets,
             'sheets' => $hojas,
         ];
+    }
+
+    /**
+     * Actualización masiva de todas las hojas de control abiertas de un proyecto:
+     * permite ampliar o modificar el rango de fechas (y opcionalmente el recorrido)
+     * en bloque para el proyecto completo o para los vehículos seleccionados,
+     * sincronizando automáticamente las planillas diarias hijas y la vigencia del proyecto.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{updated: int, daily_sheets: int, sheets: array<int, Model>}
+     */
+    public function updateBulkForProject(array $data): array
+    {
+        $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
+        if (! $companyUuid) {
+            throw ValidationException::withMessages([
+                'company_uuid' => 'No hay empresa activa en la petición.',
+            ]);
+        }
+
+        $projectUuid = (string) $data['project_uuid'];
+        $project = Project::query()
+            ->where('company_uuid', $companyUuid)
+            ->where('uuid', $projectUuid)
+            ->first();
+
+        if (! $project) {
+            throw ValidationException::withMessages([
+                'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
+            ]);
+        }
+
+        $newStart = ! empty($data['start_date'])
+            ? Carbon::parse($data['start_date'])->toDateString()
+            : null;
+        $newEnd = array_key_exists('end_date', $data)
+            ? (! empty($data['end_date']) ? Carbon::parse($data['end_date'])->toDateString() : $newStart)
+            : null;
+
+        if ($newStart && $newEnd && Carbon::parse($newEnd)->lt(Carbon::parse($newStart))) {
+            throw ValidationException::withMessages([
+                'end_date' => 'La fecha de fin debe ser igual o posterior a la fecha de inicio.',
+            ]);
+        }
+
+        $dailyRoute = array_key_exists('daily_route', $data)
+            ? trim((string) ($data['daily_route'] ?? ''))
+            : null;
+
+        $vehicleUuids = ! empty($data['vehicle_uuids'])
+            ? array_values(array_unique(array_filter((array) $data['vehicle_uuids'])))
+            : null;
+
+        $actualizadas = $this->transaction(function () use ($project, $newStart, $newEnd, $dailyRoute, $vehicleUuids) {
+            // Si las nuevas fechas amplían la vigencia actual del proyecto, se
+            // extiende el proyecto para mantener coherencia entre proyecto y hojas.
+            $projStart = $project->start_date ? Carbon::parse($project->start_date)->toDateString() : null;
+            $projEnd = $project->completion_date ? Carbon::parse($project->completion_date)->toDateString() : null;
+            $cambiosProyecto = [];
+
+            if ($newStart && (! $projStart || $newStart < $projStart)) {
+                $cambiosProyecto['start_date'] = $newStart;
+            }
+            if ($newEnd && (! $projEnd || $newEnd > $projEnd)) {
+                $cambiosProyecto['completion_date'] = $newEnd;
+            }
+            if (! empty($cambiosProyecto)) {
+                $project->update($cambiosProyecto);
+            }
+
+            return $this->syncProjectControlSheetsDates(
+                $project,
+                $newStart,
+                $newEnd,
+                $dailyRoute,
+                $vehicleUuids
+            );
+        });
+
+        $uuidsPadres = array_map(static fn (Model $h) => $h->getAttribute('uuid'), $actualizadas);
+        $dailySheets = empty($uuidsPadres)
+            ? 0
+            : ServiceDeliveryControlSheet::query()
+                ->whereIn('parent_uuid', $uuidsPadres)
+                ->count('uuid');
+
+        return [
+            'updated' => count($actualizadas),
+            'daily_sheets' => (int) $dailySheets,
+            'sheets' => $actualizadas,
+        ];
+    }
+
+    /**
+     * Sincroniza las fechas (y opcionalmente el recorrido) de todas las hojas
+     * padre de un proyecto (incluyendo las que ya se habían cerrado al terminar
+     * su vigencia anterior), propagando a sus planillas diarias abiertas y
+     * generando los días nuevos cuando el rango se extiende.
+     *
+     * @param  array<int, string>|null  $vehicleUuids
+     * @return array<int, Model>
+     */
+    public function syncProjectControlSheetsDates(
+        Project $project,
+        ?string $newStart = null,
+        ?string $newEnd = null,
+        ?string $dailyRoute = null,
+        ?array $vehicleUuids = null
+    ): array {
+        $query = ServiceDeliveryControlSheet::withoutGlobalScopes()
+            ->where('project_uuid', $project->uuid)
+            ->whereNull('parent_uuid')
+            ->where('retirada_de_proyecto', false)
+            ->orderBy('id');
+
+        if (! empty($vehicleUuids)) {
+            $query->whereHas('internalControl', fn ($q) => $q->whereIn('vehicle_uuid', $vehicleUuids));
+        }
+
+        $hojasProyecto = $query->get();
+        $actualizadas = [];
+
+        foreach ($hojasProyecto as $hoja) {
+            $estabaCerrada = ! (bool) $hoja->is_active;
+
+            $hojaStart = $hoja->start_date
+                ? Carbon::parse($hoja->start_date)->toDateString()
+                : ($hoja->service_date ? Carbon::parse($hoja->service_date)->toDateString() : null);
+            $hojaEnd = $hoja->end_date
+                ? Carbon::parse($hoja->end_date)->toDateString()
+                : $hojaStart;
+
+            $targetStart = $newStart ?? $hojaStart;
+            $targetEnd = $newEnd ?? $hojaEnd;
+
+            $payload = [
+                'start_date' => $targetStart,
+                'end_date' => $targetEnd,
+                'service_date' => $targetStart,
+            ];
+
+            if ($dailyRoute !== null) {
+                $payload['daily_route'] = $dailyRoute !== '' ? $dailyRoute : null;
+            }
+
+            // Si la hoja padre estaba cerrada (porque había finalizado sus días
+            // previos), se habilita para permitir la extensión de fechas y la
+            // creación de los nuevos días hijos, conservando intactos los días
+            // hijos que ya estaban cerrados.
+            if ($estabaCerrada) {
+                $hoja->update(['is_active' => true]);
+            }
+
+            $hojaActualizada = $this->updateServiceDeliveryControlSheet($hoja->uuid, $payload);
+
+            if ($estabaCerrada) {
+                $tieneDiasAbiertos = ServiceDeliveryControlSheet::withoutGlobalScopes()
+                    ->where('parent_uuid', $hoja->uuid)
+                    ->where('is_active', true)
+                    ->exists();
+
+                if (! $tieneDiasAbiertos) {
+                    $hojaActualizada->update(['is_active' => false]);
+                    $hojaActualizada = $hojaActualizada->fresh(['project', 'routes', 'internalControl', 'subcontractedControl']);
+                }
+            }
+
+            $actualizadas[] = $hojaActualizada;
+        }
+
+        return $actualizadas;
     }
 
     /**
@@ -1180,37 +1352,9 @@ class ServiceDeliveryControlSheetService extends BaseService
             // Los hijos cubren TODOS los días incluyendo el de inicio, para que
             // cada día (incluido el primero) tenga su planilla diaria trabajable.
             $currentDate = $startDate->copy();
-            $parentRoutes = $record->routes()->get();
 
             while (! $currentDate->greaterThan($endDate)) {
-                $child = ServiceDeliveryControlSheet::create([
-                    'official_name_and_surname' => $data['official_name_and_surname'] ?? null,
-                    'service_date' => $currentDate->toDateString(),
-                    'start_date' => $startDate->toDateString(),
-                    'end_date' => $endDate->toDateString(),
-                    'parent_uuid' => $record->uuid,
-                    'daily_route' => $dailyRoute,
-                    'type_of_control_sheet' => $type,
-                    'is_active' => true,
-                    'company_uuid' => $companyUuid,
-                    'project_uuid' => $data['project_uuid'] ?? null,
-                ]);
-
-                $this->createControlForSheet($child, $data, $type, true);
-
-                foreach ($parentRoutes as $pr) {
-                    ServiceDeliveryControlSheetRoute::create([
-                        'uuid' => (string) Str::uuid(),
-                        'service_delivery_control_sheet_uuid' => $child->uuid,
-                        'order_index' => $pr->order_index,
-                        'origin' => $pr->origin,
-                        'destination' => $pr->destination,
-                        'funcionario_nombre' => $pr->funcionario_nombre,
-                        'funcionario_cc' => $pr->funcionario_cc,
-                        'is_active' => true,
-                    ]);
-                }
-
+                $this->crearHijaDiaria($record, $currentDate->copy(), $data, $type);
                 $currentDate->addDay();
             }
         }
@@ -1218,20 +1362,88 @@ class ServiceDeliveryControlSheetService extends BaseService
         return $record->fresh(['project', 'routes', 'children']);
     }
 
+    /**
+     * Crea una planilla diaria hija con su control y los recorridos heredados
+     * del padre. La usan la creación y la ampliación de rango al editar.
+     */
+    private function crearHijaDiaria(ServiceDeliveryControlSheet $parent, Carbon $fecha, array $data, string $type): ServiceDeliveryControlSheet
+    {
+        $child = ServiceDeliveryControlSheet::create([
+            'official_name_and_surname' => $data['official_name_and_surname'] ?? $parent->official_name_and_surname,
+            'service_date' => $fecha->toDateString(),
+            'start_date' => $parent->start_date,
+            'end_date' => $parent->end_date,
+            'parent_uuid' => $parent->uuid,
+            'daily_route' => $parent->daily_route,
+            'type_of_control_sheet' => $type,
+            'is_active' => true,
+            'company_uuid' => $parent->company_uuid,
+            'project_uuid' => $parent->project_uuid,
+        ]);
+
+        // La edición puede ser parcial (p. ej. solo el proyecto): el control de
+        // la hija nueva hereda la pareja, el FUEC y los datos del conductor del
+        // padre cuando el cuerpo no los trae. Sin esto, `vehicle_uuid` y
+        // `third_party_uuid` (NOT NULL) romperían el alta del control.
+        $this->createControlForSheet($child, $this->datosDeControlHeredados($parent, $data), $type, true);
+
+        foreach ($parent->routes()->get() as $route) {
+            ServiceDeliveryControlSheetRoute::create([
+                'uuid' => (string) Str::uuid(),
+                'service_delivery_control_sheet_uuid' => $child->uuid,
+                'order_index' => $route->order_index,
+                'origin' => $route->origin,
+                'destination' => $route->destination,
+                'funcionario_nombre' => $route->funcionario_nombre,
+                'funcionario_cc' => $route->funcionario_cc,
+                'is_active' => true,
+            ]);
+        }
+
+        return $child;
+    }
+
     public function updateServiceDeliveryControlSheet(string $uuid, array $data): Model
     {
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
             $this->asegurarEditable($record, 'update');
-            $type = isset($data['type_of_control_sheet']) ? $this->normalizeType($data['type_of_control_sheet']) : $record->type_of_control_sheet;
+
+            // El tipo define el control hijo y el flujo de cierre: no se cruza
+            // interno ↔ externo después de creada (dejaría controles huérfanos).
+            if (isset($data['type_of_control_sheet'])
+                && $this->normalizeType($data['type_of_control_sheet']) !== $record->type_of_control_sheet) {
+                throw ValidationException::withMessages([
+                    'type_of_control_sheet' => 'El tipo de hoja no se puede cambiar después de crearla.',
+                ]);
+            }
+            $type = $record->type_of_control_sheet;
 
             $newProject = $data['project_uuid'] ?? $record->project_uuid;
-            $newStart = $data['start_date'] ?? ($record->start_date ? Carbon::parse($record->start_date)->toDateString() : null);
-            $newEnd = $data['end_date'] ?? ($record->end_date ? Carbon::parse($record->end_date)->toDateString() : null);
+            $newStart = ! empty($data['start_date'])
+                ? Carbon::parse($data['start_date'])->toDateString()
+                : ($record->start_date ? Carbon::parse($record->start_date)->toDateString() : null);
 
-            // El proyecto nuevo debe ser de la misma empresa del registro; si no,
-            // la planilla quedaría vinculada a un proyecto de otra cuenta.
-            $this->validarPertenencia($record->company_uuid, ['project_uuid' => $newProject]);
+            // `end_date` vacío significa servicio de un solo día (mismo criterio
+            // del formulario); si la clave no llega, se conserva la del registro.
+            $newEnd = array_key_exists('end_date', $data)
+                ? (! empty($data['end_date']) ? Carbon::parse($data['end_date'])->toDateString() : $newStart)
+                : ($record->end_date ? Carbon::parse($record->end_date)->toDateString() : $newStart);
+
+            if ($newStart && $newEnd && Carbon::parse($newEnd)->lt(Carbon::parse($newStart))) {
+                throw ValidationException::withMessages([
+                    'end_date' => 'La fecha de fin debe ser igual o posterior a la fecha de inicio.',
+                ]);
+            }
+
+            // El proyecto, el vehículo, el tercero y el FUEC deben ser de la
+            // empresa del registro; la planilla no cambia de empresa.
+            $this->validarPertenencia($record->company_uuid, [
+                'project_uuid' => $newProject,
+                'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
+                'third_party_uuid' => $data['third_party_uuid'] ?? null,
+                'fuec_uuid' => $data['fuec_uuid'] ?? null,
+            ]);
             $this->validateProjectDates($newProject, $newStart, $newEnd);
 
             $dailyRoute = $this->buildDailyRoute(
@@ -1247,7 +1459,12 @@ class ServiceDeliveryControlSheetService extends BaseService
 
             $record->update([
                 'official_name_and_surname' => $data['official_name_and_surname'] ?? $record->official_name_and_surname,
-                'service_date' => $data['service_date'] ?? $record->service_date,
+                // La hija conserva su día; el padre toma la fecha de inicio.
+                'service_date' => $record->parent_uuid
+                    ? ($data['service_date'] ?? $record->service_date)
+                    : ($newStart ?? $record->service_date),
+                'start_date' => $newStart,
+                'end_date' => $newEnd,
                 'daily_route' => $dailyRoute,
                 'start_time' => $data['start_time'] ?? $record->start_time,
                 'end_time' => $data['end_time'] ?? $record->end_time,
@@ -1261,7 +1478,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'availability_reason' => $dayKind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
                     ? mb_substr(trim((string) $availabilityReason), 0, 255)
                     : null,
-                'is_active' => $data['is_active'] ?? $record->is_active,
+                // `is_active` no se toma del cuerpo: lo controla el cierre.
                 'project_uuid' => $newProject,
             ]);
 
@@ -1269,8 +1486,234 @@ class ServiceDeliveryControlSheetService extends BaseService
                 $this->syncRoutes($record, $data['routes']);
             }
 
-            return $record->fresh(['project', 'routes']);
+            $this->sincronizarControlDeHoja($record, $data, $type);
+
+            if (! $record->parent_uuid) {
+                $this->sincronizarDiasDeLaHoja($record, $data, $type);
+            }
+
+            return $record->fresh(['project', 'routes', 'internalControl', 'subcontractedControl']);
         });
+    }
+
+    /**
+     * Sincroniza el control interno/subcontratado de la hoja con los datos del
+     * formulario (vehículo, conductor, placa, clase y FUEC). Si la hoja no
+     * tenía control, lo crea; así la edición también repara hojas históricas.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function sincronizarControlDeHoja(ServiceDeliveryControlSheet $sheet, array $data, string $type): void
+    {
+        $valor = static fn (string $clave, mixed $actual): mixed => array_key_exists($clave, $data)
+            ? $data[$clave]
+            : $actual;
+
+        $control = $sheet->internalControl()->first();
+
+        if (! $this->isExternalType($type)) {
+            $vehicleUuid = $valor('vehicle_uuid', $control?->vehicle_uuid);
+            $thirdPartyUuid = $valor('third_party_uuid', $control?->third_party_uuid);
+
+            if (! $control && ! $vehicleUuid && ! $thirdPartyUuid) {
+                return;
+            }
+
+            $payload = [
+                'company_uuid' => $sheet->company_uuid,
+                'vehicle_uuid' => $vehicleUuid,
+                'third_party_uuid' => $thirdPartyUuid,
+                'fuec_uuid' => $valor('fuec_uuid', $control?->fuec_uuid),
+                'service_delivery_control_sheet_uuid' => $sheet->uuid,
+                'is_active' => $control ? (bool) $control->is_active : true,
+            ];
+
+            if ($control) {
+                $this->serviceInternalControlService->updateServiceInternalControl($control->uuid, $payload);
+            } else {
+                $this->serviceInternalControlService->createServiceInternalControl($payload);
+            }
+
+            return;
+        }
+
+        // Externo/subcontratado: el vínculo de plataforma es opcional y solo se
+        // mantiene si la hoja ya lo tenía o si el formulario envía un par.
+        $vehicleUuid = $valor('vehicle_uuid', $control?->vehicle_uuid);
+        $thirdPartyUuid = $valor('third_party_uuid', $control?->third_party_uuid);
+
+        if ($control || $vehicleUuid || $thirdPartyUuid) {
+            $payload = [
+                'company_uuid' => $sheet->company_uuid,
+                'vehicle_uuid' => $vehicleUuid,
+                'third_party_uuid' => $thirdPartyUuid,
+                'fuec_uuid' => $valor('fuec_uuid', $control?->fuec_uuid),
+                'service_delivery_control_sheet_uuid' => $sheet->uuid,
+                'is_active' => $control ? (bool) $control->is_active : true,
+            ];
+
+            if ($control) {
+                $this->serviceInternalControlService->updateServiceInternalControl($control->uuid, $payload);
+            } else {
+                $this->serviceInternalControlService->createServiceInternalControl($payload);
+            }
+        }
+
+        $sub = $sheet->subcontractedControl()->first();
+        $placa = $valor('vehicle_license_plate', $sub?->vehicle_license_plate);
+        $conductor = $valor('driver_name_and_surname', $sub?->driver_name_and_surname);
+
+        if (! $placa && ! $conductor && ! $sub) {
+            return;
+        }
+
+        $payload = [
+            'vehicle_class_uuid' => $valor('vehicle_class_uuid', $sub?->vehicle_class_uuid),
+            'fuec_uuid' => $valor('fuec_uuid', $sub?->fuec_uuid),
+            'service_delivery_control_sheet_uuid' => $sheet->uuid,
+            'vehicle_license_plate' => $placa,
+            'driver_name_and_surname' => $conductor,
+            'driver_license_number' => $valor('driver_license_number', $sub?->driver_license_number) ?: 'N/A',
+            'is_active' => $sub ? (bool) $sub->is_active : true,
+        ];
+
+        if ($sub) {
+            $this->serviceInternalControlSubcontractedService->updateServiceInternalControlSubcontracted($sub->uuid, $payload);
+        } else {
+            $this->serviceInternalControlSubcontractedService->createServiceInternalControlSubcontracted($payload);
+        }
+    }
+
+    /**
+     * Ajusta las planillas diarias al rango de fechas del padre: propaga a las
+     * abiertas, crea los días nuevos y elimina solo días abiertos sin evidencia
+     * (los cerrados o con datos operativos bloquean el recorte con 422).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function sincronizarDiasDeLaHoja(ServiceDeliveryControlSheet $parent, array $data, string $type): void
+    {
+        if (! $parent->start_date || ! $parent->end_date) {
+            return;
+        }
+
+        $inicio = Carbon::parse($parent->start_date)->startOfDay();
+        $fin = Carbon::parse($parent->end_date)->startOfDay();
+
+        $esperados = [];
+        for ($dia = $inicio->copy(); ! $dia->greaterThan($fin); $dia->addDay()) {
+            $esperados[] = $dia->toDateString();
+        }
+
+        $hijas = $parent->children()->get()
+            ->filter(static fn (ServiceDeliveryControlSheet $hija) => $hija->service_date !== null)
+            ->keyBy(
+                static fn (ServiceDeliveryControlSheet $hija) => Carbon::parse($hija->service_date)->toDateString()
+            );
+
+        // Primero se validan los recortes: si alguno tiene evidencia, no se
+        // toca nada (la transacción revierte cualquier cambio previo).
+        foreach ($hijas as $fecha => $hija) {
+            if (in_array($fecha, $esperados, true)) {
+                continue;
+            }
+
+            if (! $hija->is_active || $this->hijaTieneEvidencia($hija)) {
+                throw ValidationException::withMessages([
+                    'end_date' => 'No se puede recortar el rango: la planilla del '
+                        .Carbon::parse($fecha)->format('d/m/Y')
+                        .' ya tiene evidencia registrada.',
+                ]);
+            }
+        }
+
+        // Propaga proyecto, tipo, rango y pareja a las hijas abiertas; las
+        // cerradas son evidencia y no se modifican.
+        foreach ($hijas as $hija) {
+            if (! $hija->is_active) {
+                continue;
+            }
+
+            $hija->update([
+                'project_uuid' => $parent->project_uuid,
+                'type_of_control_sheet' => $type,
+                'start_date' => $parent->start_date,
+                'end_date' => $parent->end_date,
+                'official_name_and_surname' => $parent->official_name_and_surname,
+            ]);
+
+            $this->sincronizarControlDeHoja($hija, $data, $type);
+        }
+
+        // Elimina los días que quedaron fuera del rango (ya validados).
+        foreach ($hijas as $fecha => $hija) {
+            if (in_array($fecha, $esperados, true)) {
+                continue;
+            }
+
+            $hija->internalControl()->delete();
+            $hija->subcontractedControl()->delete();
+            $hija->routes()->delete();
+            $hija->delete();
+        }
+
+        // Crea las planillas diarias de los días nuevos. La hoja de un solo día
+        // es su propia planilla (mismo criterio de la creación): no se crea una
+        // hija que duplique ese día.
+        if (! $inicio->equalTo($fin)) {
+            foreach ($esperados as $fecha) {
+                if ($hijas->has($fecha)) {
+                    continue;
+                }
+
+                $this->crearHijaDiaria($parent, Carbon::parse($fecha), $data, $type);
+            }
+        }
+    }
+
+    /**
+     * Datos del control que hereda una hija nueva del padre cuando el cuerpo de
+     * la edición no los envía (edición parcial).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function datosDeControlHeredados(ServiceDeliveryControlSheet $parent, array $data): array
+    {
+        $interno = $parent->internalControl()->first();
+        $subcontratado = $parent->subcontractedControl()->first();
+
+        return array_filter($data, static fn (mixed $valor): bool => $valor !== null) + [
+            'vehicle_uuid' => $interno?->vehicle_uuid,
+            'third_party_uuid' => $interno?->third_party_uuid,
+            'fuec_uuid' => $interno?->fuec_uuid ?? $subcontratado?->fuec_uuid,
+            'vehicle_class_uuid' => $subcontratado?->vehicle_class_uuid,
+            'vehicle_license_plate' => $subcontratado?->vehicle_license_plate,
+            'driver_name_and_surname' => $subcontratado?->driver_name_and_surname,
+            'driver_license_number' => $subcontratado?->driver_license_number,
+        ];
+    }
+
+    /**
+     * ¿La planilla diaria ya registra operación? Un día cerrado o con horas,
+     * kilómetros, recorridos o firmas no puede desaparecer al recortar el rango.
+     */
+    private function hijaTieneEvidencia(ServiceDeliveryControlSheet $hija): bool
+    {
+        foreach (['start_time', 'end_time', 'total_hours', 'starting_kilometer', 'ending_kilometer'] as $campo) {
+            if (! empty($hija->{$campo})) {
+                return true;
+            }
+        }
+
+        if ($hija->routes()->exists()) {
+            return true;
+        }
+
+        return Signature::query()
+            ->where('entity_type', $hija->getMorphClass())
+            ->where('entity_id', $hija->getKey())
+            ->exists();
     }
 
     public function deleteServiceDeliveryControlSheet(string $uuid): void

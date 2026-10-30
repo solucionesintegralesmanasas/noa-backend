@@ -38,10 +38,16 @@ class CongelamientoPlanillaTest extends TestCase
      */
     private function crearPlanilla(bool $activa): ServiceDeliveryControlSheet
     {
+        $empresa = (string) Str::uuid();
+        // El scope multi-tenant falla cerrado sin empresa (issue #2): la prueba
+        // del congelamiento necesita el mismo contexto que resuelve
+        // SetCompanyContext en una petición real.
+        request()->attributes->set('current_company_uuid', $empresa);
+
         Schema::disableForeignKeyConstraints();
         $id = DB::table('service_delivery_control_sheet')->insertGetId([
             'uuid' => (string) Str::uuid(),
-            'company_uuid' => (string) Str::uuid(),
+            'company_uuid' => $empresa,
             'service_date' => '2026-09-20',
             'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
             'day_kind' => 'operacion',

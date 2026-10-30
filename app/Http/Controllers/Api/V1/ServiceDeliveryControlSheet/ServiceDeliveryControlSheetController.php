@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\V1\ServiceDeliveryControlSheet;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ServiceDeliveryControlSheet\BulkStoreServiceDeliveryControlSheetRequest;
+use App\Http\Requests\ServiceDeliveryControlSheet\BulkUpdateServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\StoreServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\UpdateServiceDeliveryControlSheetRequest;
 use App\Models\Vehicle;
@@ -243,6 +244,42 @@ class ServiceDeliveryControlSheetController extends Controller
             $resultado = $this->serviceDeliveryControlSheetService->createBulkForProject($request->validated());
 
             return $this->successResponse($resultado, 'Hojas de control creadas por proyecto con éxito.', 201);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Put(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/bulk',
+        summary: 'Actualización masiva de Hojas de Control abiertas por proyecto',
+        description: 'Amplía o modifica las fechas de servicio (y opcionalmente el recorrido) de todas las hojas de control abiertas de un proyecto, generando automáticamente las planillas diarias de los días nuevos y extendiendo la vigencia del proyecto si corresponde.',
+        operationId: 'updateBulkServiceDeliveryControlSheets',
+        tags: ['ServiceDeliveryControlSheet'],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['project_uuid'],
+                properties: [
+                    new OA\Property(property: 'company_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'project_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'start_date', type: 'string', format: 'date', nullable: true),
+                    new OA\Property(property: 'end_date', type: 'string', format: 'date', nullable: true),
+                    new OA\Property(property: 'daily_route', type: 'string', nullable: true),
+                    new OA\Property(property: 'vehicle_uuids', type: 'array', nullable: true, items: new OA\Items(type: 'string', format: 'uuid')),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Actualizado con éxito. Devuelve updated, daily_sheets y las hojas.'),
+            new OA\Response(response: 422, description: 'Rango inválido o recorte de días con evidencia registrada.'),
+        ]
+    )]
+    public function updateBulk(BulkUpdateServiceDeliveryControlSheetRequest $request): JsonResponse
+    {
+        try {
+            $resultado = $this->serviceDeliveryControlSheetService->updateBulkForProject($request->validated());
+
+            return $this->successResponse($resultado, 'Hojas de control del proyecto actualizadas con éxito.');
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

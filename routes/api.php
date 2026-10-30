@@ -952,9 +952,10 @@ Route::prefix('v1')->group(function () {
                 Route::get('/project-summary', [ServiceDeliveryControlSheetController::class, 'projectSummary'])->name('api.v1.fleet.service-delivery-control-sheets.project-summary');
                 Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
                 Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
-                // SPEC-009: creación masiva por proyecto (una hoja por coche),
+                // SPEC-009: creación y actualización masiva por proyecto,
                 // antes de `/{uuid}` para que el wildcard no la capture.
                 Route::post('/bulk', [ServiceDeliveryControlSheetController::class, 'storeBulk'])->middleware('permission:service_delivery_control_sheets.create')->name('api.v1.fleet.service-delivery-control-sheets.bulk');
+                Route::put('/bulk', [ServiceDeliveryControlSheetController::class, 'updateBulk'])->middleware('permission:service_delivery_control_sheets.update')->name('api.v1.fleet.service-delivery-control-sheets.bulk-update');
                 Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
                 Route::get('/reports/{tipo}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadReportPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.pdf');
                 Route::get('/reports/{tipo}/excel', [ServiceDeliveryControlSheetController::class, 'downloadReportExcel'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.excel');

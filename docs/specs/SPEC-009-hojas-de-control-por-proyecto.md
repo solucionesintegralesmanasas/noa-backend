@@ -18,7 +18,7 @@
 3. **Se elimina «Mostrar todos»** en Control Directo: la creación por proyecto solo admite coches con asignación activa. Los tipos externos (subcontratado, contratado, plataforma) conservan su flujo actual de una sola hoja manual.
 4. **La tabla de coches es sobria:** filas simples con checkbox, placa, número interno, conductor y documento. Sin avatares, iconos, badges ni colores (propuesta explícita del usuario: «sin los iconos ni colores, simplemente los selects»).
 5. **La fuente de verdad es el proyecto:** el backend resuelve las asignaciones activas y no confía en los pares conductor↔vehículo que envíe el frontend. El frontend solo indica qué coches incluir.
-6. **La edición sigue siendo individual:** una hoja se edita con su vehículo y conductor; si el vehículo ya no está en el proyecto, sigue apareciendo para no romper el histórico.
+6. **La edición reutiliza el formulario de creación:** una hoja se edita con su vehículo y conductor; si el vehículo ya no está en el proyecto, sigue apareciendo para no romper el histórico. El tipo de hoja es inmutable y el estado (`is_active`) no se edita: queda reservado al cierre (SPEC-002 §7.2). En una hoja de varios días, los cambios de proyecto, fechas, tipo o pareja vehículo-conductor se propagan a las hojas hijas abiertas; las cerradas nunca se tocan.
 7. **El bloque directo no lleva FUEC** (ya retirado en `719b0ff`); el payload directo no envía `fuec_uuid` y el backend conserva el valor histórico.
 8. **Retiro del coche del proyecto (2026-10-21):** al desactivarse la asignación del coche, sus hojas ya creadas quedan marcadas con `retirada_de_proyecto` y salen del listado (paginado, `/list` y el resumen del proyecto), conservándose como histórico. **`is_active` queda reservado para el cierre** (SPEC-002 §7.2) y nunca se usa para el retiro. Reactivar la asignación desmarca las hojas y las devuelve al listado respetando su `is_active` de cierre. Sin relleno previo: solo aplica a los retiros hechos desde esta versión.
 
@@ -102,10 +102,15 @@ Reglas comunes replicadas de `StoreServiceDeliveryControlSheetRequest` (fechas, 
 - `handleSubmit` en creación directa llama a `store.createBulk(payload)` (nueva acción) en vez de `createItem`; el payload envía `vehicle_uuids` (los marcados) y **no** envía `vehicle_uuid`, `third_party_uuid`, `official_name_and_surname` ni `fuec_uuid`.
 - Toast final: «14 hojas creadas (420 planillas diarias)».
 
-### Edición (sin cambios de modelo)
+### Edición (implementado 2026-10-29)
 
-- La edición mantiene su select de vehículo y de conductor, con las opciones del proyecto **más el vehículo/conductor actual de la hoja aunque ya no estén activos** (histórico editable).
-- Sin «Mostrar todos» tampoco en edición.
+- Un solo `ServiceDeliveryControlSheetFormView.vue` para crear y editar (`isEditMode`): mismo marcado, diferencias por computados y `v-if`.
+- La edición mantiene su select de vehículo y de conductor, con las opciones del proyecto **más el vehículo/conductor actual de la hoja aunque ya no estén activos** (histórico editable). Sin «Mostrar todos» tampoco en edición.
+- El **tipo de hoja es inmutable** (el select se muestra deshabilitado con su explicación; el backend responde 422 si intenta cambiarse) y el **estado no se edita**: el bloque se oculta y `is_active` se ignora en el update.
+- La fecha de servicio del padre sigue a `start_date`; las hijas conservan la suya.
+- **Propagación multi-día:** al cambiar proyecto, fechas, tipo o pareja vehículo-conductor se actualizan las hojas hijas abiertas (controles internos/subcontratados) y se conservan las cerradas. Extender el rango crea las planillas diarias faltantes abiertas; recortarlo elimina solo días abiertos sin evidencia y responde 422 si el día tiene kilómetros, horas, recorridos o firmas.
+- La actualización acepta payloads parciales (la edición diaria desde `ServiceTemplateView` envía solo `routes` sin pisar fechas ni controles).
+- Pruebas: `EdicionHojaControlTest` (13 casos, 154 aserciones) y `formularioEdicion.test.js` + `listadoEdicion.test.js` en el frontend.
 
 ### Volumen y confirmación
 
