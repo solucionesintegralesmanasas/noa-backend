@@ -48,6 +48,10 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('CARTAGENA', $html);
         $this->assertStringContainsString('BOLÍVAR', $html);
 
+        // Régimen / Nivel: la empresa siempre opera en contributivo, el valor
+        // es fijo del formato PESV y debe aparecer en los 4 subsistemas.
+        $this->assertGreaterThanOrEqual(4, substr_count($html, 'CONTRIBUTIVO'));
+
         // Modalidad fija del servicio y sin columna de organismo de tránsito.
         $this->assertStringContainsString('SERVICIO ESPECIAL · NACIONAL', $html);
         $this->assertStringNotContainsString('Organismo de Tránsito', $html);

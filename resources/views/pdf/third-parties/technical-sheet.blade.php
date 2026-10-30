@@ -713,6 +713,11 @@
             </thead>
             <tbody>
                 @php
+                    // Régimen / Nivel: la empresa siempre opera en el régimen
+                    // contributivo, así que la columna fija del formato PESV
+                    // se imprime con ese valor (no viene de la PILA).
+                    $regimen = 'CONTRIBUTIVO';
+
                     $subsistemas = [
                         [
                             'Salud (EPS)',
@@ -745,7 +750,7 @@
                         <td class="ss-entity-title">{{ $subsistema }}</td>
                         <td class="text-left font-bold uppercase" style="padding-left: 6px;">
                             {{ $entidad }}&nbsp;</td>
-                        <td>&nbsp;</td>
+                        <td>{{ $regimen }}</td>
                         <td>{{ $fmtFecha($fechaAfiliacion) }}&nbsp;</td>
                     </tr>
                 @endforeach
