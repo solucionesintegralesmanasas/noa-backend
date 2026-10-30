@@ -72,6 +72,32 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
         $this->assertStringNotContainsString(', MONTERÍA, CÓRDOBA', $html);
     }
 
+    public function test_un_subsistema_sin_datos_no_aparece_en_la_ficha(): void
+    {
+        $datos = $this->datosFicha();
+        // El conductor no tiene Caja de Compensación registrada: su fila no
+        // debe salir, las demás sí.
+        $datos['driver']->socialSecurityContributions->first()->compensation_fund_name = null;
+
+        $html = view('pdf.third-parties.technical-sheet', $datos)->render();
+
+        $this->assertStringNotContainsString('Caja Compensación (CCF)', $html);
+        $this->assertStringContainsString('Salud (EPS)', $html);
+        $this->assertSame(3, substr_count($html, 'CONTRIBUTIVO'));
+    }
+
+    public function test_sin_aportes_se_omite_la_seccion_de_seguridad_social(): void
+    {
+        $datos = $this->datosFicha();
+        $datos['driver']->setRelation('socialSecurityContributions', collect());
+
+        $html = view('pdf.third-parties.technical-sheet', $datos)->render();
+
+        $this->assertStringNotContainsString('5. Afiliaciones al Sistema de Seguridad Social Integral', $html);
+        $this->assertStringNotContainsString('Salud (EPS)', $html);
+        $this->assertStringNotContainsString('CONTRIBUTIVO', $html);
+    }
+
     public function test_la_ficha_del_conductor_renderiza_sin_errores(): void
     {
         $pdf = Pdf::loadView('pdf.third-parties.technical-sheet', $this->datosFicha())

@@ -457,6 +457,41 @@
                 ->sortByDesc(fn($c) => optional($c->billing_period)->timestamp ?? 0)
                 ->first();
 
+            // Régimen / Nivel: la empresa siempre opera en el régimen
+            // contributivo, así que la columna fija del formato PESV
+            // se imprime con ese valor (no viene de la PILA).
+            $regimen = 'CONTRIBUTIVO';
+
+            // Un subsistema sin entidad ni fecha no se imprime: el conductor
+            // no lo tiene registrado. Si ninguno tiene datos, la sección 5
+            // entera se omite (un banner con la tabla vacía no aporta).
+            $subsistemas = array_values(array_filter([
+                [
+                    'Salud (EPS)',
+                    $aportes->eps_name ?? '',
+                    $aportes->eps_affiliation_date ?? null,
+                    $aportes->health_paid ?? false,
+                ],
+                [
+                    'Riesgos Laborales (ARL)',
+                    $aportes->risk_labor_name ?? '',
+                    $aportes->risk_labor_affiliation_date ?? null,
+                    $aportes->risk_labor_paid ?? false,
+                ],
+                [
+                    'Pensiones (AFP)',
+                    $aportes->pension_name ?? '',
+                    $aportes->pension_affiliation_date ?? null,
+                    $aportes->pension_paid ?? false,
+                ],
+                [
+                    'Caja Compensación (CCF)',
+                    $aportes->compensation_fund_name ?? '',
+                    $aportes->compensation_fund_affiliation_date ?? null,
+                    $aportes->compensation_fund_paid ?? false,
+                ],
+            ], fn ($fila) => ! empty($fila[1]) || ! empty($fila[2])));
+
             $nitEmpresa = trim(
                 ($driver->company->document_number ?? '') .
                     (!empty($driver->company->verification_digit) ? ' - ' . $driver->company->verification_digit : ''),
@@ -697,62 +732,31 @@
             </tbody>
         </table>
 
-        <!-- SECCIÓN 5: SEGURIDAD SOCIAL INTEGRAL (EPS, ARL, AFP, CCF) -->
-        <div class="section-banner">5. Afiliaciones al Sistema de Seguridad Social Integral</div>
-        <table class="ss-table" cellpadding="0" cellspacing="0">
-            <thead>
-                <tr>
-                    <th style="width: 26%; text-align: left; padding-left: 6px;">Subsistema</th>
-                    <th style="width: 32%; text-align: left; padding-left: 6px;">Entidad Administradora</th>
-                    <th style="width: 18%;">Régimen / Nivel</th>
-                    <th style="width: 14%;">Fecha Afiliación</th>
-                </tr>
-            </thead>
-            <tbody>
-                @php
-                    // Régimen / Nivel: la empresa siempre opera en el régimen
-                    // contributivo, así que la columna fija del formato PESV
-                    // se imprime con ese valor (no viene de la PILA).
-                    $regimen = 'CONTRIBUTIVO';
-
-                    $subsistemas = [
-                        [
-                            'Salud (EPS)',
-                            $aportes->eps_name ?? '',
-                            $aportes->eps_affiliation_date ?? null,
-                            $aportes->health_paid ?? false,
-                        ],
-                        [
-                            'Riesgos Laborales (ARL)',
-                            $aportes->risk_labor_name ?? '',
-                            $aportes->risk_labor_affiliation_date ?? null,
-                            $aportes->risk_labor_paid ?? false,
-                        ],
-                        [
-                            'Pensiones (AFP)',
-                            $aportes->pension_name ?? '',
-                            $aportes->pension_affiliation_date ?? null,
-                            $aportes->pension_paid ?? false,
-                        ],
-                        [
-                            'Caja Compensación (CCF)',
-                            $aportes->compensation_fund_name ?? '',
-                            $aportes->compensation_fund_affiliation_date ?? null,
-                            $aportes->compensation_fund_paid ?? false,
-                        ],
-                    ];
-                @endphp
-                @foreach ($subsistemas as [$subsistema, $entidad, $fechaAfiliacion, $pagado])
+        @if ($subsistemas !== [])
+            <!-- SECCIÓN 5: SEGURIDAD SOCIAL INTEGRAL (EPS, ARL, AFP, CCF) -->
+            <div class="section-banner">5. Afiliaciones al Sistema de Seguridad Social Integral</div>
+            <table class="ss-table" cellpadding="0" cellspacing="0">
+                <thead>
                     <tr>
-                        <td class="ss-entity-title">{{ $subsistema }}</td>
-                        <td class="text-left uppercase" style="padding-left: 6px;">
-                            {{ $entidad }}&nbsp;</td>
-                        <td>{{ $regimen }}</td>
-                        <td>{{ $fmtFecha($fechaAfiliacion) }}&nbsp;</td>
+                        <th style="width: 26%; text-align: left; padding-left: 6px;">Subsistema</th>
+                        <th style="width: 32%; text-align: left; padding-left: 6px;">Entidad Administradora</th>
+                        <th style="width: 18%;">Régimen / Nivel</th>
+                        <th style="width: 14%;">Fecha Afiliación</th>
                     </tr>
-                @endforeach
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach ($subsistemas as [$subsistema, $entidad, $fechaAfiliacion, $pagado])
+                        <tr>
+                            <td class="ss-entity-title">{{ $subsistema }}</td>
+                            <td class="text-left uppercase" style="padding-left: 6px;">
+                                {{ $entidad }}&nbsp;</td>
+                            <td>{{ $regimen }}</td>
+                            <td>{{ $fmtFecha($fechaAfiliacion) }}&nbsp;</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
 
     </div>
 
