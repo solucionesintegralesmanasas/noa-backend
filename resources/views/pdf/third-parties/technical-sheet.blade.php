@@ -143,7 +143,6 @@
         }
 
         .meta-val {
-            font-weight: bold;
             color: #000000;
             text-align: center;
             font-family: Arial, Helvetica, sans-serif;
@@ -203,13 +202,11 @@
 
         .field-value {
             color: #000000;
-            font-weight: bold;
         }
 
         .mono-value {
             font-family: Arial, Helvetica, sans-serif;
             font-size: 8.5pt;
-            font-weight: bold;
             color: #000000;
         }
 
@@ -629,11 +626,11 @@
             </thead>
             <tbody>
                 <tr>
-                    <td class="font-bold text-left uppercase" style="color: #000000; padding-left: 8px;">
+                    <td class="text-left uppercase" style="color: #000000; padding-left: 8px;">
                         {{ $driver->company->business_name ?? '' }}
                     </td>
                     <td class="mono-value">{{ $nitEmpresa }}</td>
-                    <td class="font-bold uppercase">SERVICIO ESPECIAL · NACIONAL</td>
+                    <td class="uppercase">SERVICIO ESPECIAL · NACIONAL</td>
                 </tr>
             </tbody>
         </table>
@@ -653,10 +650,10 @@
                 @forelse ($driver->driverLicenses as $licencia)
                     <tr>
                         <td class="mono-value">{{ $licencia->number ?? '' }}</td>
-                        <td><strong style="color: #000000; font-size: 8.5pt;">{{ $licencia->category ?? '' }}</strong>
+                        <td><span style="color: #000000; font-size: 8.5pt;">{{ $licencia->category ?? '' }}</span>
                         </td>
                         <td>{{ $fmtFecha($licencia->issue_date) }}</td>
-                        <td><strong>{{ $fmtFecha($licencia->expiration_date) }}</strong></td>
+                        <td>{{ $fmtFecha($licencia->expiration_date) }}</td>
                     </tr>
                 @empty
                     <tr>
@@ -682,10 +679,10 @@
             </thead>
             <tbody>
                 <tr>
-                    <td class="font-bold uppercase text-left" style="padding-left: 8px;">
+                    <td class="uppercase text-left" style="padding-left: 8px;">
                         {{ $contrato->contract_type ?? '' }}&nbsp;
                     </td>
-                    <td class="font-bold uppercase" style="color: #000000;">{{ $contrato->position ?? '' }}&nbsp;
+                    <td class="uppercase" style="color: #000000;">{{ $contrato->position ?? 'CONDUCTOR' }}&nbsp;
                     </td>
                     <td>{{ $fmtFecha($contrato->start_date ?? null) }}&nbsp;</td>
                     <td>
@@ -748,7 +745,7 @@
                 @foreach ($subsistemas as [$subsistema, $entidad, $fechaAfiliacion, $pagado])
                     <tr>
                         <td class="ss-entity-title">{{ $subsistema }}</td>
-                        <td class="text-left font-bold uppercase" style="padding-left: 6px;">
+                        <td class="text-left uppercase" style="padding-left: 6px;">
                             {{ $entidad }}&nbsp;</td>
                         <td>{{ $regimen }}</td>
                         <td>{{ $fmtFecha($fechaAfiliacion) }}&nbsp;</td>
