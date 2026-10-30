@@ -702,6 +702,8 @@ class ThirdPartyService extends BaseService
                 'documentType',
                 'municipality.department',
                 'idCardIssuePlace:uuid,name',
+                'birthPlace:uuid,name,department_uuid',
+                'birthPlace.department:uuid,name',
                 'branch:uuid,name',
                 'driverLicenses' => function ($q) {
                     $q->orderBy('created_at', 'desc');

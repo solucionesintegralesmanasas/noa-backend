@@ -442,6 +442,19 @@
             $fechaExpedicion = $fmtFecha($driver->id_card_issue_date ?? null);
             $grupoSanguineo = $driver->blood_type ?? '';
 
+            // Fecha y lugar de nacimiento: mismo formato ciudad, departamento
+            // que la residencia; si falta alguno no queda separador huérfano.
+            $lugarNacimiento = $driver->birthPlace
+                ? trim(
+                    $driver->birthPlace->name .
+                        ($driver->birthPlace->department ? ', ' . $driver->birthPlace->department->name : ''),
+                )
+                : '';
+            $nacimiento = implode(' · ', array_filter([
+                $fmtFecha($driver->birth_date ?? null),
+                $lugarNacimiento,
+            ]));
+
             $contrato = $driver->employmentContracts->first();
             $aportes = $driver->socialSecurityContributions
                 ->sortByDesc(fn($c) => optional($c->billing_period)->timestamp ?? 0)
@@ -546,7 +559,7 @@
                                 </tr>
                                 <tr>
                                     <td class="field-label">Fecha y Lugar Nacimiento:</td>
-                                    <td class="field-value" colspan="3">&nbsp;</td>
+                                    <td class="field-value" colspan="3">{{ $nacimiento }}</td>
                                 </tr>
                                 <tr>
                                     <td class="field-label">Estado Civil:</td>

@@ -43,6 +43,11 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('Casado/a', $html);
         $this->assertStringContainsString('O+', $html);
 
+        // Fecha y lugar de nacimiento: antes la fila quedaba vacía en el PDF.
+        $this->assertStringContainsString('24/09/1988', $html);
+        $this->assertStringContainsString('CARTAGENA', $html);
+        $this->assertStringContainsString('BOLÍVAR', $html);
+
         // Modalidad fija del servicio y sin columna de organismo de tránsito.
         $this->assertStringContainsString('SERVICIO ESPECIAL · NACIONAL', $html);
         $this->assertStringNotContainsString('Organismo de Tránsito', $html);
@@ -90,6 +95,7 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
             'email' => 'conductor@example.test',
             'address' => 'CALLE 1 # 2-3',
             'id_card_issue_date' => '2015-06-15',
+            'birth_date' => '1988-09-24',
             'sex' => 'M',
             'marital_status' => 'CASADO',
             'blood_type' => 'O+',
@@ -100,6 +106,10 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
 
         $driver->setRelation('documentType', (object) ['prefix' => 'CC']);
         $driver->setRelation('idCardIssuePlace', (object) ['name' => 'CERETÉ']);
+        $driver->setRelation('birthPlace', (object) [
+            'name' => 'CARTAGENA',
+            'department' => (object) ['name' => 'BOLÍVAR'],
+        ]);
         $driver->setRelation('branch', (object) ['name' => 'SEDE PRINCIPAL']);
         $driver->setRelation('company', (object) [
             'business_name' => 'TRANSPORTES DE PRUEBA S.A.S.',
