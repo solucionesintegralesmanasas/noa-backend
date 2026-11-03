@@ -1983,6 +1983,8 @@ class PdfService
             'project' => 'PROYECTO',
             'maintenance' => 'MANTENIMIENTO',
             'driver' => 'CONDUCTOR',
+            'agreement' => 'CONVENIO',
+            'branch' => 'SEDE OPERATIVA',
         ];
         $tipo = $filtros['filter_type'] ?? '-';
 

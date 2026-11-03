@@ -34,6 +34,8 @@ class VehicleReportService extends BaseService
 
     public const FILTER_AGREEMENT = 'agreement';
 
+    public const FILTER_BRANCH = 'branch';
+
     public const FILTER_TYPES = [
         self::FILTER_AFFILIATE,
         self::FILTER_OPERATION_CARD,
@@ -42,6 +44,7 @@ class VehicleReportService extends BaseService
         self::FILTER_MAINTENANCE,
         self::FILTER_DRIVER,
         self::FILTER_AGREEMENT,
+        self::FILTER_BRANCH,
     ];
 
     public const DOCUMENT_TYPES = ['SOAT', 'RCC', 'RCE', 'RTM'];
@@ -70,7 +73,8 @@ class VehicleReportService extends BaseService
             'vehicleClass:uuid,description',
             'thirdParty:uuid,first_name,last_name,company_name,document_number',
             'vehicleDocuments:uuid,vehicle_uuid,document_type,expiry_date,status',
-            'operationCards:uuid,vehicle_uuid,operating_card_number,expiration_date,status',
+            'operationCards:uuid,vehicle_uuid,operating_card_number,expiration_date,status,affiliated_company,runt_status',
+            'branch:branches.uuid,branches.name',
             'businessCollaborationAgreements:vehicle_uuid,contracting_entity_name,expiry_date,status',
             'driverVehicleAssignments:vehicle_uuid,project_uuid,third_party_uuid,is_active',
             'driverVehicleAssignments.project:uuid,project_name',
@@ -80,6 +84,20 @@ class VehicleReportService extends BaseService
 
         if (! empty($filtros['company_uuid'])) {
             $query->where('vehicles.company_uuid', $filtros['company_uuid']);
+        }
+
+        // Filtro transversal por sede (si entra por filter_type=branch lo aplica applyReportFilter)
+        if (! empty($filtros['branch_uuid']) && ($filtros['filter_type'] ?? null) !== self::FILTER_BRANCH) {
+            $branchUuid = $filtros['branch_uuid'];
+            $query->whereHas('vehicleBranches', function (Builder $q) use ($branchUuid) {
+                $q->where('vehicles_branches.branch_uuid', $branchUuid)
+                    ->where('vehicles_branches.is_active', 1);
+            });
+        }
+
+        // Filtro transversal por propiedad (propios vs terceros/afiliados)
+        if (! empty($filtros['ownership_type']) && in_array($filtros['ownership_type'], ['propios', 'terceros'], true)) {
+            $this->applyOwnershipFilter($query, $filtros['ownership_type'], $filtros['company_uuid'] ?? null);
         }
 
         $this->applyReportFilter($query, $filtros);
@@ -145,9 +163,16 @@ class VehicleReportService extends BaseService
                 break;
 
             case self::FILTER_AGREEMENT:
-                if (! empty($filtros['contracting_entity_name'])) {
-                    $name = trim((string) $filtros['contracting_entity_name']);
-                    $query->whereHas('businessCollaborationAgreements', fn ($q) => $q->where('contracting_entity_name', $name));
+                $this->applyAgreementFilter($query, $filtros);
+                break;
+
+            case self::FILTER_BRANCH:
+                if (! empty($filtros['branch_uuid'])) {
+                    $branchUuid = $filtros['branch_uuid'];
+                    $query->whereHas('vehicleBranches', function (Builder $q) use ($branchUuid) {
+                        $q->where('vehicles_branches.branch_uuid', $branchUuid)
+                            ->where('vehicles_branches.is_active', 1);
+                    });
                 }
                 break;
         }
@@ -204,6 +229,20 @@ class VehicleReportService extends BaseService
         return $query->distinct()->orderBy('contracting_entity_name')->limit(500)->pluck('contracting_entity_name');
     }
 
+    /**
+     * Sedes operativas activas de la empresa (para el selector del filtro).
+     */
+    public function distinctBranches(?string $companyUuid): Collection
+    {
+        $query = \App\Models\Branch::query()
+            ->where('status', 1);
+        if ($companyUuid) {
+            $query->where('company_uuid', $companyUuid);
+        }
+
+        return $query->orderBy('name')->limit(500)->get(['uuid', 'name']);
+    }
+
     protected function applyOperationCardFilter(Builder $query, array $filtros): void
     {
         $filtrosDeTarjeta = ['affiliated_company', 'operating_card_number', 'operation_card_status', 'operation_card_expiry_from', 'operation_card_expiry_to'];
@@ -226,7 +265,7 @@ class VehicleReportService extends BaseService
             $status = $filtros['operation_card_status'];
             if (in_array($status, ['0', '1', 0, 1, true, false], true)) {
                 $query->whereHas('operationCards', fn ($q) => $q->where('status', (bool) $status));
-            } elseif (in_array($status, ['vigente', 'vencida', 'por_vencer'], true)) {
+            } else {
                 $this->filterRelationByExpiry($query, 'operationCards', 'expiration_date', $status);
             }
         }
@@ -247,34 +286,138 @@ class VehicleReportService extends BaseService
 
     protected function applyDocumentFilter(Builder $query, array $filtros): void
     {
-        $docType = strtoupper(trim((string) ($filtros['document_type'] ?? '')));
+        $rawDocType = trim((string) ($filtros['document_type'] ?? ''));
+        $docType = strtoupper($rawDocType);
         $docStatus = $filtros['doc_status'] ?? null;
 
-        if ($docType && ! in_array($docType, self::DOCUMENT_TYPES, true)) {
+        $isAll = $docType === '' || in_array($docType, ['TODOS', 'ALL'], true);
+
+        if (! $isAll && ! in_array($docType, self::DOCUMENT_TYPES, true)) {
             return;
         }
 
-        if (in_array($docType, Vehicle::DOCUMENTOS_NO_APLICAN_A_PARTICULARES, true)) {
+        if (! $isAll && in_array($docType, Vehicle::DOCUMENTOS_NO_APLICAN_A_PARTICULARES, true)) {
             $query->where('vehicles.type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR);
         }
 
         if ($docType || $docStatus) {
-            $query->whereHas('vehicleDocuments', function ($q) use ($docType, $docStatus) {
-                if ($docType) {
+            $query->whereHas('vehicleDocuments', function ($q) use ($docType, $docStatus, $isAll) {
+                // Excluir documentos reemplazados
+                $q->where(function ($sq) {
+                    $sq->whereNull('status')->orWhere('status', '!=', 'INACTIVA');
+                });
+
+                if (! $isAll) {
                     $q->where('document_type', $docType);
+                } else {
+                    // Para "Todos": solo documentos que aplican según tipo de servicio
+                    $q->where(function ($subQ) {
+                        $subQ->whereIn('document_type', ['SOAT', 'RTM'])
+                            ->orWhere(function ($pubQ) {
+                                $pubQ->whereIn('document_type', ['RCC', 'RCE'])
+                                    ->whereHas('vehicle', fn ($v) => $v->where('type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR));
+                            });
+                    });
                 }
-                if (in_array($docStatus, ['vigente', 'vencido', 'por_vencer'], true)) {
-                    $today = Carbon::today()->toDateString();
-                    if ($docStatus === 'vencido') {
-                        $q->where('expiry_date', '<', $today);
-                    } elseif ($docStatus === 'vigente') {
-                        $q->where('expiry_date', '>=', $today);
-                    } else {
-                        $q->where('expiry_date', '>=', $today)
-                            ->where('expiry_date', '<=', Carbon::today()->addDays(30)->toDateString());
-                    }
+
+                if ($docStatus) {
+                    $this->applyDateStatusCondition($q, 'expiry_date', $docStatus);
                 }
             });
+        }
+    }
+
+    protected function applyAgreementFilter(Builder $query, array $filtros): void
+    {
+        $name = trim((string) ($filtros['contracting_entity_name'] ?? ''));
+        $status = $filtros['agreement_status'] ?? $filtros['doc_status'] ?? null;
+        $isAllAgreements = $name === '' || in_array(strtoupper($name), ['TODOS', 'ALL'], true);
+
+        if ($status) {
+            $query->whereHas('businessCollaborationAgreements', function ($q) use ($name, $status, $isAllAgreements) {
+                if (! $isAllAgreements) {
+                    $q->where('contracting_entity_name', $name);
+                }
+                $this->applyDateStatusCondition($q, 'expiry_date', $status);
+            });
+        } elseif (! $isAllAgreements) {
+            $query->whereHas('businessCollaborationAgreements', fn ($q) => $q->where('contracting_entity_name', $name));
+        } else {
+            $query->has('businessCollaborationAgreements');
+        }
+    }
+
+    protected function applyOwnershipFilter(Builder $query, string $ownershipType, ?string $companyUuid): void
+    {
+        $nombres = $companyUuid ? \App\Utils\OwnCompany::nombresPropios($companyUuid) : [];
+        $terminosLike = [];
+        foreach ($nombres as $nombre) {
+            $terminosLike[] = $nombre;
+            if (str_contains($nombre, 'SAS')) {
+                $terminosLike[] = str_replace('SAS', 'S.A.S', $nombre);
+                $terminosLike[] = str_replace('SAS', 'S.A.S.', $nombre);
+                $terminosLike[] = str_replace('SAS', 'S A S', $nombre);
+                $raiz = trim((string) preg_replace('/\bSAS\b/i', '', $nombre));
+                if (strlen($raiz) >= 4) {
+                    $terminosLike[] = $raiz;
+                }
+            }
+        }
+        $terminosLike = array_values(array_unique(array_filter($terminosLike)));
+
+        if ($ownershipType === 'propios') {
+            $query->where(function ($sub) use ($terminosLike) {
+                $sub->where('vehicles.type_of_service', Vehicle::SERVICIO_PARTICULAR);
+                if (! empty($terminosLike)) {
+                    $sub->orWhereHas('operationCards', function ($oq) use ($terminosLike) {
+                        $oq->where(function ($nq) use ($terminosLike) {
+                            foreach ($terminosLike as $termino) {
+                                $nq->orWhere('affiliated_company', 'like', "%{$termino}%");
+                            }
+                        });
+                    });
+                }
+            });
+        } elseif ($ownershipType === 'terceros') {
+            $query->where('vehicles.type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR);
+            if (! empty($terminosLike)) {
+                $query->whereDoesntHave('operationCards', function ($oq) use ($terminosLike) {
+                    $oq->where(function ($nq) use ($terminosLike) {
+                        foreach ($terminosLike as $termino) {
+                            $nq->orWhere('affiliated_company', 'like', "%{$termino}%");
+                        }
+                    });
+                });
+            }
+        }
+    }
+
+    protected function applyDateStatusCondition(Builder $query, string $column, string $status): void
+    {
+        $today = Carbon::today()->toDateString();
+        switch ($status) {
+            case 'vencido':
+            case 'vencida':
+                $query->whereNotNull($column)->where($column, '<', $today);
+                break;
+            case 'hoy':
+                $query->where($column, '=', $today);
+                break;
+            case 'por_vencer_5d':
+                $fiveDays = Carbon::today()->addDays(5)->toDateString();
+                $query->where($column, '>', $today)->where($column, '<=', $fiveDays);
+                break;
+            case 'mas_15d':
+                $fifteenDays = Carbon::today()->addDays(15)->toDateString();
+                $query->where($column, '>', $fifteenDays);
+                break;
+            case 'por_vencer':
+                $thirtyDays = Carbon::today()->addDays(30)->toDateString();
+                $query->where($column, '>=', $today)->where($column, '<=', $thirtyDays);
+                break;
+            case 'vigente':
+                $query->where($column, '>=', $today);
+                break;
         }
     }
 
@@ -317,15 +460,7 @@ class VehicleReportService extends BaseService
     protected function filterRelationByExpiry(Builder $query, string $relation, string $column, string $status): void
     {
         $query->whereHas($relation, function ($q) use ($column, $status) {
-            $today = Carbon::today()->toDateString();
-            if ($status === 'vencida' || $status === 'vencido') {
-                $q->where($column, '<', $today);
-            } elseif ($status === 'vigente') {
-                $q->where($column, '>=', $today);
-            } else {
-                $q->where($column, '>=', $today)
-                    ->where($column, '<=', Carbon::today()->addDays(30)->toDateString());
-            }
+            $this->applyDateStatusCondition($q, $column, $status);
         });
     }
 
@@ -370,7 +505,9 @@ class VehicleReportService extends BaseService
 
         $card = null;
         if ($vehicle->requiereTarjetaOperacion() && $vehicle->relationLoaded('operationCards') && $vehicle->operationCards->isNotEmpty()) {
-            $card = $vehicle->operationCards->sortByDesc('expiration_date')->first();
+            $card = $vehicle->operationCards
+                ->filter(fn ($c) => $c->runt_status !== 'CANCELADA')
+                ->sortByDesc('expiration_date')->first();
         }
 
         $agreement = null;
@@ -395,6 +532,9 @@ class VehicleReportService extends BaseService
             ? ($affiliate->company_name ?: trim(($affiliate->first_name ?? '').' '.($affiliate->last_name ?? '')))
             : null;
 
+        $branch = $vehicle->relationLoaded('branch') ? $vehicle->branch : null;
+        $isOwn = $vehicle->esParticular() || \App\Utils\OwnCompany::esVehiculoPropio($vehicle, $vehicle->company_uuid);
+
         return [
             'uuid' => $vehicle->uuid,
             'vehicle_license_plate' => $vehicle->vehicle_license_plate,
@@ -402,7 +542,11 @@ class VehicleReportService extends BaseService
             'vehicle_class' => $vehicle->vehicleClass?->description,
             'body_type' => $vehicle->body_type,
             'type_of_service' => $vehicle->type_of_service,
-            'modality_label' => $vehicle->type_of_service === 'PUBLICO' ? 'Público' : 'Particular',
+            'modality_label' => $vehicle->esParticular() ? 'Particular' : 'Público',
+            'is_own' => $isOwn,
+            'ownership_label' => $isOwn ? 'Propio' : 'Tercero',
+            'branch_uuid' => $branch?->uuid,
+            'branch_name' => $branch?->name,
             // Indicador para mostrar "No aplica" en pólizas RCC/RCE y tarjeta de operación (Excel, PDF y pantalla).
             'es_particular' => $vehicle->esParticular(),
             'soat_expiry' => $docs['SOAT'] ?? null,

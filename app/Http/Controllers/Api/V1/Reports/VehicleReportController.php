@@ -120,6 +120,26 @@ class VehicleReportController extends Controller
     }
 
     #[OA\Get(
+        path: '/api/v1/reports/vehicles/catalogs/branches',
+        summary: 'Sedes operativas de la empresa (selector del filtro)',
+        operationId: 'reportVehiclesBranches',
+        tags: ['Reportes'],
+        security: [['bearerAuth' => []]],
+        responses: [new OA\Response(response: 200, description: 'Catálogo recuperado.')]
+    )]
+    public function branches(Request $request): JsonResponse
+    {
+        try {
+            $sedes = $this->reportService->distinctBranches($request->attributes->get('current_company_uuid'));
+            $data = $sedes->map(fn ($b) => ['label' => $b->name, 'value' => $b->uuid])->values();
+
+            return $this->successResponse($data, 'Sedes operativas recuperadas con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
         path: '/api/v1/reports/vehicles/excel',
         summary: 'Exportar reporte de vehículos a Excel (tope 1000 filas)',
         operationId: 'reportVehiclesExcel',

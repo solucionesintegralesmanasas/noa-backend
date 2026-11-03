@@ -95,6 +95,9 @@ class VehiculoParticularDocumentosTest extends TestCase
             'notification_email' => 'transespecialessinbarreras@gmail.com',
         ]);
 
+        // Contexto de empresa que fija SetCompanyContext (el scope multi-tenant falla cerrado sin él).
+        request()->attributes->set('current_company_uuid', $empresa);
+
         return $empresa;
     }
 

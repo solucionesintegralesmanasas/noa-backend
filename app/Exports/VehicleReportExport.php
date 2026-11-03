@@ -23,7 +23,7 @@ class VehicleReportExport implements FromCollection, WithHeadings, ShouldAutoSiz
     public function headings(): array
     {
         return [
-            'Placa', 'Modelo', 'Clase de vehículo', 'Tipo de carrocería', 'Modalidad',
+            'Placa', 'Modelo', 'Clase de vehículo', 'Tipo de carrocería', 'Modalidad', 'Propiedad', 'Sede',
             'SOAT vence', 'RCC vence', 'RCE vence', 'RTM vence',
             'N.º tarjeta operación', 'Tarjeta operación vence',
             'Convenio', 'Afiliado', 'Conductor', 'Proyecto',
@@ -39,21 +39,23 @@ class VehicleReportExport implements FromCollection, WithHeadings, ShouldAutoSiz
             $noAplica = $row['es_particular'] ?? false ? 'No aplica' : null;
 
             return [
-            $row['vehicle_license_plate'],
-            $row['model'],
-            $row['vehicle_class'],
-            $row['body_type'],
-            $row['modality_label'],
-            $row['soat_expiry'],
-            $noAplica ?? $row['rcc_expiry'],
-            $noAplica ?? $row['rce_expiry'],
-            $row['rtm_expiry'],
-            $noAplica ?? $row['operation_card_number'],
-            $noAplica ?? $row['operation_card_expiry'],
-            $row['agreement_name'],
-            $row['affiliate_name'],
-            $row['driver_name'],
-            $row['project_name'],
+                $row['vehicle_license_plate'],
+                $row['model'],
+                $row['vehicle_class'],
+                $row['body_type'],
+                $row['modality_label'],
+                $row['ownership_label'] ?? (($row['is_own'] ?? false) ? 'Propio' : 'Tercero'),
+                $row['branch_name'] ?? 'Sin sede',
+                $row['soat_expiry'],
+                $noAplica ?? $row['rcc_expiry'],
+                $noAplica ?? $row['rce_expiry'],
+                $row['rtm_expiry'],
+                $noAplica ?? $row['operation_card_number'],
+                $noAplica ?? $row['operation_card_expiry'],
+                $row['agreement_name'],
+                $row['affiliate_name'],
+                $row['driver_name'],
+                $row['project_name'],
             ];
         });
     }

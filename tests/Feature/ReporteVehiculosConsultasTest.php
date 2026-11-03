@@ -28,6 +28,7 @@ class ReporteVehiculosConsultasTest extends TestCase
     {
         parent::setUp();
         $this->empresa = $this->insertar('companies', ['business_name' => 'Empresa reporte', 'is_active' => true]);
+        request()->attributes->set('current_company_uuid', $this->empresa);
     }
 
     private function vehiculoCompleto(string $placa): void
@@ -72,7 +73,7 @@ class ReporteVehiculosConsultasTest extends TestCase
 
         $this->assertMedicionConDatos($medir()->total(), 'Reporte de vehículos');
         $this->assertConteoConstante($medir, $ampliar, 'Reporte de vehículos');
-        $this->assertPresupuesto(10, $medir, 'Reporte de vehículos'); // medido: 10 (conteo + página + 8 relaciones)
+        $this->assertPresupuesto(11, $medir, 'Reporte de vehículos'); // medido: 11 (conteo + página + 9 relaciones, incl. sede)
     }
 
     public function test_la_exportacion_tiene_tope_de_consultas_y_de_memoria(): void
@@ -90,7 +91,7 @@ class ReporteVehiculosConsultasTest extends TestCase
         $consumo = memory_get_peak_usage() - $base;
 
         $this->assertMedicionConDatos($filas->count(), 'Exportación de vehículos');
-        $this->assertLessThanOrEqual(9, $consultas, "Exportación hizo $consultas consultas"); // medido: 9
+        $this->assertLessThanOrEqual(12, $consultas, "Exportación hizo $consultas consultas"); // medido: 12 (9 + sede + 2 de OwnCompany)
         $this->assertLessThanOrEqual(16777216, $consumo, 'La exportación de 50 vehículos superó 16 MB'); // ver medición en AGENTS.md
     }
 
@@ -142,7 +143,7 @@ class ReporteVehiculosConsultasTest extends TestCase
         $consumo = memory_get_peak_usage() - $base;
 
         $this->assertNotEmpty($bytes, 'El render del Excel no produjo salida');
-        $this->assertLessThanOrEqual(9, $consultas, "La exportación Excel hizo $consultas consultas"); // medido: 9 (allForExport)
+        $this->assertLessThanOrEqual(12, $consultas, "La exportación Excel hizo $consultas consultas"); // medido: 12 (allForExport)
         $this->assertLessThanOrEqual(29360128, $consumo, 'La exportación Excel superó el tope de memoria'); // medido: 25018232 (~23,9 MB); tope 28 MB
     }
 }
