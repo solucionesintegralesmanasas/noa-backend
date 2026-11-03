@@ -54,7 +54,7 @@ class AislamientoAfiliadoTest extends TestCase
     {
         parent::setUp();
         config(['authorization.enforce' => false]);
-        foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history', 'reports.vehicles.index', 'reports.vehicles.export-excel', 'reports.vehicles.export-pdf', 'third_parties.index', 'third_parties.profile', 'contractors.index', 'fuec.index', 'fuec.profile'] as $p) {
+        foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history', 'reports.vehicles.index', 'reports.vehicles.export-excel', 'reports.vehicles.export-pdf', 'third_parties.index', 'third_parties.profile', 'driver.create', 'driver.update', 'contractors.index', 'fuec.index', 'fuec.profile'] as $p) {
             Permission::findOrCreate($p, 'api');
         }
 
@@ -116,7 +116,7 @@ class AislamientoAfiliadoTest extends TestCase
         setPermissionsTeamId(null);
         $user->assignRole(Role::findOrCreate($rol, 'api'));
         if ($rol === 'AFILIADO') {
-            foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history', 'third_parties.index', 'third_parties.profile', 'contractors.index', 'fuec.index', 'fuec.profile'] as $p) {
+            foreach (['vehicles.index', 'vehicles.profile', 'vehicle_documents.index', 'operation_cards.index', 'affiliate.index', 'locations.view', 'locations.history', 'third_parties.index', 'third_parties.profile', 'driver.create', 'driver.update', 'contractors.index', 'fuec.index', 'fuec.profile'] as $p) {
                 $user->givePermissionTo($p);
             }
         } else {
@@ -152,7 +152,8 @@ class AislamientoAfiliadoTest extends TestCase
             'company_uuid' => $empresa, 'vehicle_uuid' => $vehiculo, 'inspection_date' => '2026-09-30', 'mileage' => 1000,
         ]);
         $conductor = $this->insertar('third_parties', [
-            'company_uuid' => $empresa, 'first_name' => 'Conductor', 'last_name' => $prefijo, 'is_driver' => 1, 'is_active' => 1,
+            'company_uuid' => $empresa, 'document_number' => '90'.$prefijo.'000',
+            'first_name' => 'Conductor', 'last_name' => $prefijo, 'is_driver' => 1, 'is_active' => 1,
         ]);
         $licencia = $this->insertar('driver_licenses', [
             'company_uuid' => $empresa, 'third_party_uuid' => $conductor, 'status' => 'VIGENTE',
@@ -301,6 +302,53 @@ class AislamientoAfiliadoTest extends TestCase
         $this->assertNotContains($this->datos['B']['conductor'], $uuids, 'Conductor de otro afiliado');
     }
 
+    public function test_el_afiliado_secundario_no_edita_el_conductor_compartido(): void
+    {
+        $this->insertar('affiliate_drivers', [
+            'company_uuid' => $this->empresaE,
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroB,
+            'is_primary' => 0,
+            'is_active' => 1,
+        ]);
+
+        $this->como($this->afiliadoB, $this->empresaE);
+        request()->attributes->set('current_company_uuid', $this->empresaE);
+        request()->attributes->set('current_third_party_uuid', $this->terceroB);
+
+        try {
+            app(\App\Services\ThirdParties\ThirdPartyService::class)
+                ->updateThirdParty($this->datos['A']['conductor'], ['first_name' => 'CAMBIADO']);
+
+            $this->fail('El afiliado secundario no debería poder editar al conductor compartido');
+        } catch (\Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException) {
+            // Correcto: solo el propietario principal edita los datos maestros.
+        }
+
+        $this->assertNotSame(
+            'CAMBIADO',
+            DB::table('third_parties')->where('uuid', $this->datos['A']['conductor'])->value('first_name')
+        );
+    }
+
+    public function test_el_lookup_de_conductor_existente_expone_solo_identidad_y_licencia(): void
+    {
+        $this->como($this->afiliadoB, $this->empresaE);
+
+        $r = $this->getJson('/api/v1/third-parties/driver-lookup?document_number=90AAA000');
+        $r->assertOk();
+
+        $this->assertTrue((bool) $r->json('data.encontrado'));
+        $this->assertTrue((bool) $r->json('data.es_conductor'));
+        $this->assertFalse((bool) $r->json('data.vinculado_al_afiliado'));
+        $this->assertSame($this->datos['A']['conductor'], $r->json('data.uuid'));
+
+        $data = $r->json('data');
+        foreach (['email', 'phone', 'address', 'bank_account_number', 'document_number_full'] as $sensible) {
+            $this->assertArrayNotHasKey($sensible, $data, "El lookup no debe exponer $sensible");
+        }
+    }
+
     // ── Lectura, edición y borrado por UUID ──────────────────────────────────────
 
     public function test_el_afiliado_no_abre_el_vehiculo_de_otro_afiliado_por_uuid(): void
@@ -394,6 +442,159 @@ class AislamientoAfiliadoTest extends TestCase
         $this->getJson('/api/v1/tracking/driver/'.$this->datos['A']['conductor'].'/history'.$rango)->assertOk();
         $this->assertSame(404, $this->getJson('/api/v1/tracking/driver/'.$this->datos['B']['conductor'].'/history'.$rango)->status(), 'Historial ajeno');
         $this->assertSame(404, $this->getJson('/api/v1/tracking/driver/'.$this->datos['B']['conductor'].'/stats')->status(), 'Estadísticas ajenas');
+    }
+
+    public function test_el_conductor_compartido_por_pivote_se_ve_y_se_rastrea_sin_duplicar(): void
+    {
+        // B queda vinculado al conductor de A mediante la pivote nueva, sin
+        // tocar owners_drivers ni el tercero. El GPS debe seguir siendo el mismo.
+        $this->insertar('affiliate_drivers', [
+            'company_uuid' => $this->empresaE,
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroB,
+            'is_primary' => 0,
+            'is_active' => 1,
+        ]);
+
+        $this->como($this->afiliadoB, $this->empresaE);
+
+        $terceros = $this->uuids($this->getJson('/api/v1/third-parties?company_uuid='.$this->empresaE.'&per_page=100'));
+        $this->assertContains($this->datos['A']['conductor'], $terceros, 'El afiliado vinculado debe ver al conductor compartido');
+
+        $mapa = $this->getJson('/api/v1/tracking/active-drivers');
+        $mapa->assertOk();
+        $conductores = collect($mapa->json('data'))->pluck('third_party_uuid')->all();
+        $this->assertContains($this->datos['A']['conductor'], $conductores, 'El conductor compartido aparece en el mapa');
+        $this->assertSame(
+            count($conductores),
+            count(array_unique($conductores)),
+            'El conductor compartido no debe duplicarse en active-drivers'
+        );
+
+        $this->getJson('/api/v1/tracking/last-location/'.$this->datos['A']['conductor'])->assertOk();
+        $this->getJson('/api/v1/tracking/driver/'.$this->datos['A']['conductor'].'/history?start_date=2026-10-01&end_date=2026-10-05')->assertOk();
+        $this->getJson('/api/v1/tracking/driver/'.$this->datos['A']['conductor'].'/stats')->assertOk();
+    }
+
+    public function test_un_afiliado_vincula_un_conductor_existente_sin_crear_otro_tercero(): void
+    {
+        $this->como($this->afiliadoB, $this->empresaE);
+
+        $antes = DB::table('third_parties')->count();
+
+        $this->postJson('/api/v1/third-parties/'.$this->datos['A']['conductor'].'/affiliates', [])
+            ->assertCreated();
+
+        $this->assertSame($antes, DB::table('third_parties')->count(), 'Vincular no debe crear un tercero');
+        $this->assertDatabaseHas('affiliate_drivers', [
+            'company_uuid' => $this->empresaE,
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroB,
+            'is_active' => 1,
+        ]);
+
+        // Idempotente: el segundo intento no duplica la fila.
+        $this->postJson('/api/v1/third-parties/'.$this->datos['A']['conductor'].'/affiliates', [])
+            ->assertOk();
+
+        $this->assertSame(1, DB::table('affiliate_drivers')
+            ->where('driver_uuid', $this->datos['A']['conductor'])
+            ->where('affiliate_uuid', $this->terceroB)
+            ->count());
+    }
+
+    public function test_un_afiliado_desvincula_al_conductor_sin_borrar_el_tercero(): void
+    {
+        $this->insertar('affiliate_drivers', [
+            'company_uuid' => $this->empresaE,
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroB,
+            'is_primary' => 0,
+            'is_active' => 1,
+        ]);
+
+        $this->como($this->afiliadoB, $this->empresaE);
+
+        $this->deleteJson('/api/v1/third-parties/'.$this->datos['A']['conductor'].'/affiliates/'.$this->terceroB)
+            ->assertOk();
+
+        $this->assertDatabaseHas('affiliate_drivers', [
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroB,
+            'is_active' => 0,
+        ]);
+        $this->assertDatabaseHas('third_parties', ['uuid' => $this->datos['A']['conductor']]);
+
+        $mapa = $this->getJson('/api/v1/tracking/active-drivers');
+        $conductores = collect($mapa->json('data'))->pluck('third_party_uuid')->all();
+        $this->assertNotContains($this->datos['A']['conductor'], $conductores, 'Desvinculado deja de verlo en el mapa');
+    }
+
+    public function test_desvincular_al_primario_quita_la_visibilidad_aunque_exista_en_owners_drivers(): void
+    {
+        // A es propietario legado (owners_drivers) y primario en la pivote.
+        // Al desvincularlo, el legado no debe "resucitarlo".
+        $this->insertar('affiliate_drivers', [
+            'company_uuid' => $this->empresaE,
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroA,
+            'is_primary' => 1,
+            'is_active' => 1,
+        ]);
+
+        $this->como($this->afiliadoA, $this->empresaE);
+
+        $this->assertContains(
+            $this->datos['A']['conductor'],
+            collect($this->getJson('/api/v1/tracking/active-drivers')->json('data'))->pluck('third_party_uuid')->all(),
+            'Antes de desvincular el conductor debe verse'
+        );
+
+        $this->deleteJson('/api/v1/third-parties/'.$this->datos['A']['conductor'].'/affiliates/'.$this->terceroA)
+            ->assertOk();
+
+        $this->assertDatabaseHas('affiliate_drivers', [
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroA,
+            'is_active' => 0,
+            'is_primary' => 0,
+        ]);
+
+        // El tercero y el vínculo legado siguen intactos: solo se oculta.
+        $this->assertDatabaseHas('third_parties', ['uuid' => $this->datos['A']['conductor']]);
+        $this->assertDatabaseHas('owners_drivers', ['third_party_uuid' => $this->terceroA]);
+
+        $this->assertNotContains(
+            $this->datos['A']['conductor'],
+            collect($this->getJson('/api/v1/tracking/active-drivers')->json('data'))->pluck('third_party_uuid')->all(),
+            'Desvincular al primario debe quitarlo del mapa aunque siga en owners_drivers'
+        );
+
+        $this->assertNotContains(
+            $this->datos['A']['conductor'],
+            $this->uuids($this->getJson('/api/v1/third-parties?company_uuid='.$this->empresaE.'&per_page=100'))
+        );
+
+        $this->assertNull(
+            app(\App\Services\Affiliates\AffiliateDriverService::class)
+                ->primaryAffiliateUuid($this->datos['A']['conductor']),
+            'Sin vínculo activo no debe caer al afiliado desvinculado'
+        );
+    }
+
+    public function test_un_administrador_vincula_indicando_el_afiliado_destino(): void
+    {
+        $this->como($this->admin, $this->empresaE);
+
+        $this->postJson('/api/v1/third-parties/'.$this->datos['A']['conductor'].'/affiliates', [
+            'affiliate_uuid' => $this->terceroB,
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('affiliate_drivers', [
+            'driver_uuid' => $this->datos['A']['conductor'],
+            'affiliate_uuid' => $this->terceroB,
+            'is_active' => 1,
+        ]);
     }
 
     public function test_el_administrador_ve_en_el_mapa_a_los_conductores_de_todos_los_afiliados(): void

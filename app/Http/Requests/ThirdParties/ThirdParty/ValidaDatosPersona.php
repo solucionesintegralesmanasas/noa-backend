@@ -30,49 +30,41 @@ trait ValidaDatosPersona
 
     /**
      * Reglas de validación para los datos de cédula de personas naturales.
+     * Son opcionales: solo se valida formato y rango cuando vienen diligenciados.
      */
     protected function reglasDatosPersona(): array
     {
-        $esNatural = $this->input('person_type') === 'NATURAL';
-
         return [
             'birth_place_uuid' => [
                 'nullable',
-                Rule::requiredIf($esNatural),
                 'uuid',
                 Rule::exists('cities', 'uuid'),
             ],
             'birth_date' => [
                 'nullable',
-                Rule::requiredIf($esNatural),
                 'date',
                 'before:today',
             ],
             'id_card_issue_place_uuid' => [
                 'nullable',
-                Rule::requiredIf($esNatural),
                 'uuid',
                 Rule::exists('cities', 'uuid'),
             ],
             'id_card_issue_date' => [
                 'nullable',
-                Rule::requiredIf($esNatural),
                 'date',
                 'before_or_equal:today',
             ],
             'sex' => [
                 'nullable',
-                Rule::requiredIf($esNatural),
                 Rule::in(self::SEXOS),
             ],
             'marital_status' => [
                 'nullable',
-                Rule::requiredIf($esNatural),
                 Rule::in(self::ESTADOS_CIVILES),
             ],
             'blood_type' => [
                 'nullable',
-                Rule::requiredIf($esNatural),
                 Rule::in(self::GRUPOS_SANGUINEOS),
             ],
         ];
@@ -84,17 +76,10 @@ trait ValidaDatosPersona
     protected function mensajesDatosPersona(): array
     {
         return [
-            'birth_place_uuid.required' => 'El lugar de nacimiento es obligatorio para personas naturales.',
-            'birth_date.required' => 'La fecha de nacimiento es obligatoria para personas naturales.',
             'birth_date.before' => 'La fecha de nacimiento debe ser anterior a hoy.',
-            'id_card_issue_place_uuid.required' => 'El lugar de expedición de la cédula es obligatorio para personas naturales.',
-            'id_card_issue_date.required' => 'La fecha de expedición de la cédula es obligatoria para personas naturales.',
             'id_card_issue_date.before_or_equal' => 'La fecha de expedición de la cédula no puede ser posterior a hoy.',
-            'sex.required' => 'El sexo es obligatorio para personas naturales.',
             'sex.in' => 'El sexo seleccionado no es válido.',
-            'marital_status.required' => 'El estado civil es obligatorio para personas naturales.',
             'marital_status.in' => 'El estado civil seleccionado no es válido.',
-            'blood_type.required' => 'El grupo sanguíneo es obligatorio para personas naturales.',
             'blood_type.in' => 'El grupo sanguíneo seleccionado no es válido.',
         ];
     }

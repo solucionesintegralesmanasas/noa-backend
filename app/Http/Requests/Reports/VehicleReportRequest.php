@@ -25,11 +25,18 @@ class VehicleReportRequest extends FormRequest
             'filter_type' => 'nullable|in:'.implode(',', VehicleReportService::FILTER_TYPES),
             'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
             'project_uuid' => 'nullable|uuid|exists:projects,uuid',
-            'document_type' => 'nullable|in:SOAT,RCC,RCE,RTM',
-            'doc_status' => 'nullable|in:vigente,vencido,por_vencer',
+            'branch_uuid' => 'nullable|uuid|exists:branches,uuid',
+            'ownership_type' => 'nullable|in:todos,propios,terceros',
+            'service_type' => 'nullable|string|in:TODOS,PUBLICO,PARTICULAR,todos,publico,particular',
+            'category' => 'nullable|string|in:ALL,TODOS,SOAT,RTM,OPERATION_CARD,POLIZAS,RCC,RCE,AGREEMENT,all,todos,soat,rtm,operation_card,polizas,rcc,rce,agreement',
+            'month' => 'nullable|integer|min:1|max:12',
+            'year' => 'nullable|integer|min:2020|max:2100',
+            'document_type' => 'nullable|string|in:TODOS,ALL,SOAT,RCC,RCE,RTM,todos,all,soat,rcc,rce,rtm',
+            'doc_status' => 'nullable|in:vigente,vencido,por_vencer,hoy,por_vencer_5d,mas_15d',
+            'agreement_status' => 'nullable|in:vigente,vencido,por_vencer,hoy,por_vencer_5d,mas_15d',
             'affiliated_company' => 'nullable|string|max:200',
             'contracting_entity_name' => 'nullable|string|max:200',
-            'operation_card_status' => 'nullable|in:vigente,vencida,por_vencer,0,1',
+            'operation_card_status' => 'nullable|in:vigente,vencida,por_vencer,0,1,hoy,por_vencer_5d,mas_15d',
             'operating_card_number' => 'nullable|string|max:50',
             'operation_card_expiry_from' => 'nullable|date',
             'operation_card_expiry_to' => 'nullable|date|after_or_equal:operation_card_expiry_from',
@@ -40,20 +47,6 @@ class VehicleReportRequest extends FormRequest
             'per_page' => 'nullable|integer|min:1|max:50',
             'page' => 'nullable|integer|min:1',
         ];
-    }
-
-    public function withValidator($validator): void
-    {
-        // La presencia de filter_type sin valor subordinado no debe fallar con 422:
-        // si el valor subordinado no está provisto, el servicio simplemente no
-        // restringe por ese criterio (o el filtro de tarjeta opera solo por estado).
-    }
-
-    protected function requireField($validator, string $field): void
-    {
-        if (empty($this->input($field))) {
-            $validator->errors()->add($field, "El campo {$field} es obligatorio para este tipo de filtro.");
-        }
     }
 
     public function failedValidation(Validator $validator): never
@@ -69,8 +62,11 @@ class VehicleReportRequest extends FormRequest
             'filter_type' => 'Tipo de filtro',
             'third_party_uuid' => 'Tercero',
             'project_uuid' => 'Proyecto',
+            'branch_uuid' => 'Sede operativa',
+            'ownership_type' => 'Tipo de vinculación / propiedad',
             'document_type' => 'Tipo de documento',
             'doc_status' => 'Estado del documento',
+            'agreement_status' => 'Estado del convenio',
             'operation_card_status' => 'Estado de la tarjeta de operación',
             'affiliated_company' => 'Empresa de la tarjeta de operación',
             'contracting_entity_name' => 'Convenio',

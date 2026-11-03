@@ -43,6 +43,15 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('Casado/a', $html);
         $this->assertStringContainsString('O+', $html);
 
+        // Fecha y lugar de nacimiento: antes la fila quedaba vacía en el PDF.
+        $this->assertStringContainsString('24/09/1988', $html);
+        $this->assertStringContainsString('CARTAGENA', $html);
+        $this->assertStringContainsString('BOLÍVAR', $html);
+
+        // Régimen / Nivel: la empresa siempre opera en contributivo, el valor
+        // es fijo del formato PESV y debe aparecer en los 4 subsistemas.
+        $this->assertGreaterThanOrEqual(4, substr_count($html, 'CONTRIBUTIVO'));
+
         // Modalidad fija del servicio y sin columna de organismo de tránsito.
         $this->assertStringContainsString('SERVICIO ESPECIAL · NACIONAL', $html);
         $this->assertStringNotContainsString('Organismo de Tránsito', $html);
@@ -61,6 +70,32 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
 
         $this->assertStringContainsString('MONTERÍA, CÓRDOBA', $html);
         $this->assertStringNotContainsString(', MONTERÍA, CÓRDOBA', $html);
+    }
+
+    public function test_un_subsistema_sin_datos_no_aparece_en_la_ficha(): void
+    {
+        $datos = $this->datosFicha();
+        // El conductor no tiene Caja de Compensación registrada: su fila no
+        // debe salir, las demás sí.
+        $datos['driver']->socialSecurityContributions->first()->compensation_fund_name = null;
+
+        $html = view('pdf.third-parties.technical-sheet', $datos)->render();
+
+        $this->assertStringNotContainsString('Caja Compensación (CCF)', $html);
+        $this->assertStringContainsString('Salud (EPS)', $html);
+        $this->assertSame(3, substr_count($html, 'CONTRIBUTIVO'));
+    }
+
+    public function test_sin_aportes_se_omite_la_seccion_de_seguridad_social(): void
+    {
+        $datos = $this->datosFicha();
+        $datos['driver']->setRelation('socialSecurityContributions', collect());
+
+        $html = view('pdf.third-parties.technical-sheet', $datos)->render();
+
+        $this->assertStringNotContainsString('5. Afiliaciones al Sistema de Seguridad Social Integral', $html);
+        $this->assertStringNotContainsString('Salud (EPS)', $html);
+        $this->assertStringNotContainsString('CONTRIBUTIVO', $html);
     }
 
     public function test_la_ficha_del_conductor_renderiza_sin_errores(): void
@@ -90,6 +125,7 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
             'email' => 'conductor@example.test',
             'address' => 'CALLE 1 # 2-3',
             'id_card_issue_date' => '2015-06-15',
+            'birth_date' => '1988-09-24',
             'sex' => 'M',
             'marital_status' => 'CASADO',
             'blood_type' => 'O+',
@@ -100,6 +136,10 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
 
         $driver->setRelation('documentType', (object) ['prefix' => 'CC']);
         $driver->setRelation('idCardIssuePlace', (object) ['name' => 'CERETÉ']);
+        $driver->setRelation('birthPlace', (object) [
+            'name' => 'CARTAGENA',
+            'department' => (object) ['name' => 'BOLÍVAR'],
+        ]);
         $driver->setRelation('branch', (object) ['name' => 'SEDE PRINCIPAL']);
         $driver->setRelation('company', (object) [
             'business_name' => 'TRANSPORTES DE PRUEBA S.A.S.',

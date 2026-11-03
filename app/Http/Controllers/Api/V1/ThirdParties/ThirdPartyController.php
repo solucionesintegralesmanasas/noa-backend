@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\ThirdParties;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ThirdParties\ThirdParty\StoreThirdPartyRequest;
 use App\Http\Requests\ThirdParties\ThirdParty\UpdateThirdPartyRequest;
+use App\Services\Affiliates\AffiliateDriverService;
 use App\Services\Pdf\PdfService;
 use App\Services\ThirdParties\ThirdPartyService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -28,7 +29,8 @@ use OpenApi\Attributes as OA;
 class ThirdPartyController extends Controller
 {
     public function __construct(
-        private readonly ThirdPartyService $thirdPartyService
+        private readonly ThirdPartyService $thirdPartyService,
+        private readonly AffiliateDriverService $affiliateDriverService
     ) {}
 
     #[OA\Get(
@@ -143,6 +145,150 @@ class ThirdPartyController extends Controller
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/third-parties/driver-lookup',
+        summary: 'Buscar un conductor existente por documento para vincularlo',
+        operationId: 'driverLookupThirdParty',
+        tags: ['Tercero'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'document_number', in: 'query', required: true, schema: new OA\Schema(type: 'string')),
+            new OA\Parameter(name: 'document_type_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Resultado de la búsqueda. Solo datos de identidad y licencia.'),
+        ]
+    )]
+    public function driverLookup(Request $request): JsonResponse
+    {
+        try {
+            $datos = $request->validate([
+                'document_number' => ['required', 'string', 'max:20'],
+                'document_type_uuid' => ['nullable', 'uuid'],
+            ]);
+
+            $companyUuid = (string) $request->attributes->get('current_company_uuid');
+            if ($companyUuid === '') {
+                return $this->errorResponse('No se pudo determinar la empresa activa.', 422);
+            }
+
+            $resultado = $this->thirdPartyService->buscarConductorParaVincular(
+                $companyUuid,
+                (string) $datos['document_number'],
+                $datos['document_type_uuid'] ?? null
+            );
+
+            if (($resultado['es_conductor'] ?? false) === true) {
+                $affiliateUuid = $this->affiliateUuidDelContexto($request);
+                $resultado['vinculado_al_afiliado'] = $affiliateUuid
+                    ? $this->affiliateDriverService->isLinked((string) $resultado['uuid'], $affiliateUuid)
+                    : false;
+            }
+
+            return $this->successResponse($resultado, 'Búsqueda de conductor realizada.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Post(
+        path: '/api/v1/third-parties/{uuid}/affiliates',
+        summary: 'Vincular un conductor existente al afiliado del usuario',
+        operationId: 'linkAffiliateDriverThirdParty',
+        tags: ['Tercero'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 201, description: 'Conductor vinculado.'),
+            new OA\Response(response: 200, description: 'El conductor ya estaba vinculado.'),
+        ]
+    )]
+    public function linkDriver(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $datos = $request->validate([
+                'affiliate_uuid' => ['nullable', 'uuid', 'exists:third_parties,uuid'],
+            ]);
+
+            $affiliateUuid = $this->affiliateUuidDelContexto($request, $datos['affiliate_uuid'] ?? null);
+
+            if (! $affiliateUuid) {
+                return $this->errorResponse('No se pudo determinar el afiliado a vincular.', 422);
+            }
+
+            $record = $this->affiliateDriverService->link(
+                $uuid,
+                $affiliateUuid,
+                false,
+                $request->user()?->uuid
+            );
+
+            $message = $record->wasRecentlyCreated
+                ? 'Conductor vinculado al afiliado con éxito.'
+                : 'El conductor ya estaba vinculado al afiliado.';
+
+            return $this->successResponse($record, $message, $record->wasRecentlyCreated ? 201 : 200);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Delete(
+        path: '/api/v1/third-parties/{uuid}/affiliates/{affiliateUuid}',
+        summary: 'Desactivar el vínculo de un conductor con un afiliado',
+        operationId: 'unlinkAffiliateDriverThirdParty',
+        tags: ['Tercero'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'uuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'affiliateUuid', in: 'path', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Vínculo desactivado.'),
+        ]
+    )]
+    public function unlinkDriver(Request $request, string $uuid, string $affiliateUuid): JsonResponse
+    {
+        try {
+            $affiliate = $this->affiliateUuidDelContexto($request, $affiliateUuid);
+
+            if (! $affiliate) {
+                return $this->errorResponse('No se pudo determinar el afiliado a desvincular.', 422);
+            }
+
+            $desvinculado = $this->affiliateDriverService->unlink($uuid, $affiliate);
+
+            return $this->successResponse(
+                ['desvinculado' => $desvinculado],
+                $desvinculado ? 'Conductor desvinculado del afiliado.' : 'El conductor no estaba vinculado a ese afiliado.'
+            );
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    /**
+     * Para un AFILIADO siempre se usa su propio tercero (nunca uno del cuerpo).
+     * Un administrador puede indicarlo explícitamente.
+     */
+    private function affiliateUuidDelContexto(Request $request, ?string $explicitAffiliateUuid = null): ?string
+    {
+        $user = $request->user();
+        if (! $user) {
+            return null;
+        }
+
+        $delContexto = $request->attributes->get('current_third_party_uuid');
+
+        if ($user->hasRole('AFILIADO') && ! $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA'])) {
+            return $delContexto ? (string) $delContexto : null;
+        }
+
+        return $explicitAffiliateUuid ?: ($delContexto ? (string) $delContexto : null);
     }
 
     #[OA\Get(
@@ -262,11 +408,11 @@ class ThirdPartyController extends Controller
                     new OA\Property(property: 'address', type: 'string', nullable: true),
                     new OA\Property(property: 'municipality_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'branch_uuid', type: 'string', format: 'uuid', description: 'Sucursal del tercero (obligatoria en la práctica)'),
-                    new OA\Property(property: 'id_card_issue_place_uuid', type: 'string', format: 'uuid', nullable: true, description: 'Ciudad de expedición de la cédula (obligatoria para persona NATURAL)'),
-                    new OA\Property(property: 'id_card_issue_date', type: 'string', format: 'date', nullable: true, description: 'Fecha de expedición de la cédula (obligatoria para persona NATURAL)'),
-                    new OA\Property(property: 'sex', type: 'string', enum: ['M', 'F', 'O'], nullable: true, description: 'Sexo (obligatorio para persona NATURAL)'),
-                    new OA\Property(property: 'marital_status', type: 'string', enum: ['SOLTERO', 'CASADO', 'UNION_LIBRE', 'SEPARADO', 'DIVORCIADO', 'VIUDO'], nullable: true, description: 'Estado civil (obligatorio para persona NATURAL)'),
-                    new OA\Property(property: 'blood_type', type: 'string', enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], nullable: true, description: 'Grupo sanguíneo (obligatorio para persona NATURAL)'),
+                    new OA\Property(property: 'id_card_issue_place_uuid', type: 'string', format: 'uuid', nullable: true, description: 'Ciudad de expedición de la cédula (opcional)'),
+                    new OA\Property(property: 'id_card_issue_date', type: 'string', format: 'date', nullable: true, description: 'Fecha de expedición de la cédula (opcional)'),
+                    new OA\Property(property: 'sex', type: 'string', enum: ['M', 'F', 'O'], nullable: true, description: 'Sexo (opcional)'),
+                    new OA\Property(property: 'marital_status', type: 'string', enum: ['SOLTERO', 'CASADO', 'UNION_LIBRE', 'SEPARADO', 'DIVORCIADO', 'VIUDO'], nullable: true, description: 'Estado civil (opcional)'),
+                    new OA\Property(property: 'blood_type', type: 'string', enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], nullable: true, description: 'Grupo sanguíneo (opcional)'),
                     new OA\Property(property: 'tax_regime', type: 'string'),
                     new OA\Property(property: 'tax_responsibility_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'bank_account_number', type: 'string', nullable: true),
@@ -342,11 +488,11 @@ class ThirdPartyController extends Controller
                     new OA\Property(property: 'address', type: 'string', nullable: true),
                     new OA\Property(property: 'municipality_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'branch_uuid', type: 'string', format: 'uuid', description: 'Sucursal del tercero (obligatoria en la práctica)'),
-                    new OA\Property(property: 'id_card_issue_place_uuid', type: 'string', format: 'uuid', nullable: true, description: 'Ciudad de expedición de la cédula (obligatoria para persona NATURAL)'),
-                    new OA\Property(property: 'id_card_issue_date', type: 'string', format: 'date', nullable: true, description: 'Fecha de expedición de la cédula (obligatoria para persona NATURAL)'),
-                    new OA\Property(property: 'sex', type: 'string', enum: ['M', 'F', 'O'], nullable: true, description: 'Sexo (obligatorio para persona NATURAL)'),
-                    new OA\Property(property: 'marital_status', type: 'string', enum: ['SOLTERO', 'CASADO', 'UNION_LIBRE', 'SEPARADO', 'DIVORCIADO', 'VIUDO'], nullable: true, description: 'Estado civil (obligatorio para persona NATURAL)'),
-                    new OA\Property(property: 'blood_type', type: 'string', enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], nullable: true, description: 'Grupo sanguíneo (obligatorio para persona NATURAL)'),
+                    new OA\Property(property: 'id_card_issue_place_uuid', type: 'string', format: 'uuid', nullable: true, description: 'Ciudad de expedición de la cédula (opcional)'),
+                    new OA\Property(property: 'id_card_issue_date', type: 'string', format: 'date', nullable: true, description: 'Fecha de expedición de la cédula (opcional)'),
+                    new OA\Property(property: 'sex', type: 'string', enum: ['M', 'F', 'O'], nullable: true, description: 'Sexo (opcional)'),
+                    new OA\Property(property: 'marital_status', type: 'string', enum: ['SOLTERO', 'CASADO', 'UNION_LIBRE', 'SEPARADO', 'DIVORCIADO', 'VIUDO'], nullable: true, description: 'Estado civil (opcional)'),
+                    new OA\Property(property: 'blood_type', type: 'string', enum: ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'], nullable: true, description: 'Grupo sanguíneo (opcional)'),
                     new OA\Property(property: 'tax_regime', type: 'string'),
                     new OA\Property(property: 'tax_responsibility_uuid', type: 'string', format: 'uuid'),
                     new OA\Property(property: 'bank_account_number', type: 'string', nullable: true),

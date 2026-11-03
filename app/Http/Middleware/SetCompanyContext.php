@@ -5,6 +5,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Company;
+use App\Services\Affiliates\AffiliateDriverService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -56,16 +57,12 @@ class SetCompanyContext
                 }
 
                 if ($user->hasRole('CONDUCTOR') && $thirdPartyUuid) {
-                    $affiliate = \App\Models\OwnerDriver::withoutGlobalScopes()->whereIn(
-                        'driver_license_uuid',
-                        \App\Models\DriverLicense::withoutGlobalScopes()
-                            ->where('third_party_uuid', $thirdPartyUuid)
-                            ->whereIn('status', ['VIGENTE', 'ACTIVA'])
-                            ->pluck('uuid')
-                    )->first();
+                    // Pivote nueva primero; si aún no existe, cae al owners_drivers legado.
+                    $affiliateUuid = app(AffiliateDriverService::class)
+                        ->primaryAffiliateUuid($thirdPartyUuid);
 
-                    if ($affiliate) {
-                        $request->attributes->set('current_affiliate_uuid', $affiliate->third_party_uuid);
+                    if ($affiliateUuid) {
+                        $request->attributes->set('current_affiliate_uuid', $affiliateUuid);
                     }
                 }
             }

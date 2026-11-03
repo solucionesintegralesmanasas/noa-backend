@@ -578,6 +578,15 @@ Route::prefix('v1')->group(function () {
             Route::get('/list', [ThirdPartyController::class, 'list'])->name('api.v1.third-parties.list');
             Route::post('/', [ThirdPartyController::class, 'store'])->name('api.v1.third-parties.store');
             Route::get('/email-check', [ThirdPartyController::class, 'emailCheck'])->name('api.v1.third-parties.email-check');
+            Route::get('/driver-lookup', [ThirdPartyController::class, 'driverLookup'])
+                ->middleware(['permission:driver.create', 'throttle:30,1'])
+                ->name('api.v1.third-parties.driver-lookup');
+            Route::post('/{uuid}/affiliates', [ThirdPartyController::class, 'linkDriver'])
+                ->middleware('permission:driver.create')
+                ->name('api.v1.third-parties.affiliates.store');
+            Route::delete('/{uuid}/affiliates/{affiliateUuid}', [ThirdPartyController::class, 'unlinkDriver'])
+                ->middleware('permission:driver.update')
+                ->name('api.v1.third-parties.affiliates.destroy');
             Route::get('/{uuid}', [ThirdPartyController::class, 'show'])->name('api.v1.third-parties.show');
             Route::get('/{uuid}/technical-sheet', [ThirdPartyController::class, 'technicalSheet'])->name('api.v1.third-parties.technical-sheet');
             Route::get('/{uuid}/technical-sheet/pdf', [ThirdPartyController::class, 'technicalSheetPdf'])->name('api.v1.third-parties.technical-sheet.pdf');
@@ -952,9 +961,10 @@ Route::prefix('v1')->group(function () {
                 Route::get('/project-summary', [ServiceDeliveryControlSheetController::class, 'projectSummary'])->name('api.v1.fleet.service-delivery-control-sheets.project-summary');
                 Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
                 Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
-                // SPEC-009: creación masiva por proyecto (una hoja por coche),
+                // SPEC-009: creación y actualización masiva por proyecto,
                 // antes de `/{uuid}` para que el wildcard no la capture.
                 Route::post('/bulk', [ServiceDeliveryControlSheetController::class, 'storeBulk'])->middleware('permission:service_delivery_control_sheets.create')->name('api.v1.fleet.service-delivery-control-sheets.bulk');
+                Route::put('/bulk', [ServiceDeliveryControlSheetController::class, 'updateBulk'])->middleware('permission:service_delivery_control_sheets.update')->name('api.v1.fleet.service-delivery-control-sheets.bulk-update');
                 Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
                 Route::get('/reports/{tipo}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadReportPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.pdf');
                 Route::get('/reports/{tipo}/excel', [ServiceDeliveryControlSheetController::class, 'downloadReportExcel'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.excel');
@@ -1125,8 +1135,10 @@ Route::prefix('v1')->group(function () {
         Route::prefix('reports')->group(function () {
             Route::prefix('vehicles')->group(function () {
                 Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'index'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.index');
+                Route::get('/calendar', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'calendar'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.calendar');
                 Route::get('/catalogs/affiliated-companies', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'affiliatedCompanies'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.affiliated-companies');
                 Route::get('/catalogs/agreements', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'agreements'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.agreements');
+                Route::get('/catalogs/branches', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'branches'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.branches');
                 Route::get('/catalogs/drivers', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'drivers'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.drivers');
                 Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'excel'])->middleware('permission:reports.vehicles.export-excel')->name('api.v1.reports.vehicles.excel');
                 Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'pdf'])->middleware('permission:reports.vehicles.export-pdf')->name('api.v1.reports.vehicles.pdf');

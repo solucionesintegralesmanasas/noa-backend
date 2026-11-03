@@ -76,6 +76,7 @@ class ServiceInternalControlSubcontractedService extends BaseService
             $record->update([
                 'vehicle_class_uuid' => $data['vehicle_class_uuid'] ?? $record->vehicle_class_uuid,
                 'service_delivery_control_sheet_uuid' => $data['service_delivery_control_sheet_uuid'] ?? $record->service_delivery_control_sheet_uuid,
+                'fuec_uuid' => $data['fuec_uuid'] ?? $record->fuec_uuid,
                 'vehicle_license_plate' => $data['vehicle_license_plate'] ?? $record->vehicle_license_plate,
                 'driver_name_and_surname' => $data['driver_name_and_surname'] ?? $record->driver_name_and_surname,
                 'driver_license_number' => $data['driver_license_number'] ?? $record->driver_license_number,

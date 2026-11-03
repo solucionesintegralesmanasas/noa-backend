@@ -537,17 +537,12 @@ abstract class BaseService
             } else {
                 if ($table === 'third_parties') {
                     if ($user->hasRole('AFILIADO')) {
-                        // Un afiliado ve a sus conductores vinculados (a través de owners_drivers) y a sí mismo
-                        $driverLicenseUuids = \App\Models\OwnerDriver::withoutGlobalScopes()
-                            ->where('third_party_uuid', $affiliateUuid)
-                            ->pluck('driver_license_uuid');
-
-                        $driverThirdPartyUuids = \App\Models\DriverLicense::withoutGlobalScopes()
-                            ->whereIn('uuid', $driverLicenseUuids)
-                            ->pluck('third_party_uuid')
-                            ->toArray();
-
-                        $allowedUuids = array_unique(array_merge([$affiliateUuid], $driverThirdPartyUuids));
+                        // Un afiliado ve a sus conductores vinculados (pivote nueva o
+                        // legado de owners_drivers) y a sí mismo.
+                        $allowedUuids = array_unique(array_merge(
+                            [$affiliateUuid],
+                            $this->conductoresVinculadosAlAfiliado($affiliateUuid)
+                        ));
 
                         $query->whereIn($table . '.uuid', $allowedUuids);
                     } elseif ($user->hasRole('CONDUCTOR')) {
@@ -556,30 +551,26 @@ abstract class BaseService
                     }
                 } elseif ($table === 'driver_licenses') {
                     if ($user->hasRole('AFILIADO')) {
-                        $driverLicenseUuids = \App\Models\OwnerDriver::withoutGlobalScopes()
+                        $driverUuids = $this->conductoresVinculadosAlAfiliado($affiliateUuid);
+                        $licenciasPropias = \App\Models\OwnerDriver::withoutGlobalScopes()
                             ->where('third_party_uuid', $affiliateUuid)
                             ->pluck('driver_license_uuid')
                             ->toArray();
 
-                        $query->where(function ($q) use ($table, $affiliateUuid, $driverLicenseUuids) {
+                        $query->where(function ($q) use ($table, $affiliateUuid, $driverUuids, $licenciasPropias) {
                             $q->where($table . '.third_party_uuid', $affiliateUuid)
-                                ->orWhereIn($table . '.uuid', $driverLicenseUuids);
+                                ->orWhereIn($table . '.third_party_uuid', $driverUuids)
+                                ->orWhereIn($table . '.uuid', $licenciasPropias);
                         });
                     } elseif ($user->hasRole('CONDUCTOR')) {
                         $query->where($table . '.third_party_uuid', $thirdPartyUuid);
                     }
                 } elseif ($table === 'social_security_contributions') {
                     if ($user->hasRole('AFILIADO')) {
-                        $driverLicenseUuids = \App\Models\OwnerDriver::withoutGlobalScopes()
-                            ->where('third_party_uuid', $affiliateUuid)
-                            ->pluck('driver_license_uuid');
-
-                        $driverThirdPartyUuids = \App\Models\DriverLicense::withoutGlobalScopes()
-                            ->whereIn('uuid', $driverLicenseUuids)
-                            ->pluck('third_party_uuid')
-                            ->toArray();
-
-                        $allowedUuids = array_unique(array_merge([$affiliateUuid], $driverThirdPartyUuids));
+                        $allowedUuids = array_unique(array_merge(
+                            [$affiliateUuid],
+                            $this->conductoresVinculadosAlAfiliado($affiliateUuid)
+                        ));
 
                         $query->whereIn($table . '.third_party_uuid', $allowedUuids);
                     } elseif ($user->hasRole('CONDUCTOR')) {
@@ -664,5 +655,18 @@ abstract class BaseService
                 }
             }
         }
+    }
+
+    /**
+     * Conductores visibles para un afiliado según la pivote nueva y el legado
+     * de owners_drivers. Se centraliza aquí para no duplicar la regla en cada
+     * rama del aislamiento.
+     *
+     * @return array<int, string>
+     */
+    private function conductoresVinculadosAlAfiliado(string $affiliateUuid): array
+    {
+        return app(\App\Services\Affiliates\AffiliateDriverService::class)
+            ->driverUuidsForAffiliate($affiliateUuid);
     }
 }

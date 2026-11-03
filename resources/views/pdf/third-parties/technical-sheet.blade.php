@@ -143,7 +143,6 @@
         }
 
         .meta-val {
-            font-weight: bold;
             color: #000000;
             text-align: center;
             font-family: Arial, Helvetica, sans-serif;
@@ -203,13 +202,11 @@
 
         .field-value {
             color: #000000;
-            font-weight: bold;
         }
 
         .mono-value {
             font-family: Arial, Helvetica, sans-serif;
             font-size: 8.5pt;
-            font-weight: bold;
             color: #000000;
         }
 
@@ -442,10 +439,58 @@
             $fechaExpedicion = $fmtFecha($driver->id_card_issue_date ?? null);
             $grupoSanguineo = $driver->blood_type ?? '';
 
+            // Fecha y lugar de nacimiento: mismo formato ciudad, departamento
+            // que la residencia; si falta alguno no queda separador huérfano.
+            $lugarNacimiento = $driver->birthPlace
+                ? trim(
+                    $driver->birthPlace->name .
+                        ($driver->birthPlace->department ? ', ' . $driver->birthPlace->department->name : ''),
+                )
+                : '';
+            $nacimiento = implode(' · ', array_filter([
+                $fmtFecha($driver->birth_date ?? null),
+                $lugarNacimiento,
+            ]));
+
             $contrato = $driver->employmentContracts->first();
             $aportes = $driver->socialSecurityContributions
                 ->sortByDesc(fn($c) => optional($c->billing_period)->timestamp ?? 0)
                 ->first();
+
+            // Régimen / Nivel: la empresa siempre opera en el régimen
+            // contributivo, así que la columna fija del formato PESV
+            // se imprime con ese valor (no viene de la PILA).
+            $regimen = 'CONTRIBUTIVO';
+
+            // Un subsistema sin entidad ni fecha no se imprime: el conductor
+            // no lo tiene registrado. Si ninguno tiene datos, la sección 5
+            // entera se omite (un banner con la tabla vacía no aporta).
+            $subsistemas = array_values(array_filter([
+                [
+                    'Salud (EPS)',
+                    $aportes->eps_name ?? '',
+                    $aportes->eps_affiliation_date ?? null,
+                    $aportes->health_paid ?? false,
+                ],
+                [
+                    'Riesgos Laborales (ARL)',
+                    $aportes->risk_labor_name ?? '',
+                    $aportes->risk_labor_affiliation_date ?? null,
+                    $aportes->risk_labor_paid ?? false,
+                ],
+                [
+                    'Pensiones (AFP)',
+                    $aportes->pension_name ?? '',
+                    $aportes->pension_affiliation_date ?? null,
+                    $aportes->pension_paid ?? false,
+                ],
+                [
+                    'Caja Compensación (CCF)',
+                    $aportes->compensation_fund_name ?? '',
+                    $aportes->compensation_fund_affiliation_date ?? null,
+                    $aportes->compensation_fund_paid ?? false,
+                ],
+            ], fn ($fila) => ! empty($fila[1]) || ! empty($fila[2])));
 
             $nitEmpresa = trim(
                 ($driver->company->document_number ?? '') .
@@ -546,7 +591,7 @@
                                 </tr>
                                 <tr>
                                     <td class="field-label">Fecha y Lugar Nacimiento:</td>
-                                    <td class="field-value" colspan="3">&nbsp;</td>
+                                    <td class="field-value" colspan="3">{{ $nacimiento }}</td>
                                 </tr>
                                 <tr>
                                     <td class="field-label">Estado Civil:</td>
@@ -616,11 +661,11 @@
             </thead>
             <tbody>
                 <tr>
-                    <td class="font-bold text-left uppercase" style="color: #000000; padding-left: 8px;">
+                    <td class="text-left uppercase" style="color: #000000; padding-left: 8px;">
                         {{ $driver->company->business_name ?? '' }}
                     </td>
                     <td class="mono-value">{{ $nitEmpresa }}</td>
-                    <td class="font-bold uppercase">SERVICIO ESPECIAL · NACIONAL</td>
+                    <td class="uppercase">SERVICIO ESPECIAL · NACIONAL</td>
                 </tr>
             </tbody>
         </table>
@@ -640,10 +685,10 @@
                 @forelse ($driver->driverLicenses as $licencia)
                     <tr>
                         <td class="mono-value">{{ $licencia->number ?? '' }}</td>
-                        <td><strong style="color: #000000; font-size: 8.5pt;">{{ $licencia->category ?? '' }}</strong>
+                        <td><span style="color: #000000; font-size: 8.5pt;">{{ $licencia->category ?? '' }}</span>
                         </td>
                         <td>{{ $fmtFecha($licencia->issue_date) }}</td>
-                        <td><strong>{{ $fmtFecha($licencia->expiration_date) }}</strong></td>
+                        <td>{{ $fmtFecha($licencia->expiration_date) }}</td>
                     </tr>
                 @empty
                     <tr>
@@ -669,10 +714,10 @@
             </thead>
             <tbody>
                 <tr>
-                    <td class="font-bold uppercase text-left" style="padding-left: 8px;">
+                    <td class="uppercase text-left" style="padding-left: 8px;">
                         {{ $contrato->contract_type ?? '' }}&nbsp;
                     </td>
-                    <td class="font-bold uppercase" style="color: #000000;">{{ $contrato->position ?? '' }}&nbsp;
+                    <td class="uppercase" style="color: #000000;">{{ $contrato->position ?? 'CONDUCTOR' }}&nbsp;
                     </td>
                     <td>{{ $fmtFecha($contrato->start_date ?? null) }}&nbsp;</td>
                     <td>
@@ -687,57 +732,31 @@
             </tbody>
         </table>
 
-        <!-- SECCIÓN 5: SEGURIDAD SOCIAL INTEGRAL (EPS, ARL, AFP, CCF) -->
-        <div class="section-banner">5. Afiliaciones al Sistema de Seguridad Social Integral</div>
-        <table class="ss-table" cellpadding="0" cellspacing="0">
-            <thead>
-                <tr>
-                    <th style="width: 26%; text-align: left; padding-left: 6px;">Subsistema</th>
-                    <th style="width: 32%; text-align: left; padding-left: 6px;">Entidad Administradora</th>
-                    <th style="width: 18%;">Régimen / Nivel</th>
-                    <th style="width: 14%;">Fecha Afiliación</th>
-                </tr>
-            </thead>
-            <tbody>
-                @php
-                    $subsistemas = [
-                        [
-                            'Salud (EPS)',
-                            $aportes->eps_name ?? '',
-                            $aportes->eps_affiliation_date ?? null,
-                            $aportes->health_paid ?? false,
-                        ],
-                        [
-                            'Riesgos Laborales (ARL)',
-                            $aportes->risk_labor_name ?? '',
-                            $aportes->risk_labor_affiliation_date ?? null,
-                            $aportes->risk_labor_paid ?? false,
-                        ],
-                        [
-                            'Pensiones (AFP)',
-                            $aportes->pension_name ?? '',
-                            $aportes->pension_affiliation_date ?? null,
-                            $aportes->pension_paid ?? false,
-                        ],
-                        [
-                            'Caja Compensación (CCF)',
-                            $aportes->compensation_fund_name ?? '',
-                            $aportes->compensation_fund_affiliation_date ?? null,
-                            $aportes->compensation_fund_paid ?? false,
-                        ],
-                    ];
-                @endphp
-                @foreach ($subsistemas as [$subsistema, $entidad, $fechaAfiliacion, $pagado])
+        @if ($subsistemas !== [])
+            <!-- SECCIÓN 5: SEGURIDAD SOCIAL INTEGRAL (EPS, ARL, AFP, CCF) -->
+            <div class="section-banner">5. Afiliaciones al Sistema de Seguridad Social Integral</div>
+            <table class="ss-table" cellpadding="0" cellspacing="0">
+                <thead>
                     <tr>
-                        <td class="ss-entity-title">{{ $subsistema }}</td>
-                        <td class="text-left font-bold uppercase" style="padding-left: 6px;">
-                            {{ $entidad }}&nbsp;</td>
-                        <td>&nbsp;</td>
-                        <td>{{ $fmtFecha($fechaAfiliacion) }}&nbsp;</td>
+                        <th style="width: 26%; text-align: left; padding-left: 6px;">Subsistema</th>
+                        <th style="width: 32%; text-align: left; padding-left: 6px;">Entidad Administradora</th>
+                        <th style="width: 18%;">Régimen / Nivel</th>
+                        <th style="width: 14%;">Fecha Afiliación</th>
                     </tr>
-                @endforeach
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach ($subsistemas as [$subsistema, $entidad, $fechaAfiliacion, $pagado])
+                        <tr>
+                            <td class="ss-entity-title">{{ $subsistema }}</td>
+                            <td class="text-left uppercase" style="padding-left: 6px;">
+                                {{ $entidad }}&nbsp;</td>
+                            <td>{{ $regimen }}</td>
+                            <td>{{ $fmtFecha($fechaAfiliacion) }}&nbsp;</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
 
     </div>
 
