@@ -17,10 +17,11 @@ use Tests\TestCase;
 
 /**
  * Datos de identidad de la cédula de una persona natural en terceros
- * (issue #9): lugar y fecha de expedición, sexo, estado civil y grupo
- * sanguíneo. Obligatorios para NATURAL, no aplican a JURIDICA; la edición
- * parcial no borra los campos no enviados. Se prueba por HTTP (seam único
- * del spec): la capa de servicio no tiene lógica propia para estos campos.
+ * (issue #9): lugar y fecha de nacimiento, lugar y fecha de expedición,
+ * sexo, estado civil y grupo sanguíneo. Son opcionales (se validan solo
+ * cuando vienen diligenciados), no aplican a JURIDICA; la edición parcial
+ * no borra los campos no enviados. Se prueba por HTTP (seam único del
+ * spec): la capa de servicio no tiene lógica propia para estos campos.
  */
 class TerceroDatosPersonaTest extends TestCase
 {
@@ -200,22 +201,48 @@ class TerceroDatosPersonaTest extends TestCase
         $this->assertNull($fila->blood_type);
     }
 
-    public function test_persona_natural_sin_los_datos_rechaza_con_mensajes_etiquetados(): void
+    public function test_persona_natural_se_guarda_sin_los_datos_de_persona(): void
     {
-        $r = $this->comoAdmin()->postJson('/api/v1/third-parties', $this->datosBase());
+        $datos = $this->datosBase();
 
-        $r->assertStatus(422);
+        $r = $this->comoAdmin()->postJson('/api/v1/third-parties', $datos);
 
-        $rechazados = $this->camposRechazados($r);
+        $r->assertCreated();
 
-        $this->assertContains('birth_place_uuid', $rechazados);
-        $this->assertContains('birth_date', $rechazados);
-        $this->assertContains('id_card_issue_place_uuid', $rechazados);
-        $this->assertContains('id_card_issue_date', $rechazados);
-        $this->assertContains('sex', $rechazados);
-        $this->assertContains('marital_status', $rechazados);
-        $this->assertContains('blood_type', $rechazados);
-        $this->assertStringContainsString('personas naturales', implode(' ', $this->mensajesDe($r, 'sex')));
+        $fila = DB::table('third_parties')
+            ->where('document_number', $datos['document_number'])
+            ->first();
+
+        $this->assertNull($fila->birth_place_uuid);
+        $this->assertNull($fila->birth_date);
+        $this->assertNull($fila->id_card_issue_place_uuid);
+        $this->assertNull($fila->id_card_issue_date);
+        $this->assertNull($fila->sex);
+        $this->assertNull($fila->marital_status);
+        $this->assertNull($fila->blood_type);
+    }
+
+    public function test_los_datos_de_persona_se_pueden_diligenciar_parcialmente(): void
+    {
+        $datos = $this->datosBase() + [
+            'birth_date' => '1985-04-12',
+            'sex' => 'F',
+        ];
+
+        $r = $this->comoAdmin()->postJson('/api/v1/third-parties', $datos);
+
+        $r->assertCreated();
+
+        $fila = DB::table('third_parties')
+            ->where('document_number', $datos['document_number'])
+            ->first();
+
+        $this->assertSame('1985-04-12', (string) $fila->birth_date);
+        $this->assertSame('F', $fila->sex);
+        $this->assertNull($fila->birth_place_uuid);
+        $this->assertNull($fila->id_card_issue_place_uuid);
+        $this->assertNull($fila->marital_status);
+        $this->assertNull($fila->blood_type);
     }
 
     public function test_valores_fuera_de_las_listas_rechazados(): void
