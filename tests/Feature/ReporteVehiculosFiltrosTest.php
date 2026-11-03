@@ -331,4 +331,122 @@ class ReporteVehiculosFiltrosTest extends TestCase
         $this->assertSame(1, $res5d->total());
         $this->assertSame('CNV002', $res5d->items()[0]['vehicle_license_plate']);
     }
+
+    public function test_endpoint_calendario_vencimientos_retorna_eventos_y_kpis(): void
+    {
+        Sanctum::actingAs($this->user, ['*']);
+
+        $vPub = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'TJW731',
+            'type_of_service' => 'PUBLICO',
+            'is_active' => true,
+        ]);
+
+        $vPart = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'VMU809',
+            'type_of_service' => 'PARTICULAR',
+            'is_active' => true,
+        ]);
+
+        // SOAT que vence hoy (2026-10-30) en vehículo público
+        $this->insertar('vehicle_documents', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vPub,
+            'document_type' => 'SOAT',
+            'expiry_date' => '2026-10-30',
+            'status' => 'VIGENTE',
+        ]);
+
+        // RTM por vencer en 3 días (2026-11-02) en vehículo particular
+        $this->insertar('vehicle_documents', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vPart,
+            'document_type' => 'RTM',
+            'expiry_date' => '2026-11-02',
+            'status' => 'VIGENTE',
+        ]);
+
+        // Convenio en 4 días (2026-11-03)
+        $this->insertar('business_collaboration_agreements', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vPub,
+            'agreement_internal_id' => 'CNV-CAL-01',
+            'contracting_entity_name' => 'TRANSCORVALLE S.A.S.',
+            'expiry_date' => '2026-11-03',
+            'status' => true,
+        ]);
+
+        $response = $this->withHeaders([
+            'X-Company-UUID' => $this->empresaUuid,
+        ])->getJson('/api/v1/reports/vehicles/calendar?month=11&year=2026');
+
+        $response->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.kpis.soat_alert', 1)
+            ->assertJsonPath('data.kpis.rtm_alert', 1)
+            ->assertJsonPath('data.kpis.agreement_upcoming', 1)
+            ->assertJsonPath('data.kpis.agreement_nearest_name', 'TRANSCORVALLE S.A.S.');
+
+        $events = $response->json('data.events');
+        $this->assertCount(3, $events);
+        $this->assertSame('TJW731', $events[0]['vehicle_license_plate']);
+        $this->assertSame('today', $events[0]['status']);
+    }
+
+    public function test_vehiculo_inactivo_se_excluye_de_reportes_y_calendario(): void
+    {
+        Sanctum::actingAs($this->user, ['*']);
+
+        $vActivo = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'ACT100',
+            'type_of_service' => 'PUBLICO',
+            'is_active' => true,
+        ]);
+
+        $vInactivo = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'INA200',
+            'type_of_service' => 'PUBLICO',
+            'is_active' => false,
+        ]);
+
+        $this->insertar('vehicle_documents', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vActivo,
+            'document_type' => 'SOAT',
+            'expiry_date' => '2026-11-15',
+            'status' => 'VIGENTE',
+        ]);
+
+        $this->insertar('vehicle_documents', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vInactivo,
+            'document_type' => 'SOAT',
+            'expiry_date' => '2026-11-16',
+            'status' => 'VIGENTE',
+        ]);
+
+        // 1. Calendario: solo debe listar el vehículo activo
+        $resCal = $this->withHeaders([
+            'X-Company-UUID' => $this->empresaUuid,
+        ])->getJson('/api/v1/reports/vehicles/calendar?month=11&year=2026');
+
+        $resCal->assertOk();
+        $calPlates = collect($resCal->json('data.events'))->pluck('vehicle_license_plate')->all();
+        $this->assertContains('ACT100', $calPlates);
+        $this->assertNotContains('INA200', $calPlates);
+
+        // 2. Reporte paginado: solo el activo
+        $resRep = $this->withHeaders([
+            'X-Company-UUID' => $this->empresaUuid,
+        ])->getJson('/api/v1/reports/vehicles?filter_type=document&document_type=SOAT');
+
+        $resRep->assertOk();
+        $repPlates = collect($resRep->json('data.data'))->pluck('vehicle_license_plate')->all();
+        $this->assertContains('ACT100', $repPlates);
+        $this->assertNotContains('INA200', $repPlates);
+    }
 }

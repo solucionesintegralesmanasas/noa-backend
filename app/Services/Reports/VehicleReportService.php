@@ -86,8 +86,13 @@ class VehicleReportService extends BaseService
             $query->where('vehicles.company_uuid', $filtros['company_uuid']);
         }
 
-        // Filtro transversal por sede (si entra por filter_type=branch lo aplica applyReportFilter)
-        if (! empty($filtros['branch_uuid']) && ($filtros['filter_type'] ?? null) !== self::FILTER_BRANCH) {
+        // Excluir vehículos inactivos de los reportes y del calendario (solo flota activa)
+        if (empty($filtros['include_inactive'])) {
+            $query->where('vehicles.is_active', true);
+        }
+
+        // Filtro transversal por sede
+        if (! empty($filtros['branch_uuid'])) {
             $branchUuid = $filtros['branch_uuid'];
             $query->whereHas('vehicleBranches', function (Builder $q) use ($branchUuid) {
                 $q->where('vehicles_branches.branch_uuid', $branchUuid)
@@ -95,9 +100,32 @@ class VehicleReportService extends BaseService
             });
         }
 
+        // Acotación opcional por mes y año (usada en reportes y exportaciones del calendario)
+        if (! empty($filtros['month']) && ! empty($filtros['year'])) {
+            $m = (int) $filtros['month'];
+            $y = (int) $filtros['year'];
+            $start = Carbon::createFromDate($y, $m, 1)->startOfMonth()->toDateString();
+            $end = Carbon::createFromDate($y, $m, 1)->endOfMonth()->toDateString();
+            $query->where(function (Builder $sub) use ($start, $end) {
+                $sub->whereHas('vehicleDocuments', fn ($d) => $d->whereBetween('expiry_date', [$start, $end]))
+                    ->orWhereHas('operationCards', fn ($c) => $c->whereBetween('expiration_date', [$start, $end]))
+                    ->orWhereHas('businessCollaborationAgreements', fn ($a) => $a->whereBetween('expiry_date', [$start, $end]));
+            });
+        }
+
         // Filtro transversal por propiedad (propios vs terceros/afiliados)
         if (! empty($filtros['ownership_type']) && in_array($filtros['ownership_type'], ['propios', 'terceros'], true)) {
             $this->applyOwnershipFilter($query, $filtros['ownership_type'], $filtros['company_uuid'] ?? null);
+        }
+
+        // Filtro transversal por modalidad / tipo de servicio (PUBLICO vs PARTICULAR)
+        if (! empty($filtros['service_type'])) {
+            $svc = strtoupper(trim((string) $filtros['service_type']));
+            if ($svc === Vehicle::SERVICIO_PARTICULAR) {
+                $query->where('vehicles.type_of_service', Vehicle::SERVICIO_PARTICULAR);
+            } elseif ($svc === 'PUBLICO') {
+                $query->where('vehicles.type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR);
+            }
         }
 
         $this->applyReportFilter($query, $filtros);
@@ -134,6 +162,16 @@ class VehicleReportService extends BaseService
                             ->orWhereHas('owners', fn ($oq) => $oq->where('third_party_uuid', $uuid));
                     });
                 }
+                // Si se combina con filtro de documento, tarjeta o convenio
+                if (! empty($filtros['document_type'])) {
+                    $this->applyDocumentFilter($query, $filtros);
+                }
+                if (! empty($filtros['operating_card_number']) || ! empty($filtros['operation_card_status'])) {
+                    $this->applyOperationCardFilter($query, $filtros);
+                }
+                if (! empty($filtros['agreement_status'])) {
+                    $this->applyAgreementFilter($query, $filtros);
+                }
                 break;
 
             case self::FILTER_DRIVER:
@@ -167,13 +205,7 @@ class VehicleReportService extends BaseService
                 break;
 
             case self::FILTER_BRANCH:
-                if (! empty($filtros['branch_uuid'])) {
-                    $branchUuid = $filtros['branch_uuid'];
-                    $query->whereHas('vehicleBranches', function (Builder $q) use ($branchUuid) {
-                        $q->where('vehicles_branches.branch_uuid', $branchUuid)
-                            ->where('vehicles_branches.is_active', 1);
-                    });
-                }
+                // Aplicado de forma transversal y unificada en baseQuery
                 break;
         }
     }
@@ -186,7 +218,8 @@ class VehicleReportService extends BaseService
     {
         $uuids = \App\Models\ProjectDriverVehicle::query()
             ->where('is_active', 1)
-            ->when($companyUuid, fn ($q) => $q->whereHas('vehicle', fn ($v) => $v->where('vehicles.company_uuid', $companyUuid)))
+            ->whereHas('vehicle', fn ($v) => $v->where('vehicles.is_active', true)
+                ->when($companyUuid, fn ($w) => $w->where('vehicles.company_uuid', $companyUuid)))
             ->distinct()
             ->pluck('third_party_uuid');
 
@@ -206,7 +239,8 @@ class VehicleReportService extends BaseService
     {
         $query = \App\Models\OperationCard::query()
             ->whereNotNull('affiliated_company')
-            ->where('affiliated_company', '<>', '');
+            ->where('affiliated_company', '<>', '')
+            ->whereHas('vehicle', fn ($v) => $v->where('vehicles.is_active', true));
         if ($companyUuid) {
             $query->where('company_uuid', $companyUuid);
         }
@@ -221,7 +255,8 @@ class VehicleReportService extends BaseService
     {
         $query = \App\Models\BusinessCollaborationAgreement::query()
             ->whereNotNull('contracting_entity_name')
-            ->where('contracting_entity_name', '<>', '');
+            ->where('contracting_entity_name', '<>', '')
+            ->whereHas('vehicle', fn ($v) => $v->where('vehicles.is_active', true));
         if ($companyUuid) {
             $query->where('company_uuid', $companyUuid);
         }
@@ -576,6 +611,289 @@ class VehicleReportService extends BaseService
                 ? ($driver->company_name ?: trim(($driver->first_name ?? '').' '.($driver->last_name ?? '')))
                 : null,
             'project_name' => $project?->project_name,
+        ];
+    }
+
+    /**
+     * Genera la estructura cronológica de eventos para el Calendario de Vencimientos y Convenios.
+     *
+     * @param  array<string, mixed>  $filtros
+     * @return array<string, mixed>
+     */
+    public function calendarEvents(array $filtros = []): array
+    {
+        $filas = $this->allForExport($filtros, 1000);
+        $today = Carbon::today();
+        $todayStr = $today->toDateString();
+
+        $rawCategory = strtoupper(trim((string) ($filtros['category'] ?? 'ALL')));
+        $categoryFilter = in_array($rawCategory, ['', 'ALL', 'TODOS'], true) ? 'ALL' : $rawCategory;
+
+        [$windowStart, $windowEnd] = $this->resolveCalendarWindow(
+            isset($filtros['month']) && $filtros['month'] !== '' ? (int) $filtros['month'] : null,
+            isset($filtros['year']) && $filtros['year'] !== '' ? (int) $filtros['year'] : null
+        );
+
+        $kpis = [
+            'soat_alert' => 0,
+            'rtm_alert' => 0,
+            'operation_card_alert' => 0,
+            'polizas_alert' => 0,
+            'agreement_upcoming' => 0,
+            'agreement_nearest_name' => null,
+            'up_to_date_docs' => 0,
+            'total_vehicles' => $filas->count(),
+        ];
+
+        $categoryCounts = [
+            'ALL' => 0,
+            'SOAT' => 0,
+            'RTM' => 0,
+            'OPERATION_CARD' => 0,
+            'POLIZAS' => 0,
+            'AGREEMENT' => 0,
+        ];
+
+        $nearestAgreementDays = null;
+        $events = [];
+        $definiciones = $this->getDocumentDefinitions();
+
+        foreach ($filas as $row) {
+            $esParticular = (bool) ($row['es_particular'] ?? false);
+
+            foreach ($definiciones as $code => $def) {
+                if ($esParticular && ! $def['particular_aplica']) {
+                    continue;
+                }
+
+                $expiryDate = $row[$def['expiry_key']] ?? null;
+                if (! $expiryDate) {
+                    continue;
+                }
+
+                $target = Carbon::parse($expiryDate)->startOfDay();
+                $daysRemaining = (int) $today->diffInDays($target, false);
+                $status = $this->resolveEventStatus($daysRemaining);
+                $isAlert15d = $daysRemaining <= 15;
+
+                // Contabilizar KPIs globales
+                if ($code === 'SOAT' && $isAlert15d) {
+                    $kpis['soat_alert']++;
+                } elseif ($code === 'RTM' && $isAlert15d) {
+                    $kpis['rtm_alert']++;
+                } elseif ($code === 'OPERATION_CARD' && $isAlert15d) {
+                    $kpis['operation_card_alert']++;
+                } elseif (in_array($code, ['RCC', 'RCE'], true) && $isAlert15d) {
+                    $kpis['polizas_alert']++;
+                } elseif ($code === 'AGREEMENT' && $daysRemaining <= 30) {
+                    $kpis['agreement_upcoming']++;
+                    if ($nearestAgreementDays === null || $daysRemaining < $nearestAgreementDays) {
+                        $nearestAgreementDays = $daysRemaining;
+                        $kpis['agreement_nearest_name'] = $row['agreement_name'] ?? 'Convenio activo';
+                    }
+                }
+
+                if ($code !== 'AGREEMENT' && $daysRemaining > 15) {
+                    $kpis['up_to_date_docs']++;
+                }
+
+                // Filtrar por ventana del mes consultado
+                if ($windowStart && $windowEnd) {
+                    if ($expiryDate < $windowStart || $expiryDate > $windowEnd) {
+                        continue;
+                    }
+                }
+
+                // Contabilizar category_counts dentro del período del calendario consultado
+                $categoryCounts['ALL']++;
+                if ($code === 'SOAT') {
+                    $categoryCounts['SOAT']++;
+                } elseif ($code === 'RTM') {
+                    $categoryCounts['RTM']++;
+                } elseif ($code === 'OPERATION_CARD') {
+                    $categoryCounts['OPERATION_CARD']++;
+                } elseif (in_array($code, ['RCC', 'RCE'], true)) {
+                    $categoryCounts['POLIZAS']++;
+                } elseif ($code === 'AGREEMENT') {
+                    $categoryCounts['AGREEMENT']++;
+                }
+
+                // Filtrado por categoría seleccionada para los eventos devueltos
+                if ($categoryFilter !== 'ALL') {
+                    if ($categoryFilter === 'POLIZAS' && ! in_array($code, ['RCC', 'RCE'], true)) {
+                        continue;
+                    }
+                    if ($categoryFilter !== 'POLIZAS' && $code !== $categoryFilter && $def['group'] !== $categoryFilter) {
+                        continue;
+                    }
+                }
+
+                $events[] = $this->buildEventData($row, $code, $def, $expiryDate, $status, $daysRemaining);
+            }
+        }
+
+        usort($events, static function (array $a, array $b): int {
+            $cmpDate = strcmp($a['date'], $b['date']);
+            if ($cmpDate !== 0) {
+                return $cmpDate;
+            }
+            $cmpDays = $a['days_remaining'] <=> $b['days_remaining'];
+            if ($cmpDays !== 0) {
+                return $cmpDays;
+            }
+
+            return strcmp((string) $a['vehicle_license_plate'], (string) $b['vehicle_license_plate']);
+        });
+
+        return [
+            'today' => $todayStr,
+            'kpis' => $kpis,
+            'category_counts' => $categoryCounts,
+            'events' => $events,
+        ];
+    }
+
+    /**
+     * Calcula la ventana de días del mes para el calendario (con 14 días de margen adyacente).
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    protected function resolveCalendarWindow(?int $month, ?int $year): array
+    {
+        if (! $month || ! $year) {
+            return [null, null];
+        }
+
+        $firstDay = Carbon::createFromDate($year, $month, 1)->startOfDay();
+        return [
+            $firstDay->copy()->subDays(14)->toDateString(),
+            $firstDay->copy()->endOfMonth()->addDays(14)->toDateString(),
+        ];
+    }
+
+    /**
+     * Catálogo de definiciones de documentos y convenios para el calendario.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    protected function getDocumentDefinitions(): array
+    {
+        return [
+            'SOAT' => [
+                'expiry_key' => 'soat_expiry',
+                'uuid_key' => 'soat_uuid',
+                'label' => 'SOAT',
+                'subtitle' => 'Póliza Obligatoria',
+                'group' => 'SOAT',
+                'particular_aplica' => true,
+            ],
+            'RTM' => [
+                'expiry_key' => 'rtm_expiry',
+                'uuid_key' => 'rtm_uuid',
+                'label' => 'RTM',
+                'subtitle' => 'Revisión Técnico Mecánica',
+                'group' => 'RTM',
+                'particular_aplica' => true,
+            ],
+            'OPERATION_CARD' => [
+                'expiry_key' => 'operation_card_expiry',
+                'uuid_key' => 'operation_card_uuid',
+                'label' => 'Tarjeta de Operación',
+                'subtitle' => 'Habilitación MinTransporte',
+                'group' => 'OPERATION_CARD',
+                'particular_aplica' => false,
+            ],
+            'RCC' => [
+                'expiry_key' => 'rcc_expiry',
+                'uuid_key' => 'rcc_uuid',
+                'label' => 'Póliza RCC',
+                'subtitle' => 'Responsabilidad Civil Contractual',
+                'group' => 'POLIZAS',
+                'particular_aplica' => false,
+            ],
+            'RCE' => [
+                'expiry_key' => 'rce_expiry',
+                'uuid_key' => 'rce_uuid',
+                'label' => 'Póliza RCE',
+                'subtitle' => 'Responsabilidad Civil Extracontractual',
+                'group' => 'POLIZAS',
+                'particular_aplica' => false,
+            ],
+            'AGREEMENT' => [
+                'expiry_key' => 'agreement_expiry',
+                'uuid_key' => null,
+                'label' => 'Convenio de Colaboración',
+                'subtitle' => 'Convenio Empresarial',
+                'group' => 'AGREEMENT',
+                'particular_aplica' => true,
+            ],
+        ];
+    }
+
+    /**
+     * Determina el estado de alerta según los días restantes para el vencimiento.
+     */
+    protected function resolveEventStatus(int $daysRemaining): string
+    {
+        if ($daysRemaining < 0) {
+            return 'expired';
+        }
+        if ($daysRemaining === 0) {
+            return 'today';
+        }
+        if ($daysRemaining <= 5) {
+            return 'expiring_5d';
+        }
+        if ($daysRemaining <= 15) {
+            return 'expiring_15d';
+        }
+
+        return 'valid';
+    }
+
+    /**
+     * Estructura el payload individual de un evento del calendario.
+     *
+     * @param  array<string, mixed>  $row
+     * @param  array<string, mixed>  $def
+     * @return array<string, mixed>
+     */
+    protected function buildEventData(
+        array $row,
+        string $code,
+        array $def,
+        string $expiryDate,
+        string $status,
+        int $daysRemaining
+    ): array {
+        $subtitle = $def['subtitle'];
+        if ($code === 'AGREEMENT' && ! empty($row['agreement_name'])) {
+            $subtitle = (string) $row['agreement_name'];
+        } elseif ($code === 'OPERATION_CARD' && ! empty($row['operation_card_number'])) {
+            $subtitle = 'Habilitación MinTransporte · N.º '.$row['operation_card_number'];
+        }
+
+        return [
+            'id' => $row['uuid'].'_'.$code.'_'.$expiryDate,
+            'date' => $expiryDate,
+            'vehicle_uuid' => $row['uuid'],
+            'vehicle_license_plate' => $row['vehicle_license_plate'],
+            'model' => $row['model'],
+            'vehicle_class' => $row['vehicle_class'],
+            'modality_label' => $row['modality_label'],
+            'is_own' => $row['is_own'],
+            'ownership_label' => $row['ownership_label'],
+            'affiliate_name' => $row['affiliate_name'],
+            'branch_name' => $row['branch_name'],
+            'category' => $code,
+            'category_group' => $def['group'],
+            'category_label' => $def['label'],
+            'subtitle' => $subtitle,
+            'document_uuid' => $def['uuid_key'] ? ($row[$def['uuid_key']] ?? null) : null,
+            'operation_card_number' => $row['operation_card_number'] ?? null,
+            'agreement_name' => $row['agreement_name'] ?? null,
+            'status' => $status,
+            'days_remaining' => $daysRemaining,
         ];
     }
 }

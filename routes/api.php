@@ -1135,6 +1135,7 @@ Route::prefix('v1')->group(function () {
         Route::prefix('reports')->group(function () {
             Route::prefix('vehicles')->group(function () {
                 Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'index'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.index');
+                Route::get('/calendar', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'calendar'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.calendar');
                 Route::get('/catalogs/affiliated-companies', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'affiliatedCompanies'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.affiliated-companies');
                 Route::get('/catalogs/agreements', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'agreements'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.agreements');
                 Route::get('/catalogs/branches', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'branches'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.branches');

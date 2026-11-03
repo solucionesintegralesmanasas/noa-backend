@@ -57,6 +57,39 @@ class VehicleReportController extends Controller
     }
 
     #[OA\Get(
+        path: '/api/v1/reports/vehicles/calendar',
+        summary: 'Calendario cronológico de vencimientos y convenios con KPIs de auditoría',
+        operationId: 'reportVehiclesCalendar',
+        tags: ['Reportes'],
+        security: [['bearerAuth' => []]],
+        parameters: [
+            new OA\Parameter(name: 'month', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 1, maximum: 12)),
+            new OA\Parameter(name: 'year', in: 'query', required: false, schema: new OA\Schema(type: 'integer', minimum: 2020, maximum: 2100)),
+            new OA\Parameter(name: 'category', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['ALL', 'SOAT', 'RTM', 'OPERATION_CARD', 'POLIZAS', 'RCC', 'RCE', 'AGREEMENT'])),
+            new OA\Parameter(name: 'ownership_type', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['todos', 'propios', 'terceros'])),
+            new OA\Parameter(name: 'service_type', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['TODOS', 'PUBLICO', 'PARTICULAR'])),
+            new OA\Parameter(name: 'third_party_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'branch_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'search', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Calendario de vencimientos recuperado con éxito.'),
+            new OA\Response(response: 422, description: 'Filtros inválidos.'),
+        ]
+    )]
+    public function calendar(VehicleReportRequest $request): JsonResponse
+    {
+        try {
+            $filtros = $request->reportFilters($request->attributes->get('current_company_uuid'));
+            $data = $this->reportService->calendarEvents($filtros);
+
+            return $this->successResponse($data, 'Calendario de vencimientos recuperado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
         path: '/api/v1/reports/vehicles/catalogs/drivers',
         summary: 'Conductores con asignación activa (solo personas naturales)',
         operationId: 'reportVehiclesDrivers',

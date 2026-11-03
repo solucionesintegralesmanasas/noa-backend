@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 namespace App\Services\Fleet;
 
+use App\Models\BusinessCollaborationAgreement;
+use App\Models\Notification;
+use App\Models\OperationCard;
 use App\Models\SystemConfiguration;
 use App\Models\Vehicle;
+use App\Models\VehicleDocument;
 use App\Services\BaseService;
+use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -438,6 +443,8 @@ class VehicleService extends BaseService
                 }
             }
 
+            $estabaActivo = (bool) $record->is_active;
+
             $record->update([
                 'third_party_uuid' => array_key_exists('third_party_uuid', $data) ? $data['third_party_uuid'] : $record->third_party_uuid,
                 'vehicle_license_plate' => $data['vehicle_license_plate'] ?? $record->vehicle_license_plate,
@@ -545,6 +552,10 @@ class VehicleService extends BaseService
                 }
             }
 
+            if ($estabaActivo !== (bool) $record->is_active) {
+                $this->sincronizarNotificacionesPorActividad($record);
+            }
+
             return $record->fresh();
         });
     }
@@ -564,17 +575,86 @@ class VehicleService extends BaseService
 
     /**
      * Método toggleVehicleStatus.
+     * Alterna la actividad del vehículo (is_active).
+     * Si pasa a inactivo, limpia sus notificaciones asociadas y queda excluido de reportes/auditoría.
+     * Si se reactiva, re-sincroniza las alertas preventivas de la empresa.
      */
     public function toggleVehicleStatus(string $uuid): Model
     {
         return $this->transaction(function () use ($uuid) {
             $record = $this->findByUuid($uuid);
+            $newStatus = ! (bool) $record->is_active;
+
             $record->update([
-                'is_active' => ! $record->is_active,
+                'is_active' => $newStatus,
             ]);
+
+            $this->sincronizarNotificacionesPorActividad($record);
 
             return $record->fresh();
         });
+    }
+
+    /**
+     * Mantiene las notificaciones coherentes con la actividad del vehículo:
+     * inactivo → se limpian sus alertas; activo → se re-sincronizan las de la empresa.
+     * Compartido por toggleVehicleStatus() y updateVehicle() (cambio de is_active desde el formulario).
+     */
+    protected function sincronizarNotificacionesPorActividad(Vehicle $record): void
+    {
+        if (! $record->is_active) {
+            $this->clearVehicleNotifications($record);
+
+            return;
+        }
+
+        try {
+            app(NotificationsService::class)->syncNotifications($record->company_uuid);
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudieron re-sincronizar notificaciones al activar vehículo: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Limpia todas las notificaciones pendientes o asociadas a un vehículo inactivo.
+     */
+    protected function clearVehicleNotifications(Vehicle $vehicle): void
+    {
+        $docUuids = $vehicle->vehicleDocuments()->pluck('uuid')->toArray();
+        $opCardUuids = $vehicle->operationCards()->pluck('uuid')->toArray();
+        $agreementUuids = $vehicle->businessCollaborationAgreements()->pluck('uuid')->toArray();
+
+        Notification::query()
+            ->where(function (Builder $q) use ($vehicle, $docUuids, $opCardUuids, $agreementUuids) {
+                $q->where(function (Builder $sub) use ($vehicle) {
+                    $sub->where('entity_type', Vehicle::class)
+                        ->where('entity_uuid', $vehicle->uuid);
+                });
+
+                if (! empty($docUuids)) {
+                    $q->orWhere(function (Builder $sub) use ($docUuids) {
+                        $sub->where('entity_type', VehicleDocument::class)
+                            ->whereIn('entity_uuid', $docUuids);
+                    });
+                }
+
+                if (! empty($opCardUuids)) {
+                    $q->orWhere(function (Builder $sub) use ($opCardUuids) {
+                        $sub->where('entity_type', OperationCard::class)
+                            ->whereIn('entity_uuid', $opCardUuids);
+                    });
+                }
+
+                if (! empty($agreementUuids)) {
+                    $q->orWhere(function (Builder $sub) use ($agreementUuids) {
+                        $sub->where('entity_type', BusinessCollaborationAgreement::class)
+                            ->whereIn('entity_uuid', $agreementUuids);
+                    });
+                }
+
+                $q->orWhere('extra_data->vehicle_uuid', $vehicle->uuid);
+            })
+            ->delete();
     }
 
     /**
