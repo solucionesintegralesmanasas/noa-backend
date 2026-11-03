@@ -555,8 +555,13 @@ class EdicionHojaControlTest extends TestCase
 
     public function test_la_actualizacion_parcial_de_una_hija_conserva_su_dia(): void
     {
-        $padre = $this->crearHojaDirecta(1, '2026-10-10', '2026-10-12');
-        $hija = $this->hijoPorFecha($padre, '2026-10-11');
+        // Los recorridos solo se pueden guardar el día vigente, así que el
+        // rango termina hoy y la hija que se actualiza es la de hoy.
+        $hoy = now()->toDateString();
+        $inicio = now()->subDays(2)->toDateString();
+
+        $padre = $this->crearHojaDirecta(1, $inicio, $hoy);
+        $hija = $this->hijoPorFecha($padre, $hoy);
         $this->assertNotNull($hija);
 
         // Este es el payload que envía la vista de la planilla diaria: solo los
@@ -568,16 +573,34 @@ class EdicionHojaControlTest extends TestCase
         ])->assertOk();
 
         $hijaFresca = DB::table('service_delivery_control_sheet')->where('uuid', $hija->uuid)->first();
-        $this->assertSame('2026-10-11', $hijaFresca->service_date);
-        $this->assertSame('2026-10-10', $hijaFresca->start_date);
-        $this->assertSame('2026-10-12', $hijaFresca->end_date);
+        $this->assertSame($hoy, $hijaFresca->service_date);
+        $this->assertSame($inicio, $hijaFresca->start_date);
+        $this->assertSame($hoy, $hijaFresca->end_date);
         $this->assertSame(1, DB::table('service_delivery_control_sheet_routes')
             ->where('service_delivery_control_sheet_uuid', $hija->uuid)->count());
 
         $this->assertSame(
-            '2026-10-10',
+            $inicio,
             DB::table('service_delivery_control_sheet')->where('uuid', $padre)->value('start_date'),
         );
+    }
+
+    public function test_guardar_recorridos_de_una_hija_vencida_responde_422(): void
+    {
+        // El rango es pasado: la hija abierta ya no se puede diligenciar.
+        $padre = $this->crearHojaDirecta(1, '2026-10-10', '2026-10-12');
+        $hija = $this->hijoPorFecha($padre, '2026-10-11');
+        $this->assertNotNull($hija);
+
+        $respuesta = $this->actualizar($hija->uuid, [
+            'routes' => [
+                ['order_index' => 0, 'origin' => 'Origen', 'destination' => 'Destino'],
+            ],
+        ])->assertStatus(422);
+
+        $this->assertContains('update', $this->camposDeError($respuesta));
+        $this->assertSame(0, DB::table('service_delivery_control_sheet_routes')
+            ->where('service_delivery_control_sheet_uuid', $hija->uuid)->count());
     }
 
     public function test_la_edicion_parcial_de_una_hoja_de_un_dia_no_crea_hija(): void

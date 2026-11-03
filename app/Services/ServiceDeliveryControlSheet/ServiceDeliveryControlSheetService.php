@@ -391,6 +391,34 @@ class ServiceDeliveryControlSheetService extends BaseService
     }
 
     /**
+     * Solo la planilla del día calendario vigente se puede operar.
+     *
+     * Los días anteriores quedan bloqueados aunque sigan abiertos: el conductor
+     * no debe diligenciar una jornada pasada ni arrastrarla a la fecha actual.
+     * El padre multi-día representa el rango del proyecto y se puede editar
+     * (fechas, pareja, propagación) aunque su inicio haya pasado.
+     */
+    private function asegurarDiaVigente(Model $record, string $campo): void
+    {
+        $esPadreMultiDia = ! $record->parent_uuid && $record->children()->exists();
+        if ($esPadreMultiDia) {
+            return;
+        }
+
+        $fecha = $record->service_date
+            ? Carbon::parse($record->service_date)->toDateString()
+            : null;
+
+        if (! $fecha || $fecha >= Carbon::today()->toDateString()) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            $campo => 'La planilla pertenece a un día ya vencido y solo puede diligenciarse el día vigente.',
+        ]);
+    }
+
+    /**
      * SPEC-002 §5.2 — Reglas de una jornada declarada en disponibilidad.
      *
      * Exige motivo (no basta con "no tener recorridos") y prohíbe recorridos:
@@ -776,6 +804,8 @@ class ServiceDeliveryControlSheetService extends BaseService
         if (! $record) {
             return ['planilla' => null, 'route' => null];
         }
+
+        $this->asegurarDiaVigente($record, 'close_route');
 
         $routes = $record->routes()->orderBy('order_index')->get();
 
@@ -1408,6 +1438,13 @@ class ServiceDeliveryControlSheetService extends BaseService
         return $this->transaction(function () use ($uuid, $data) {
             $record = $this->findByUuid($uuid);
             $this->asegurarEditable($record, 'update');
+            // La guarda del día solo aplica a la operación diaria (guardar
+            // recorridos desde la vista de la planilla). La edición
+            // administrativa de una hoja histórica sigue permitida: corrige
+            // fechas, pareja y datos sin reabrir la jornada pasada.
+            if (array_key_exists('routes', $data)) {
+                $this->asegurarDiaVigente($record, 'update');
+            }
 
             // El tipo define el control hijo y el flujo de cierre: no se cruza
             // interno ↔ externo después de creada (dejaría controles huérfanos).
@@ -1733,6 +1770,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             $record = $this->findByUuid($uuid);
             // SPEC-002 §7.2: /start también muta la planilla (hora, km, FUEC).
             $this->asegurarEditable($record, 'start');
+            $this->asegurarDiaVigente($record, 'start');
             $record->update([
                 'start_time' => $data['start_time'] ?? $record->start_time,
                 'starting_kilometer' => $data['starting_kilometer'] ?? $record->starting_kilometer,
@@ -1756,6 +1794,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             $record = $this->findByUuid($uuid);
             // Evita el doble cierre: reescribiría horas, km y volvería a firmar.
             $this->asegurarEditable($record, 'close');
+            $this->asegurarDiaVigente($record, 'close');
 
             $pendingChildren = ServiceDeliveryControlSheet::query()
                 ->where('parent_uuid', $record->uuid)
