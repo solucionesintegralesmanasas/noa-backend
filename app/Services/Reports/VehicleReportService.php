@@ -365,29 +365,38 @@ class VehicleReportService extends BaseService
         }
         $terminosLike = array_values(array_unique(array_filter($terminosLike)));
 
+        // Evalúa únicamente sobre la tarjeta de operación activa más reciente no cancelada
+        $tarjetaMasRecienteEsPropia = function (Builder $subQuery) use ($terminosLike) {
+            $subQuery->where(function ($q) {
+                $q->whereNull('runt_status')
+                    ->orWhere('runt_status', '!=', 'CANCELADA');
+            })
+            ->whereRaw('operation_cards.uuid = (
+                select oc_sub.uuid
+                from operation_cards as oc_sub
+                where oc_sub.vehicle_uuid = operation_cards.vehicle_uuid
+                  and (oc_sub.runt_status != "CANCELADA" or oc_sub.runt_status is null)
+                order by oc_sub.expiration_date desc
+                limit 1
+            )')
+            ->where(function ($nq) use ($terminosLike) {
+                foreach ($terminosLike as $termino) {
+                    $nq->orWhere('affiliated_company', 'like', "%{$termino}%");
+                }
+            });
+        };
+
         if ($ownershipType === 'propios') {
-            $query->where(function ($sub) use ($terminosLike) {
+            $query->where(function ($sub) use ($tarjetaMasRecienteEsPropia, $terminosLike) {
                 $sub->where('vehicles.type_of_service', Vehicle::SERVICIO_PARTICULAR);
                 if (! empty($terminosLike)) {
-                    $sub->orWhereHas('operationCards', function ($oq) use ($terminosLike) {
-                        $oq->where(function ($nq) use ($terminosLike) {
-                            foreach ($terminosLike as $termino) {
-                                $nq->orWhere('affiliated_company', 'like', "%{$termino}%");
-                            }
-                        });
-                    });
+                    $sub->orWhereHas('operationCards', $tarjetaMasRecienteEsPropia);
                 }
             });
         } elseif ($ownershipType === 'terceros') {
             $query->where('vehicles.type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR);
             if (! empty($terminosLike)) {
-                $query->whereDoesntHave('operationCards', function ($oq) use ($terminosLike) {
-                    $oq->where(function ($nq) use ($terminosLike) {
-                        foreach ($terminosLike as $termino) {
-                            $nq->orWhere('affiliated_company', 'like', "%{$termino}%");
-                        }
-                    });
-                });
+                $query->whereDoesntHave('operationCards', $tarjetaMasRecienteEsPropia);
             }
         }
     }

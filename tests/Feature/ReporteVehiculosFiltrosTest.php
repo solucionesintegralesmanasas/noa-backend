@@ -223,9 +223,34 @@ class ReporteVehiculosFiltrosTest extends TestCase
             'status' => true,
         ]);
 
+        // Vehículo 4: Tuvo tarjeta propia en el pasado (2022), pero su tarjeta más reciente (2027) es de un tercero.
+        // No debe aparecer como propio por el historial, sino como tercero.
+        $vHistorico = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'HIS404',
+            'type_of_service' => 'PUBLICO',
+            'is_active' => true,
+        ]);
+        $this->insertar('operation_cards', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vHistorico,
+            'affiliated_company' => 'TRANSPORTES SIN BARRERAS S.A.S',
+            'operating_card_number' => 'TO-VIEJA-PROPIA',
+            'expiration_date' => '2022-01-01',
+            'status' => false,
+        ]);
+        $this->insertar('operation_cards', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vHistorico,
+            'affiliated_company' => 'TERCERO ACTUAL S.A.',
+            'operating_card_number' => 'TO-NUEVA-TERCERO',
+            'expiration_date' => '2027-06-01',
+            'status' => true,
+        ]);
+
         $service = app(VehicleReportService::class);
 
-        // Propios: PAR101 y PUB202
+        // Propios: PAR101 y PUB202 (HIS404 NO debe entrar porque su tarjeta activa más reciente es de tercero)
         $resPropios = $service->paginateReport([
             'company_uuid' => $this->empresaUuid,
             'ownership_type' => 'propios',
@@ -236,15 +261,18 @@ class ReporteVehiculosFiltrosTest extends TestCase
         $this->assertContains('PAR101', $placasPropias);
         $this->assertContains('PUB202', $placasPropias);
         $this->assertNotContains('TER303', $placasPropias);
+        $this->assertNotContains('HIS404', $placasPropias);
 
-        // Terceros: TER303
+        // Terceros: TER303 y HIS404
         $resTerceros = $service->paginateReport([
             'company_uuid' => $this->empresaUuid,
             'ownership_type' => 'terceros',
         ]);
-        $this->assertSame(1, $resTerceros->total());
-        $this->assertSame('TER303', $resTerceros->items()[0]['vehicle_license_plate']);
-        $this->assertFalse($resTerceros->items()[0]['is_own']);
+        $this->assertSame(2, $resTerceros->total());
+        $placasTerceros = collect($resTerceros->items())->pluck('vehicle_license_plate')->all();
+        $this->assertContains('TER303', $placasTerceros);
+        $this->assertContains('HIS404', $placasTerceros);
+        $this->assertTrue(collect($resTerceros->items())->every(fn ($f) => $f['is_own'] === false && $f['ownership_label'] === 'Tercero'));
     }
 
     public function test_la_sede_se_muestra_sin_filtrar_por_sede(): void
