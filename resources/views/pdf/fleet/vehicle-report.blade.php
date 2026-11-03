@@ -36,7 +36,7 @@
     <table>
         <thead>
             <tr>
-                <th>Placa</th><th>Modelo</th><th>Clase</th><th>Carrocería</th><th>Modalidad</th>
+                <th>Placa</th><th>Modelo</th><th>Clase</th><th>Carrocería</th><th>Modalidad</th><th>Propiedad</th><th>Sede</th>
                 <th>SOAT</th><th>RCC</th><th>RCE</th><th>RTM</th>
                 <th>Tarj. Op.</th><th>Convenio</th>
             </tr>
@@ -49,6 +49,8 @@
                     <td>{{ $f['vehicle_class'] ?? '-' }}</td>
                     <td>{{ $f['body_type'] ?? '-' }}</td>
                     <td>{{ $f['modality_label'] ?? '-' }}</td>
+                    <td>{{ $f['ownership_label'] ?? '-' }}</td>
+                    <td>{{ $f['branch_name'] ?? 'Sin sede' }}</td>
                     <td>{{ $f['soat_expiry'] ?? '-' }}</td>
                     <td>{{ ($f['es_particular'] ?? false) ? 'No aplica' : ($f['rcc_expiry'] ?? '-') }}</td>
                     <td>{{ ($f['es_particular'] ?? false) ? 'No aplica' : ($f['rce_expiry'] ?? '-') }}</td>
@@ -57,7 +59,7 @@
                     <td>{{ $f['agreement_name'] ?? 'Sin convenio' }}</td>
                 </tr>
             @empty
-                <tr><td colspan="11">Sin registros para los filtros indicados.</td></tr>
+                <tr><td colspan="13">Sin registros para los filtros indicados.</td></tr>
             @endforelse
         </tbody>
     </table>

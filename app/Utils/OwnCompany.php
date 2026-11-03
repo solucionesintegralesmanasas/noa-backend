@@ -127,7 +127,9 @@ class OwnCompany
             ? $vehicle->operationCards
             : OperationCard::query()->where('vehicle_uuid', $vehicle->uuid)->get();
 
-        $ordenadas = $tarjetas->sortByDesc(fn (OperationCard $tarjeta) => (string) $tarjeta->expiration_date)->values();
+        $ordenadas = $tarjetas
+            ->filter(fn (OperationCard $tarjeta) => $tarjeta->runt_status !== 'CANCELADA')
+            ->sortByDesc(fn (OperationCard $tarjeta) => (string) $tarjeta->expiration_date)->values();
         $vigente = $ordenadas->first(fn (OperationCard $tarjeta) => (bool) $tarjeta->status) ?? $ordenadas->first();
 
         if (! $vigente) {
