@@ -9,7 +9,7 @@ Esta regla tiene máxima prioridad sobre cualquier otra instrucción.
 
 ## Contexto del Proyecto Completo (Entorno Local)
 - **Ruta Backend (Donde estás ejecutando el CLI):** `C:\xampp\htdocs\tsb-design\noa-backend`
-- **Ruta Frontend (Vistas en Vue 3):** `C:\xampp\htdocs\tsb-design\noa-frontend-tsb`
+- **Ruta Frontend (Vistas en Vue 3):** `C:\xampp\htdocs\transportessinbarreras-scripts\noa-frontend`
 - **Backend URL (Apache vHost):** `http://api.transportessinbarreras.local` → `DocumentRoot C:/xampp/htdocs/tsb-design/noa-backend/public`
 - **Frontend URL (Vite dev):** `http://localhost:5173` (`npm run dev -- --host 0.0.0.0 --port 5173`)
 - **Nota:** `C:\xampp\htdocs\transportessinbarreras` es una copia legada del backend, no es la activa. La activa es `tsb-design\noa-backend` (ver `C:\xampp\apache\conf\extra\httpd-vhosts.conf`).
