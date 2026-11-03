@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Arquitectura de Alto Nivel y Estructura del Código
 
-Este repositorio contiene el backend de NOA (Laravel 12 con PHP ^8.5). El frontend Vue 3 reside en un directorio hermano (`C:\xampp\htdocs\transportessinbarreras-scripts\noa-frontend`).
+Este repositorio contiene el backend de NOA (Laravel 12 con PHP ^8.5). El frontend Vue 3 reside en un directorio hermano (`C:\xampp\htdocs\tsb-design\noa-frontend-tsb`).
 
 - **Patrón por Capas:** Las solicitudes fluyen a través de `Controller` (`app/Http/Controllers/Api/V1/<Módulo>`) → `FormRequest` (`Store*`/`Update*`) → `Service` (hereda de `App\Services\BaseService` para CRUD por UUID, paginación, búsqueda, transacciones y soft deletes) → `Model`.
 - **Autorización y Seguridad:** El control de acceso se rige por permisos de Spatie (`spatie/laravel-permission`), middleware de autorización por recurso (`authz`), contexto multi-tenant mediante `company_uuid` y aislamiento estricto por afiliado/empresa.
