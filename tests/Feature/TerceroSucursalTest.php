@@ -157,6 +157,40 @@ class TerceroSucursalTest extends TestCase
         );
     }
 
+    public function test_crear_un_conductor_crea_el_vinculo_pivote_primario(): void
+    {
+        $afiliado = $this->insertar('third_parties', [
+            'company_uuid' => $this->empresa,
+            'document_number' => '900777111',
+            'company_name' => 'AFILIADO PRUEBA',
+            'is_affiliate' => 1,
+            'is_active' => 1,
+        ]);
+
+        $datos = $this->datosTercero([
+            'is_driver' => true,
+            'affiliate_uuid' => $afiliado,
+            'license_number' => 'LIC-900777111',
+            'license_category' => 'C1',
+            'license_issue_date' => '2020-01-01',
+            'license_expiration_date' => '2030-01-01',
+            'license_status' => 'ACTIVA',
+        ]);
+
+        $respuesta = $this->crear($datos);
+        $respuesta->assertCreated();
+
+        $conductorUuid = $respuesta->json('data.uuid');
+
+        $this->assertDatabaseHas('affiliate_drivers', [
+            'company_uuid' => $this->empresa,
+            'driver_uuid' => $conductorUuid,
+            'affiliate_uuid' => $afiliado,
+            'is_primary' => 1,
+            'is_active' => 1,
+        ]);
+    }
+
     public function test_no_permite_una_sucursal_de_otra_empresa(): void
     {
         $otraEmpresa = $this->crearEmpresa();

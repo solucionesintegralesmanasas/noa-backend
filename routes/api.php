@@ -578,6 +578,15 @@ Route::prefix('v1')->group(function () {
             Route::get('/list', [ThirdPartyController::class, 'list'])->name('api.v1.third-parties.list');
             Route::post('/', [ThirdPartyController::class, 'store'])->name('api.v1.third-parties.store');
             Route::get('/email-check', [ThirdPartyController::class, 'emailCheck'])->name('api.v1.third-parties.email-check');
+            Route::get('/driver-lookup', [ThirdPartyController::class, 'driverLookup'])
+                ->middleware(['permission:driver.create', 'throttle:30,1'])
+                ->name('api.v1.third-parties.driver-lookup');
+            Route::post('/{uuid}/affiliates', [ThirdPartyController::class, 'linkDriver'])
+                ->middleware('permission:driver.create')
+                ->name('api.v1.third-parties.affiliates.store');
+            Route::delete('/{uuid}/affiliates/{affiliateUuid}', [ThirdPartyController::class, 'unlinkDriver'])
+                ->middleware('permission:driver.update')
+                ->name('api.v1.third-parties.affiliates.destroy');
             Route::get('/{uuid}', [ThirdPartyController::class, 'show'])->name('api.v1.third-parties.show');
             Route::get('/{uuid}/technical-sheet', [ThirdPartyController::class, 'technicalSheet'])->name('api.v1.third-parties.technical-sheet');
             Route::get('/{uuid}/technical-sheet/pdf', [ThirdPartyController::class, 'technicalSheetPdf'])->name('api.v1.third-parties.technical-sheet.pdf');

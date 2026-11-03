@@ -6,6 +6,7 @@ namespace App\Services\ThirdParties;
 
 use App\Models\ThirdParty;
 use App\Models\User;
+use App\Services\Affiliates\AffiliateDriverService;
 use App\Services\Auth\Concerns\ProtegeRolesPrivilegiados;
 use App\Services\BaseService;
 use App\Services\Fleet\DriverLicenseService;
@@ -19,6 +20,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de Tercero.
@@ -45,7 +47,8 @@ class ThirdPartyService extends BaseService
     protected array $searchableFields = ['trade_name', 'company_name', 'first_name', 'last_name', 'document_number', 'email'];
 
     public function __construct(
-        protected DriverLicenseService $driverLicenseService
+        protected DriverLicenseService $driverLicenseService,
+        protected AffiliateDriverService $affiliateDriverService
     ) {
         parent::__construct();
 
@@ -274,6 +277,71 @@ class ThirdPartyService extends BaseService
     }
 
     /**
+     * Busca un conductor existente por documento para vincularlo a otro
+     * afiliado. Devuelve solo datos de identidad y licencia: nunca correo,
+     * teléfono, dirección, banco ni seguridad social, para no exponer el
+     * registro completo a cualquier afiliado que conozca una cédula.
+     *
+     * @return array<string, mixed>
+     */
+    public function buscarConductorParaVincular(
+        string $companyUuid,
+        string $documentNumber,
+        ?string $documentTypeUuid = null
+    ): array {
+        $query = ThirdParty::withoutGlobalScopes()
+            ->where('company_uuid', $companyUuid)
+            ->where('document_number', $documentNumber);
+
+        if ($documentTypeUuid) {
+            $query->where('document_type_uuid', $documentTypeUuid);
+        }
+
+        $tercero = $query->orderBy('id')->first();
+
+        if (! $tercero) {
+            return ['encontrado' => false];
+        }
+
+        if (! (bool) $tercero->is_driver) {
+            return [
+                'encontrado' => true,
+                'es_conductor' => false,
+                'uuid' => $tercero->uuid,
+                'document_type_uuid' => $tercero->document_type_uuid,
+                'document_number' => $tercero->document_number,
+            ];
+        }
+
+        $licencia = $tercero->driverLicenses()
+            ->orderByDesc('expiration_date')
+            ->orderByDesc('id')
+            ->first();
+
+        return [
+            'encontrado' => true,
+            'es_conductor' => true,
+            'uuid' => $tercero->uuid,
+            'person_type' => $tercero->person_type,
+            'document_type_uuid' => $tercero->document_type_uuid,
+            'document_number' => $tercero->document_number,
+            'first_name' => $tercero->first_name,
+            'last_name' => $tercero->last_name,
+            'company_name' => $tercero->company_name,
+            'trade_name' => $tercero->trade_name,
+            'is_active' => (bool) $tercero->is_active,
+            'licencia' => $licencia ? [
+                'number' => $licencia->number,
+                'category' => $licencia->category,
+                'issue_date' => $licencia->issue_date,
+                'expiration_date' => $licencia->expiration_date,
+                'status' => $licencia->status,
+                'restrictions' => $licencia->restrictions,
+            ] : null,
+        ];
+    }
+
+    /**
      * Método createThirdParty.
      */
     public function createThirdParty(array $data): Model
@@ -337,6 +405,23 @@ class ThirdPartyService extends BaseService
                 ]);
             }
 
+            // Vínculo conductor ↔ afiliado. El primero que lo registra queda como
+            // propietario principal; los afiliados adicionales se agregan por la
+            // pivote sin tocar el tercero ni la licencia.
+            if (($data['is_driver'] ?? false)) {
+                $affiliateUuid = $data['affiliate_uuid']
+                    ?? ((bool) ($data['is_affiliate'] ?? false) ? $thirdParty->uuid : null);
+
+                if ($affiliateUuid) {
+                    $this->affiliateDriverService->link(
+                        $thirdParty->uuid,
+                        $affiliateUuid,
+                        true,
+                        Auth::user()?->uuid
+                    );
+                }
+            }
+
             // Provisionamos el usuario vinculado si el tercero tiene al menos
             // uno de los roles de acceso al sistema (empleado, afiliado, conductor).
             if (isset($data['registration_from']) && $data['registration_from'] === 'Company') {
@@ -355,6 +440,35 @@ class ThirdPartyService extends BaseService
      * (p. ej. ADMIN_EMPRESA, SUPERADMIN o el rol de coordinador de sede) se preservan.
      */
     private const MANAGED_ACCESS_ROLES = ['EMPLEADO', 'AFILIADO', 'CONDUCTOR'];
+
+    /**
+     * Un afiliado secundario puede ver y operar al conductor compartido, pero
+     * no editar su registro maestro ni "absorberlo" cambiando el propietario.
+     * Solo el afiliado principal (o administración) edita.
+     */
+    private function asegurarPuedeEditarConductor(ThirdParty $record): void
+    {
+        $user = Auth::user();
+
+        if (! $user || ! $user->hasRole('AFILIADO') || $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA'])) {
+            return;
+        }
+
+        if (! (bool) $record->is_driver) {
+            return;
+        }
+
+        $affiliateUuid = request()->attributes->get('current_third_party_uuid');
+        if (! $affiliateUuid) {
+            return;
+        }
+
+        $primario = $this->affiliateDriverService->primaryAffiliateUuid($record->uuid);
+
+        if ($primario && $primario !== $affiliateUuid) {
+            throw new AccessDeniedHttpException('Solo el afiliado propietario puede editar los datos del conductor.');
+        }
+    }
 
     /**
      * Rechaza (422) guardar un tercero con el correo del usuario de OTRO tercero de la empresa: el usuario es único
@@ -592,6 +706,8 @@ class ThirdPartyService extends BaseService
                 throw (new ModelNotFoundException)->setModel(ThirdParty::class, [$uuid]);
             }
 
+            $this->asegurarPuedeEditarConductor($record);
+
             $this->asegurarCorreoLibreDeOtroTercero((string) ($data['email'] ?? $record->email), (string) $record->company_uuid, $record->uuid);
 
             $record->update([
@@ -656,6 +772,22 @@ class ThirdPartyService extends BaseService
                     $this->driverLicenseService->updateDriverLicense($license->uuid, $licenseData);
                 } else {
                     $this->driverLicenseService->createDriverLicense($licenseData);
+                }
+            }
+
+            // Mantiene el propietario principal de la pivote alineado con la
+            // licencia. Un cambio de afiliado es un traspaso: el primario anterior
+            // deja de ver al conductor.
+            if (($data['is_driver'] ?? $record->is_driver)) {
+                $isAffiliate = isset($data['is_affiliate']) ? (bool) $data['is_affiliate'] : (bool) $record->is_affiliate;
+                $affiliateUuid = $data['affiliate_uuid'] ?? ($isAffiliate ? $record->uuid : null);
+
+                if ($affiliateUuid) {
+                    $this->affiliateDriverService->assignPrimary(
+                        $record->uuid,
+                        $affiliateUuid,
+                        Auth::user()?->uuid
+                    );
                 }
             }
 

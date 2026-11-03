@@ -4,19 +4,19 @@ declare(strict_types=1);
 
 namespace App\Services\Tracking;
 
-use App\Models\DriverLicense;
-use App\Models\OwnerDriver;
 use App\Models\ProjectDriverVehicle;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Services\Affiliates\AffiliateDriverService;
 
 /**
  * Qué conductores puede rastrear un AFILIADO: los suyos, no los de otros afiliados de la empresa.
  *
- * Un conductor es "suyo" si está vinculado a él (`owners_drivers` → licencia) o si está asignado en un
- * proyecto a uno de sus vehículos. SUPERADMIN y ADMIN_EMPRESA (o cualquier usuario sin el rol AFILIADO)
- * no tienen restricción y reciben `null`. Un afiliado sin tercero asociado recibe una lista vacía
- * (no ve nada), igual que en `BaseService::aplicarFiltroAfiliado`.
+ * Un conductor es "suyo" si está vinculado en `affiliate_drivers` (pivote nueva) o en el legado
+ * `owners_drivers` → licencia, o si está asignado en un proyecto a uno de sus vehículos. SUPERADMIN y
+ * ADMIN_EMPRESA (o cualquier usuario sin el rol AFILIADO) no tienen restricción y reciben `null`.
+ * Un afiliado sin tercero asociado recibe una lista vacía (no ve nada), igual que en
+ * `BaseService::aplicarFiltroAfiliado`.
  */
 class AlcanceAfiliado
 {
@@ -45,12 +45,13 @@ class AlcanceAfiliado
             ->pluck('uuid')
             ->all();
 
-        $licencias = OwnerDriver::withoutGlobalScopes()->where('third_party_uuid', $tercero)->pluck('driver_license_uuid');
-        $vinculados = DriverLicense::withoutGlobalScopes()->whereIn('uuid', $licencias)->pluck('third_party_uuid');
+        // Lectura dual: pivote nueva + legado de owners_drivers, para que el mapa
+        // no pierda conductores mientras se completa la migración.
+        $vinculados = app(AffiliateDriverService::class)->driverUuidsForAffiliate($tercero);
         $asignados = ProjectDriverVehicle::withoutGlobalScopes()->whereIn('vehicle_uuid', $vehiculos)->pluck('third_party_uuid');
 
         return [
-            'conductores' => $vinculados->merge($asignados)->filter()->unique()->values()->all(),
+            'conductores' => collect($vinculados)->merge($asignados)->filter()->unique()->values()->all(),
             'vehiculos' => $vehiculos,
         ];
     }

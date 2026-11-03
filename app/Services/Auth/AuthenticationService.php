@@ -6,8 +6,7 @@ namespace App\Services\Auth;
 
 use App\Events\UserAuthenticated;
 use App\Exceptions\GeneralException;
-use App\Models\DriverLicense;
-use App\Models\OwnerDriver;
+use App\Services\Affiliates\AffiliateDriverService;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -483,18 +482,13 @@ class AuthenticationService
             try {
                 $uuidDriver = $thirdPartyUuid; // Guardamos el UUID original del conductor
 
-                // Buscamos el propietario/afiliado vinculado a la licencia del conductor
-                $affiliate = OwnerDriver::withoutGlobalScopes()->whereIn(
-                    'driver_license_uuid',
-                    DriverLicense::withoutGlobalScopes()
-                        ->where('third_party_uuid', $uuidDriver)
-                        ->whereIn('status', ['VIGENTE', 'ACTIVA'])
-                        ->pluck('uuid')
-                )->first();
+                // Afiliado principal: pivote nueva y, si no existe, el vínculo legado.
+                $affiliateUuid = app(AffiliateDriverService::class)
+                    ->primaryAffiliateUuid($uuidDriver);
 
-                if ($affiliate) {
+                if ($affiliateUuid) {
                     // Reemplazamos el third_party_uuid por el del propietario/afiliado
-                    $thirdPartyUuid = $affiliate->third_party_uuid;
+                    $thirdPartyUuid = $affiliateUuid;
                 }
             } catch (\Throwable $e) {
                 report($e);
