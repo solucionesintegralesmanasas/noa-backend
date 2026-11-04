@@ -771,15 +771,27 @@ class FuecService extends BaseService
                 return $nextNumber;
             }
 
+            // Si no existe la secuencia en la tabla de consecutivos, verificar si ya existen FUECs para este contrato
+            $contractUuid = DB::table('contractors')->where('id', $contractId)->value('uuid');
+            $maxExisting = 0;
+            if ($contractUuid) {
+                $maxExisting = (int) DB::table('fuec')
+                    ->where('contractor_uuid', $contractUuid)
+                    ->whereYear('issue_date', $year)
+                    ->max('number_fuec');
+            }
+
+            $nextNumber = $maxExisting + 1;
+
             ItWasConsecutive::create([
                 'type' => 'extract',
                 'company_uuid' => $companyUuid,
                 'year' => $year,
                 'contract_id' => $contractId,
-                'current_consecutive' => 1,
+                'current_consecutive' => $nextNumber,
             ]);
 
-            return 1;
+            return $nextNumber;
         });
 
         // Asegurar que el contrato y extracto tengan exactamente 4 dígitos usando el módulo y relleno a la izquierda.
@@ -903,7 +915,15 @@ class FuecService extends BaseService
                     ->where('contract_id', $contract->id)
                     ->first();
 
-                $extractConsecutive = $sequence ? ($sequence->current_consecutive + 1) : 1;
+                if ($sequence) {
+                    $extractConsecutive = $sequence->current_consecutive + 1;
+                } else {
+                    $maxExisting = (int) DB::table('fuec')
+                        ->where('contractor_uuid', $contract->uuid)
+                        ->whereYear('issue_date', $year)
+                        ->max('number_fuec');
+                    $extractConsecutive = $maxExisting + 1;
+                }
             }
         } elseif ($contractNumber) {
             $assignedContractNumber = (int) $contractNumber;

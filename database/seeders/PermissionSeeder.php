@@ -318,6 +318,7 @@ class PermissionSeeder extends Seeder
             'fuec.profile'  => ['module' => 'FUEC', 'description' => 'Ver el perfil detallado de un FUEC'],
             'fuec.update'   => ['module' => 'FUEC', 'description' => 'Actualizar un FUEC'],
             'fuec.delete'   => ['module' => 'FUEC', 'description' => 'Eliminar un FUEC'],
+            'fuec.renew'    => ['module' => 'FUEC', 'description' => 'Renovar extractos de contrato FUEC'],
 
             // --- Configuraciones del Sistema ---
             'system_configurations.index'  => ['module' => 'Configuraciones del Sistema', 'description' => 'Listar todas las configuraciones del sistema'],

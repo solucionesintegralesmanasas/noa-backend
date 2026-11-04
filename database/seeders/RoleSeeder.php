@@ -284,6 +284,7 @@ class RoleSeeder extends Seeder
             'fuec.update',
             'fuec.delete',
             'fuec.profile',
+            'fuec.renew',
 
             'system_configurations.index',
             'system_configurations.create',

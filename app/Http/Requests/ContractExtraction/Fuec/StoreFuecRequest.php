@@ -21,7 +21,28 @@ class StoreFuecRequest extends FormRequest
      */
     public function authorize(): bool
     {
+        // La renovación de FUEC (reutilización de un contrato existente) está reservada exclusivamente para administradores.
+        if (! empty($this->input('contractor.uuid'))) {
+            $user = $this->user();
+            if ($user && ! $user->hasRole('SUPERADMIN') && ! $user->hasRole('ADMIN_EMPRESA') && ! $user->can('fuec.renew')) {
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    /**
+     * Maneja un intento de autorización fallido.
+     */
+    protected function failedAuthorization(): never
+    {
+        throw new HttpResponseException(
+            $this->errorResponse(
+                'Acceso no autorizado: la renovación de extractos de contrato (FUEC) está reservada exclusivamente para administradores.',
+                403
+            )
+        );
     }
 
     /**
