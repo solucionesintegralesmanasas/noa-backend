@@ -256,8 +256,9 @@ class RenovarFuecTest extends TestCase
             'object_contract_uuid' => $this->objeto,
             'main_conductor_uuid' => $this->conductor,
             'contract_number_display' => '0001',
+            'renewed_from_uuid' => (string) Str::uuid(),
             'contractor' => [
-                'uuid' => (string) Str::uuid(), // Envía contractor.uuid para renovar
+                'uuid' => (string) Str::uuid(),
                 'document_type_uuid' => $this->tipoDocumento,
                 'document_number' => '900999888',
                 'company_name' => 'Empresa Contratante',
@@ -296,6 +297,7 @@ class RenovarFuecTest extends TestCase
             'destination_route' => 'CALI',
             'object_contract_uuid' => $this->objeto,
             'main_conductor_uuid' => $this->conductor,
+            'renewed_from_uuid' => (string) Str::uuid(),
             'contractor' => [
                 'document_type_uuid' => $this->tipoDocumento,
                 'document_number' => '900999888',

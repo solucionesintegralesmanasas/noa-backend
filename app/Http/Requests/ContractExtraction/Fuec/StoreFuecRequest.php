@@ -21,12 +21,13 @@ class StoreFuecRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        // La renovación de FUEC (reutilización de un contrato existente) está reservada exclusivamente para administradores.
-        if (! empty($this->input('contractor.uuid'))) {
+        // La renovación se declara con `renewed_from_uuid` (FUEC de origen); la selección normal de un
+        // contratante existente (contractor.uuid) no es una renovación y no se restringe.
+        if (! empty($this->input('renewed_from_uuid'))) {
             $user = $this->user();
-            if ($user && ! $user->hasRole('SUPERADMIN') && ! $user->hasRole('ADMIN_EMPRESA') && ! $user->can('fuec.renew')) {
-                return false;
-            }
+
+            return $user !== null
+                && ($user->hasRole('SUPERADMIN') || $user->hasRole('ADMIN_EMPRESA') || $user->can('fuec.renew'));
         }
 
         return true;
