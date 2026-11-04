@@ -25,6 +25,27 @@ class StoreFuecRequest extends FormRequest
     }
 
     /**
+     * Prepara los datos para validación asegurando origen y destino en mayúsculas limpias.
+     */
+    protected function prepareForValidation(): void
+    {
+        $merge = [];
+        if ($this->has('origin_route')) {
+            $merge['origin_route'] = is_string($this->origin_route)
+                ? mb_strtoupper(trim($this->origin_route), 'UTF-8')
+                : $this->origin_route;
+        }
+        if ($this->has('destination_route')) {
+            $merge['destination_route'] = is_string($this->destination_route)
+                ? mb_strtoupper(trim($this->destination_route), 'UTF-8')
+                : $this->destination_route;
+        }
+        if (! empty($merge)) {
+            $this->merge($merge);
+        }
+    }
+
+    /**
      * Obtiene las reglas de validación que se aplican a la solicitud.
      */
     public function rules(): array

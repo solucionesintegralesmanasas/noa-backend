@@ -13,6 +13,7 @@ use App\Models\SocialSecurityContribution;
 use App\Models\ThirdParty;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
+use App\Models\VehicleInspection;
 use App\Services\BaseService;
 use App\Services\Fleet\FuelStatusService;
 use App\Utils\Logger;
@@ -937,6 +938,58 @@ class NotificationsService extends BaseService
             $this->query()
                 ->where('entity_uuid', $entityUuid)
                 ->where('type', $type)
+                ->delete();
+        });
+    }
+
+    /**
+     * Elimina todas las notificaciones pendientes o asociadas a un vehículo inactivo.
+     */
+    public function clearVehicleNotifications(Vehicle $vehicle): void
+    {
+        $docUuids = $vehicle->vehicleDocuments()->pluck('uuid')->toArray();
+        $opCardUuids = $vehicle->operationCards()->pluck('uuid')->toArray();
+        $agreementUuids = $vehicle->businessCollaborationAgreements()->pluck('uuid')->toArray();
+        $inspectionUuids = $vehicle->inspections()->pluck('uuid')->toArray();
+
+        $this->transaction(function () use ($vehicle, $docUuids, $opCardUuids, $agreementUuids, $inspectionUuids) {
+            $this->query()
+                ->where(function (Builder $q) use ($vehicle, $docUuids, $opCardUuids, $agreementUuids, $inspectionUuids) {
+                    $q->where(function (Builder $sub) use ($vehicle) {
+                        $sub->where('entity_type', Vehicle::class)
+                            ->where('entity_uuid', $vehicle->uuid);
+                    });
+
+                    if (! empty($docUuids)) {
+                        $q->orWhere(function (Builder $sub) use ($docUuids) {
+                            $sub->where('entity_type', VehicleDocument::class)
+                                ->whereIn('entity_uuid', $docUuids);
+                        });
+                    }
+
+                    if (! empty($opCardUuids)) {
+                        $q->orWhere(function (Builder $sub) use ($opCardUuids) {
+                            $sub->where('entity_type', OperationCard::class)
+                                ->whereIn('entity_uuid', $opCardUuids);
+                        });
+                    }
+
+                    if (! empty($agreementUuids)) {
+                        $q->orWhere(function (Builder $sub) use ($agreementUuids) {
+                            $sub->where('entity_type', BusinessCollaborationAgreement::class)
+                                ->whereIn('entity_uuid', $agreementUuids);
+                        });
+                    }
+
+                    if (! empty($inspectionUuids)) {
+                        $q->orWhere(function (Builder $sub) use ($inspectionUuids) {
+                            $sub->where('entity_type', VehicleInspection::class)
+                                ->whereIn('entity_uuid', $inspectionUuids);
+                        });
+                    }
+
+                    $q->orWhere('extra_data->vehicle_uuid', $vehicle->uuid);
+                })
                 ->delete();
         });
     }

@@ -192,4 +192,20 @@ class Fuec extends Model
     {
         return $this->hasMany(FuecPassenger::class, 'fuec_uuid', 'uuid');
     }
+
+    /**
+     * Mutador para normalizar la ruta de origen a mayúsculas limpias.
+     */
+    public function setOriginRouteAttribute(?string $value): void
+    {
+        $this->attributes['origin_route'] = $value !== null ? mb_strtoupper(trim($value), 'UTF-8') : null;
+    }
+
+    /**
+     * Mutador para normalizar la ruta de destino a mayúsculas limpias.
+     */
+    public function setDestinationRouteAttribute(?string $value): void
+    {
+        $this->attributes['destination_route'] = $value !== null ? mb_strtoupper(trim($value), 'UTF-8') : null;
+    }
 }

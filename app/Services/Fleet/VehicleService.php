@@ -616,45 +616,11 @@ class VehicleService extends BaseService
     }
 
     /**
-     * Limpia todas las notificaciones pendientes o asociadas a un vehículo inactivo.
+     * Limpia todas las notificaciones pendientes o asociadas a un vehículo inactivo delegando en NotificationsService.
      */
     protected function clearVehicleNotifications(Vehicle $vehicle): void
     {
-        $docUuids = $vehicle->vehicleDocuments()->pluck('uuid')->toArray();
-        $opCardUuids = $vehicle->operationCards()->pluck('uuid')->toArray();
-        $agreementUuids = $vehicle->businessCollaborationAgreements()->pluck('uuid')->toArray();
-
-        Notification::query()
-            ->where(function (Builder $q) use ($vehicle, $docUuids, $opCardUuids, $agreementUuids) {
-                $q->where(function (Builder $sub) use ($vehicle) {
-                    $sub->where('entity_type', Vehicle::class)
-                        ->where('entity_uuid', $vehicle->uuid);
-                });
-
-                if (! empty($docUuids)) {
-                    $q->orWhere(function (Builder $sub) use ($docUuids) {
-                        $sub->where('entity_type', VehicleDocument::class)
-                            ->whereIn('entity_uuid', $docUuids);
-                    });
-                }
-
-                if (! empty($opCardUuids)) {
-                    $q->orWhere(function (Builder $sub) use ($opCardUuids) {
-                        $sub->where('entity_type', OperationCard::class)
-                            ->whereIn('entity_uuid', $opCardUuids);
-                    });
-                }
-
-                if (! empty($agreementUuids)) {
-                    $q->orWhere(function (Builder $sub) use ($agreementUuids) {
-                        $sub->where('entity_type', BusinessCollaborationAgreement::class)
-                            ->whereIn('entity_uuid', $agreementUuids);
-                    });
-                }
-
-                $q->orWhere('extra_data->vehicle_uuid', $vehicle->uuid);
-            })
-            ->delete();
+        app(NotificationsService::class)->clearVehicleNotifications($vehicle);
     }
 
     /**
