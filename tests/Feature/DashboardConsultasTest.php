@@ -39,13 +39,19 @@ class DashboardConsultasTest extends TestCase
         $empresa = $this->insertar('companies', ['business_name' => 'Empresa presupuesto', 'is_active' => true]);
         Schema::disableForeignKeyConstraints();
         $usuario = User::create([
-            'uuid' => (string) Str::uuid(), 'name' => 'Prueba', 'email' => Str::random(8).'@test.local',
-            'password' => Hash::make('secreto123'), 'is_active' => true,
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Prueba',
+            'email' => Str::random(8) . '@test.local',
+            'password' => Hash::make('secreto123'),
+            'is_active' => true,
         ]);
         Schema::enableForeignKeyConstraints();
         DB::table('company_user')->insert([
-            'user_id' => $usuario->id, 'company_uuid' => $empresa, 'is_active' => true,
-            'created_at' => now(), 'updated_at' => now(),
+            'user_id' => $usuario->id,
+            'company_uuid' => $empresa,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
         Sanctum::actingAs($usuario->fresh(), ['*']);
         // Lo que hace `SetCompanyContext` en cada petición; sin esto el scope recurre
@@ -69,21 +75,31 @@ class DashboardConsultasTest extends TestCase
     private function empresaConConductor(int $vehiculos): array
     {
         $empresa = $this->insertar('companies', ['business_name' => 'Empresa conductor', 'is_active' => true]);
-        $correo = Str::random(8).'@test.local';
+        $correo = Str::random(8) . '@test.local';
         $conductor = $this->insertar('third_parties', [
-            'company_uuid' => $empresa, 'first_name' => 'Conductor', 'last_name' => 'Prueba',
-            'email' => $correo, 'is_driver' => true,
+            'company_uuid' => $empresa,
+            'first_name' => 'Conductor',
+            'last_name' => 'Prueba',
+            'email' => $correo,
+            'is_driver' => true,
         ]);
 
         Schema::disableForeignKeyConstraints();
         $usuario = User::create([
-            'uuid' => (string) Str::uuid(), 'name' => 'Conductor', 'email' => $correo,
-            'password' => Hash::make('secreto123'), 'is_active' => true,
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Conductor',
+            'email' => $correo,
+            'password' => Hash::make('secreto123'),
+            'is_active' => true,
         ]);
         Schema::enableForeignKeyConstraints();
         DB::table('company_user')->insert([
-            'user_id' => $usuario->id, 'company_uuid' => $empresa, 'third_party_uuid' => $conductor,
-            'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
+            'user_id' => $usuario->id,
+            'company_uuid' => $empresa,
+            'third_party_uuid' => $conductor,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
 
         $rol = Role::findOrCreate('CONDUCTOR', 'api');
@@ -91,10 +107,12 @@ class DashboardConsultasTest extends TestCase
 
         $proyecto = $this->insertar('projects', ['company_uuid' => $empresa, 'project_name' => 'Proyecto conductor']);
         for ($i = 1; $i <= $vehiculos; $i++) {
-            $v = $this->vehiculo($empresa, 'CON'.str_pad((string) $i, 3, '0', STR_PAD_LEFT));
+            $v = $this->vehiculo($empresa, 'CON' . str_pad((string) $i, 3, '0', STR_PAD_LEFT));
             $this->insertar('project_driver_vehicles', [
-                'project_uuid' => $proyecto, 'third_party_uuid' => $conductor,
-                'vehicle_uuid' => $v, 'is_active' => true,
+                'project_uuid' => $proyecto,
+                'third_party_uuid' => $conductor,
+                'vehicle_uuid' => $v,
+                'is_active' => true,
             ]);
         }
 
@@ -107,8 +125,11 @@ class DashboardConsultasTest extends TestCase
     private function documento(string $empresa, string $vehiculo, string $tipo, string $vence): void
     {
         $this->insertar('vehicle_documents', [
-            'company_uuid' => $empresa, 'vehicle_uuid' => $vehiculo,
-            'document_type' => $tipo, 'expiry_date' => $vence, 'status' => 'VIGENTE',
+            'company_uuid' => $empresa,
+            'vehicle_uuid' => $vehiculo,
+            'document_type' => $tipo,
+            'expiry_date' => $vence,
+            'status' => 'VIGENTE',
         ]);
     }
 
@@ -125,7 +146,7 @@ class DashboardConsultasTest extends TestCase
         };
         $ampliar = function () use ($empresa): void {
             for ($i = 3; $i <= 12; $i++) {
-                $this->vehiculo($empresa, 'DASH'.str_pad((string) $i, 3, '0', STR_PAD_LEFT));
+                $this->vehiculo($empresa, 'DASH' . str_pad((string) $i, 3, '0', STR_PAD_LEFT));
             }
         };
 
@@ -134,8 +155,8 @@ class DashboardConsultasTest extends TestCase
         $resumen = $medir();
         $enServicio = collect($resumen['stats'])->firstWhere('label', 'Vehículos en Servicio');
         $this->assertMedicionConDatos((int) ($enServicio['current'] ?? 0), 'Resumen del dashboard');
-        // Medido: 12 consultas (km, conductores, FUEC y vehículos, actual y anterior).
-        $this->assertPresupuesto(12, $medir, 'Resumen del dashboard');
+        // Medido: 4 consultas constantes (vehículos, km agregados en 1 pasada, conductores y FUEC).
+        $this->assertPresupuesto(4, $medir, 'Resumen del dashboard');
     }
 
     public function test_las_alertas_no_crecen_con_la_cantidad_de_vehiculos(): void
@@ -152,7 +173,7 @@ class DashboardConsultasTest extends TestCase
         };
         $ampliar = function () use ($empresa): void {
             for ($i = 3; $i <= 10; $i++) {
-                $this->vehiculo($empresa, 'ALR'.str_pad((string) $i, 3, '0', STR_PAD_LEFT));
+                $this->vehiculo($empresa, 'ALR' . str_pad((string) $i, 3, '0', STR_PAD_LEFT));
             }
         };
 
@@ -178,10 +199,12 @@ class DashboardConsultasTest extends TestCase
             $conductor = (string) DB::table('company_user')->where('company_uuid', $empresa)->value('third_party_uuid');
             $proyecto = (string) DB::table('projects')->where('company_uuid', $empresa)->value('uuid');
             for ($i = 2; $i <= 8; $i++) {
-                $v = $this->vehiculo($empresa, 'CON'.str_pad((string) $i, 3, '0', STR_PAD_LEFT));
+                $v = $this->vehiculo($empresa, 'CON' . str_pad((string) $i, 3, '0', STR_PAD_LEFT));
                 $this->insertar('project_driver_vehicles', [
-                    'project_uuid' => $proyecto, 'third_party_uuid' => $conductor,
-                    'vehicle_uuid' => $v, 'is_active' => true,
+                    'project_uuid' => $proyecto,
+                    'third_party_uuid' => $conductor,
+                    'vehicle_uuid' => $v,
+                    'is_active' => true,
                 ]);
             }
         };
@@ -193,8 +216,9 @@ class DashboardConsultasTest extends TestCase
         $this->assertPresupuesto(24, $medir, 'Resumen del conductor');
     }
 
-    public function test_la_cache_del_dashboard_es_por_empresa(): void
+    public function test_el_dashboard_no_usa_cache_y_aisla_por_empresa(): void
     {
+        Cache::flush();
         $empresaA = $this->empresa();
         app(DashboardService::class)->getSummary(30);
         app(DashboardService::class)->getAlerts();
@@ -202,10 +226,84 @@ class DashboardConsultasTest extends TestCase
         $empresaB = $this->empresa();
         app(DashboardService::class)->getSummary(30);
 
-        // Antes la empresa salía de una columna inexistente y todas compartían "global".
-        $this->assertTrue(Cache::has("dashboard_summary_{$empresaA}_30"));
-        $this->assertTrue(Cache::has("dashboard_alerts_{$empresaA}"));
-        $this->assertTrue(Cache::has("dashboard_summary_{$empresaB}_30"));
+        // Sin caché: el dashboard se computa en tiempo real sin almacenar claves en Cache
+        $this->assertFalse(Cache::has("dashboard_summary_{$empresaA}_30"));
+        $this->assertFalse(Cache::has("dashboard_alerts_{$empresaA}"));
+        $this->assertFalse(Cache::has("dashboard_summary_{$empresaB}_30"));
         $this->assertFalse(Cache::has('dashboard_summary_global_30'));
+    }
+
+    public function test_los_endpoints_http_del_dashboard_responden_200_con_su_contrato_y_cero_escrituras(): void
+    {
+        $empresa = $this->empresa();
+        $v = $this->vehiculo($empresa, 'HTTP001');
+        // Documento vencido para ejercitar la rama de documentos expirados en alertas
+        $this->documento($empresa, $v, 'SOAT', Carbon::today()->subDays(5)->toDateString());
+
+        $headers = ['X-Company-UUID' => $empresa];
+
+        // 1. Resumen general de la empresa
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $respuestaSummary = $this->getJson('/api/v1/dashboard/summary?days=30', $headers);
+        $respuestaSummary->assertOk()
+            ->assertJsonStructure([
+                'success',
+                'data' => [
+                    'stats',
+                ],
+            ]);
+
+        $mutacionesSummary = array_filter(
+            DB::getQueryLog(),
+            fn (array $query): bool => preg_match('/^(insert|update|delete|replace|alter|create|drop|truncate)\b/i', trim($query['query'])) === 1
+        );
+        $this->assertCount(0, $mutacionesSummary, 'GET /dashboard/summary no debe realizar escrituras');
+
+        // 2. Alertas del dashboard (no debe persistir cambios en BD durante la lectura)
+        DB::flushQueryLog();
+
+        $respuestaAlerts = $this->getJson('/api/v1/dashboard/alerts', $headers);
+        $respuestaAlerts->assertOk()
+            ->assertJsonStructure([
+                'success',
+                'data',
+            ]);
+
+        $alertas = $respuestaAlerts->json('data');
+        $this->assertIsArray($alertas);
+        $this->assertNotEmpty($alertas, 'Debe retornar alertas incluyendo el documento vencido');
+
+        $mutacionesAlerts = array_filter(
+            DB::getQueryLog(),
+            fn (array $query): bool => preg_match('/^(insert|update|delete|replace|alter|create|drop|truncate)\b/i', trim($query['query'])) === 1
+        );
+        $this->assertCount(0, $mutacionesAlerts, 'GET /dashboard/alerts no debe realizar escrituras');
+
+        // 3. Resumen del conductor (autenticado como CONDUCTOR)
+        $conductorData = $this->empresaConConductor(2);
+        $conductorHeaders = ['X-Company-UUID' => $conductorData['empresa']];
+
+        DB::flushQueryLog();
+
+        $respuestaConductor = $this->getJson('/api/v1/dashboard/conductor-summary?days=30', $conductorHeaders);
+        $respuestaConductor->assertOk()
+            ->assertJsonStructure([
+                'success',
+                'data' => [
+                    'active_service',
+                    'conductor',
+                    'kpis',
+                    'quick_access',
+                    'vehicles',
+                ],
+            ]);
+
+        $mutacionesConductor = array_filter(
+            DB::getQueryLog(),
+            fn (array $query): bool => preg_match('/^(insert|update|delete|replace|alter|create|drop|truncate)\b/i', trim($query['query'])) === 1
+        );
+        $this->assertCount(0, $mutacionesConductor, 'GET /dashboard/conductor-summary no debe realizar escrituras');
     }
 }

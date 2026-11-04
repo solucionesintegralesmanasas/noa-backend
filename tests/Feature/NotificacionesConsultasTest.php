@@ -29,6 +29,7 @@ class NotificacionesConsultasTest extends TestCase
     {
         parent::setUp();
         $this->empresa = $this->insertar('companies', ['business_name' => 'Empresa notificaciones', 'is_active' => true]);
+        request()->attributes->set('current_company_uuid', $this->empresa);
     }
 
     private function vehiculoConVencimientos(string $placa): void
