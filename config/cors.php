@@ -5,7 +5,7 @@ return [
     'allowed_methods' => ['*'],
     'allowed_origins' => explode(',', env('FRONTEND_URLS', 'http://localhost:5173')),
     'allowed_headers' => ['*'],
-    'exposed_headers' => ['X-API-Version', 'Sunset', 'X-API-Deprecation-Notice'],
+    'exposed_headers' => ['X-API-Version', 'Sunset', 'X-API-Deprecation-Notice', 'Content-Disposition'],
     'max_age' => 3600,
     'supports_credentials' => false, // Usar Bearer tokens
 ];
