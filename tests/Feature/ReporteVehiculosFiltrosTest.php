@@ -449,4 +449,41 @@ class ReporteVehiculosFiltrosTest extends TestCase
         $this->assertContains('ACT100', $repPlates);
         $this->assertNotContains('INA200', $repPlates);
     }
+
+    public function test_desactivar_vehiculo_limpia_notificaciones_sin_error(): void
+    {
+        $vUuid = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'DES999',
+            'is_active' => true,
+        ]);
+
+        $vehicle = \App\Models\Vehicle::where('uuid', $vUuid)->firstOrFail();
+        $this->assertTrue((bool) $vehicle->is_active);
+
+        $service = app(\App\Services\Fleet\VehicleService::class);
+        $toggleRes = $service->toggleStatus($vUuid);
+
+        $this->assertFalse($toggleRes);
+        $vehicle->refresh();
+        $this->assertFalse((bool) $vehicle->is_active);
+
+        Sanctum::actingAs($this->user, ['*']);
+
+        // Reactivar vía HTTP
+        $resHttp = $this->withHeaders([
+            'X-Company-UUID' => $this->empresaUuid,
+        ])->patchJson("/api/v1/fleet-management/vehicles/{$vUuid}/toggle-status");
+        $resHttp->assertOk();
+        $vehicle->refresh();
+        $this->assertTrue((bool) $vehicle->is_active);
+
+        // Desactivar de nuevo vía HTTP
+        $resHttp2 = $this->withHeaders([
+            'X-Company-UUID' => $this->empresaUuid,
+        ])->patchJson("/api/v1/fleet-management/vehicles/{$vUuid}/toggle-status");
+        $resHttp2->assertOk();
+        $vehicle->refresh();
+        $this->assertFalse((bool) $vehicle->is_active);
+    }
 }

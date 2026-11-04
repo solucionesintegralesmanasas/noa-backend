@@ -950,7 +950,7 @@ class NotificationsService extends BaseService
         $docUuids = $vehicle->vehicleDocuments()->pluck('uuid')->toArray();
         $opCardUuids = $vehicle->operationCards()->pluck('uuid')->toArray();
         $agreementUuids = $vehicle->businessCollaborationAgreements()->pluck('uuid')->toArray();
-        $inspectionUuids = $vehicle->inspections()->pluck('uuid')->toArray();
+        $inspectionUuids = $vehicle->vehicleInspections()->pluck('uuid')->toArray();
 
         $this->transaction(function () use ($vehicle, $docUuids, $opCardUuids, $agreementUuids, $inspectionUuids) {
             $this->query()

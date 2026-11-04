@@ -596,6 +596,16 @@ class VehicleService extends BaseService
     }
 
     /**
+     * Sobrescribe toggleStatus de BaseService para alternar is_active en lugar del inexistente 'status'.
+     */
+    public function toggleStatus(string $uuid, string $field = 'is_active', array $enumMapping = []): bool
+    {
+        $record = $this->toggleVehicleStatus($uuid);
+
+        return (bool) $record->is_active;
+    }
+
+    /**
      * Mantiene las notificaciones coherentes con la actividad del vehículo:
      * inactivo → se limpian sus alertas; activo → se re-sincronizan las de la empresa.
      * Compartido por toggleVehicleStatus() y updateVehicle() (cambio de is_active desde el formulario).

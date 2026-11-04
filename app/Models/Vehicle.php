@@ -261,6 +261,16 @@ class Vehicle extends Model
     }
 
     /**
+     * Alias de conveniencia para vehicleInspections.
+     *
+     * @return HasMany
+     */
+    public function inspections()
+    {
+        return $this->vehicleInspections();
+    }
+
+    /**
      * Relación con vehicle_branches.
      *
      * @return HasMany
