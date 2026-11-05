@@ -165,7 +165,41 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
             : 'VEHÍCULO EN DISPONIBILIDAD';
     }
 
-    protected $with = ['project:id,uuid,project_name,start_date,completion_date', 'routes', 'internalControl.vehicle', 'internalControl.thirdParty', 'subcontractedControl.vehicleClass'];
+    public const RELACIONES_BASICAS = [
+        'project:id,uuid,project_name,start_date,completion_date',
+        'routes',
+        'internalControl.vehicle',
+        'internalControl.thirdParty',
+        'subcontractedControl.vehicleClass',
+    ];
+
+    public const RELACIONES_DETALLE = [
+        'project:id,uuid,project_name,start_date,completion_date',
+        'routes',
+        'internalControl.vehicle',
+        'internalControl.thirdParty',
+        'subcontractedControl.vehicleClass',
+        'children.routes',
+        'children.internalControl.vehicle',
+        'children.internalControl.thirdParty',
+        'children.subcontractedControl.vehicleClass',
+    ];
+
+    /**
+     * Scope para cargar relaciones completas requeridas en vistas de listado y reportes (SPEC-012).
+     */
+    public function scopeConRelacionesCompletas($query)
+    {
+        return $query->with(self::RELACIONES_BASICAS);
+    }
+
+    /**
+     * Scope para cargar relaciones completas con detalle de hijos para vista individual (SPEC-012).
+     */
+    public function scopeConRelacionesDetalle($query)
+    {
+        return $query->with(self::RELACIONES_DETALLE);
+    }
 
     /**
      * Colecciones de archivos de la hoja.
@@ -215,15 +249,39 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
     public function getVehicleLicensePlateAttribute(): ?string
     {
         if ($this->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
-            return $this->internalControl && $this->internalControl->vehicle ? $this->internalControl->vehicle->vehicle_license_plate : null;
+            if ($this->relationLoaded('internalControl') && $this->internalControl) {
+                $ic = $this->internalControl;
+                $vehicle = $ic->relationLoaded('vehicle') ? $ic->vehicle : null;
+                if ($vehicle) {
+                    return $vehicle->vehicle_license_plate;
+                }
+            }
+
+            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
+                return $this->parent->vehicle_license_plate;
+            }
+
+            return null;
         }
 
         if (in_array($this->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
-            if ($this->subcontractedControl) {
+            if ($this->relationLoaded('subcontractedControl') && $this->subcontractedControl) {
                 return $this->subcontractedControl->vehicle_license_plate;
             }
-            // Fallback: vehículo externo de plataforma guardado como interno
-            return $this->internalControl && $this->internalControl->vehicle ? $this->internalControl->vehicle->vehicle_license_plate : null;
+
+            if ($this->relationLoaded('internalControl') && $this->internalControl) {
+                $ic = $this->internalControl;
+                $vehicle = $ic->relationLoaded('vehicle') ? $ic->vehicle : null;
+                if ($vehicle) {
+                    return $vehicle->vehicle_license_plate;
+                }
+            }
+
+            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
+                return $this->parent->vehicle_license_plate;
+            }
+
+            return null;
         }
 
         return null;
@@ -232,22 +290,49 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
     public function getDriverNameAttribute(): ?string
     {
         if ($this->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
-            $driver = $this->internalControl ? $this->internalControl->thirdParty : null;
-            if ($driver) {
-                return trim($driver->first_name.' '.$driver->last_name);
+            if ($this->relationLoaded('internalControl') && $this->internalControl) {
+                $ic = $this->internalControl;
+                $driver = $ic->relationLoaded('thirdParty') ? $ic->thirdParty : null;
+                if ($driver) {
+                    return trim($driver->first_name.' '.$driver->last_name);
+                }
             }
+
+            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
+                $parentDriver = $this->parent->driver_name;
+                if ($parentDriver) {
+                    return $parentDriver;
+                }
+            }
+
+            return ! empty($this->official_name_and_surname) ? trim($this->official_name_and_surname) : null;
         }
 
         if (in_array($this->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
-            if ($this->subcontractedControl) {
-                return $this->subcontractedControl->driver_name_and_surname;
+            if ($this->relationLoaded('subcontractedControl') && $this->subcontractedControl) {
+                if (! empty($this->subcontractedControl->driver_name_and_surname)) {
+                    return trim($this->subcontractedControl->driver_name_and_surname);
+                }
             }
-            $driver = $this->internalControl ? $this->internalControl->thirdParty : null;
-            if ($driver) {
-                return trim($driver->first_name.' '.$driver->last_name);
+
+            if ($this->relationLoaded('internalControl') && $this->internalControl) {
+                $ic = $this->internalControl;
+                $driver = $ic->relationLoaded('thirdParty') ? $ic->thirdParty : null;
+                if ($driver) {
+                    return trim($driver->first_name.' '.$driver->last_name);
+                }
             }
+
+            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
+                $parentDriver = $this->parent->driver_name;
+                if ($parentDriver) {
+                    return $parentDriver;
+                }
+            }
+
+            return ! empty($this->official_name_and_surname) ? trim($this->official_name_and_surname) : null;
         }
 
-        return null;
+        return ! empty($this->official_name_and_surname) ? trim($this->official_name_and_surname) : null;
     }
 }

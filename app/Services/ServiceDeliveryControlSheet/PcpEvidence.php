@@ -265,7 +265,14 @@ final class PcpEvidence
             ->whereNull('parent_uuid')
             ->whereIn('project_uuid', $projectUuids)
             ->where('retirada_de_proyecto', false)
-            ->with(['routes', 'children.routes'])
+            ->with([
+                'routes',
+                'internalControl.thirdParty',
+                'subcontractedControl',
+                'children.routes',
+                'children.internalControl.thirdParty',
+                'children.subcontractedControl',
+            ])
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => fn ($q) => $q->where('is_active', true)]);
 

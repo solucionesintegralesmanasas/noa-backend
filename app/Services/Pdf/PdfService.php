@@ -53,7 +53,7 @@ class PdfService
         $base = ($webPage && trim($webPage) !== '') ? trim($webPage) : (string) config('app.url');
 
         if (! preg_match('~^https?://~i', $base)) {
-            $base = 'https://'.$base;
+            $base = 'https://' . $base;
         }
 
         return rtrim($base, '/');
@@ -189,13 +189,13 @@ class PdfService
     public static function nombreArchivo(string ...$partes): string
     {
         $partes = array_map('trim', $partes);
-        $partes = array_values(array_filter($partes, fn ($p) => $p !== ''));
+        $partes = array_values(array_filter($partes, fn($p) => $p !== ''));
 
         $nombre = implode(' - ', $partes);
         $nombre = preg_replace('/[\/\\\\:*?"<>|]+/u', '-', $nombre);
         $nombre = preg_replace('/\s+/u', ' ', $nombre);
 
-        return trim($nombre, " -.").'.pdf';
+        return trim($nombre, " -.") . '.pdf';
     }
 
     /**
@@ -287,7 +287,7 @@ class PdfService
                 'super' => $superBase64,
                 'transpor' => $transporBase64,
                 'signing_date' => $agreement->effective_date ? $agreement->effective_date->format('Y-m-d') : now()->format('Y-m-d'),
-                'legal_representative_name' => $agreement->company ? ($agreement->company->legal_representative_name.' '.$agreement->company->legal_representative_last_name) : 'N/A',
+                'legal_representative_name' => $agreement->company ? ($agreement->company->legal_representative_name . ' ' . $agreement->company->legal_representative_last_name) : 'N/A',
                 'document_number' => $agreement->company ? $agreement->company->legal_representative_document_number : 'N/A',
                 'document_number_expedition_place' => $agreement->company && $agreement->company->municipality ? $agreement->company->municipality->name : 'N/A',
                 'company_name' => $agreement->company ? $agreement->company->business_name : 'N/A',
@@ -345,8 +345,8 @@ class PdfService
 
             $vCode = strtolower($fuec->verification_code);
 
-            $qrUrl = $this->buildWebBaseUrl($fuec->company->web_page).
-                '/#/validacion-de-fuec/'.$vCode;
+            $qrUrl = $this->buildWebBaseUrl($fuec->company->web_page) .
+                '/#/validacion-de-fuec/' . $vCode;
 
             // Generar código QR usando BaconQrCode (disponible nativamente en composer.lock)
             $renderer = new ImageRenderer(
@@ -440,7 +440,7 @@ class PdfService
             $placa = trim((string) ($fuec->vehicle->vehicle_license_plate ?? 'SINPLACA'));
             $origen = trim((string) ($fuec->origin_route ?? ''));
             $destino = trim((string) ($fuec->destination_route ?? ''));
-            $recorrido = trim($origen.($origen !== '' && $destino !== '' ? ' - ' : '').$destino, ' -');
+            $recorrido = trim($origen . ($origen !== '' && $destino !== '' ? ' - ' : '') . $destino, ' -');
             $nombre = self::nombreArchivo('FUEC', $placa, $recorrido);
 
             return [
@@ -489,9 +489,9 @@ class PdfService
                 return null;
             }
 
-            return 'data:'.$mime.';base64,'.base64_encode((string) file_get_contents($path));
+            return 'data:' . $mime . ';base64,' . base64_encode((string) file_get_contents($path));
         } catch (\Throwable $e) {
-            Logger::warning('No se pudo resolver el membrete: '.$e->getMessage());
+            Logger::warning('No se pudo resolver el membrete: ' . $e->getMessage());
 
             return null;
         }
@@ -545,7 +545,7 @@ class PdfService
                 }
             }
         } catch (\Throwable $e) {
-            Logger::warning('No se pudo leer pdf_branding: '.$e->getMessage());
+            Logger::warning('No se pudo leer pdf_branding: ' . $e->getMessage());
         }
 
         return self::PDF_MODO_DEFECTO;
@@ -580,7 +580,7 @@ class PdfService
                 $base64 = $this->getBase64Parallel(['logo_fondo' => $logoModel], ['logo_fondo' => 1200]);
                 $fondo = $base64['logo_fondo'] ?? null;
             } catch (\Throwable $e) {
-                Logger::warning('No se pudo cargar el logo de fondo: '.$e->getMessage());
+                Logger::warning('No se pudo cargar el logo de fondo: ' . $e->getMessage());
             }
         }
 
@@ -647,7 +647,7 @@ class PdfService
             $metricas = $dompdf->getFontMetrics();
             $fuente = $metricas->getFont('Arial', 'normal');
             $tamano = 7.5;
-            $texto = 'Generado por NOA Transportes | Fecha: '.date('d/m/Y H:i').' | Página {PAGE_NUM} de {PAGE_COUNT}';
+            $texto = 'Generado por NOA Transportes | Fecha: ' . date('d/m/Y H:i') . ' | Página {PAGE_NUM} de {PAGE_COUNT}';
             $anchoTexto = $metricas->getTextWidth($texto, $fuente, $tamano);
 
             // Vertical: el texto arranca abajo del centro y sube por el borde derecho.
@@ -656,7 +656,7 @@ class PdfService
 
             $canvas->page_text($x, $y, $texto, $fuente, $tamano, [0.47, 0.47, 0.47], 0.0, 0.0, -90);
         } catch (\Throwable $e) {
-            Logger::warning('No se pudo sellar el paginado: '.$e->getMessage());
+            Logger::warning('No se pudo sellar el paginado: ' . $e->getMessage());
         }
 
         return $pdf;
@@ -704,7 +704,7 @@ class PdfService
                         continue;
                     }
                 } catch (\Exception $e) {
-                    Logger::warning('No se pudo cargar Spatie Media local: '.$e->getMessage());
+                    Logger::warning('No se pudo cargar Spatie Media local: ' . $e->getMessage());
                 }
             }
 
@@ -718,7 +718,7 @@ class PdfService
                     }
                 }
             } catch (\Exception $e) {
-                Logger::warning('No se pudo cargar archivo local: '.$e->getMessage());
+                Logger::warning('No se pudo cargar archivo local: ' . $e->getMessage());
             }
 
             // Spatie Media expone `getUrl()`, no un atributo `url`: sin este
@@ -733,7 +733,7 @@ class PdfService
                         continue;
                     }
                 } catch (\Throwable $e) {
-                    Logger::warning('No se pudo obtener la URL del archivo: '.$e->getMessage());
+                    Logger::warning('No se pudo obtener la URL del archivo: ' . $e->getMessage());
                 }
             }
 
@@ -816,7 +816,7 @@ class PdfService
                 'firma' => $signatureModel,
             ]);
 
-            $qrUrl = $this->buildWebBaseUrl($fullCompany->web_page ?? null).'/validar-vehiculo/'.$vehicleUuid;
+            $qrUrl = $this->buildWebBaseUrl($fullCompany->web_page ?? null) . '/validar-vehiculo/' . $vehicleUuid;
             $renderer = new ImageRenderer(
                 new RendererStyle(150),
                 new SvgImageBackEnd
@@ -849,7 +849,7 @@ class PdfService
                 'file_name' => $fileName,
             ];
         } catch (\Exception $e) {
-            Logger::error('PdfService@generateVehicleHistoryPdf: '.$e->getMessage());
+            Logger::error('PdfService@generateVehicleHistoryPdf: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -889,7 +889,7 @@ class PdfService
             ]);
 
             // ✅ Generar Código QR usando BaconQrCode (disponible nativamente)
-            $qrUrl = $this->buildWebBaseUrl($webPage).'/validar-vehiculo/'.$vehicle->uuid;
+            $qrUrl = $this->buildWebBaseUrl($webPage) . '/validar-vehiculo/' . $vehicle->uuid;
 
             $renderer = new ImageRenderer(
                 new RendererStyle(150),
@@ -922,7 +922,7 @@ class PdfService
                 'file_name' => $fileName,
             ];
         } catch (\Exception $e) {
-            Logger::error('PdfGenerationService@generateVehicleTechnicalSheetPdf: '.$e->getMessage());
+            Logger::error('PdfGenerationService@generateVehicleTechnicalSheetPdf: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -982,7 +982,7 @@ class PdfService
                 'file_name' => $fileName,
             ];
         } catch (\Exception $e) {
-            Logger::error('PdfService@generateHandoverRecordPdf: '.$e->getMessage());
+            Logger::error('PdfService@generateHandoverRecordPdf: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -1016,7 +1016,7 @@ class PdfService
         // El recibo se identifica con la referencia de pago del cargo (14 dígitos);
         // el UUID queda solo como último recurso para no imprimir un identificador interno.
         $receiptNumber = $charge->payment_reference ?: $uuid;
-        $qrData = "Recibo: {$receiptNumber} | Fecha: ".($charge->payment_date ? $charge->payment_date->format('Y-m-d') : 'N/A')." | Valor: {$charge->amount}";
+        $qrData = "Recibo: {$receiptNumber} | Fecha: " . ($charge->payment_date ? $charge->payment_date->format('Y-m-d') : 'N/A') . " | Valor: {$charge->amount}";
         $renderer = new ImageRenderer(
             new RendererStyle(120),
             new SvgImageBackEnd
@@ -1032,15 +1032,15 @@ class PdfService
                 'firma' => $base64Images['firma'],
                 'super' => $superBase64,
                 'transpor' => $transporBase64,
-                'qr_code' => 'data:image/svg+xml;base64,'.$qrBase64,
+                'qr_code' => 'data:image/svg+xml;base64,' . $qrBase64,
                 'signing_date' => $charge->created_at->format('Y-m-d'),
                 'payment_date' => $charge->payment_date ? $charge->payment_date->format('Y-m-d') : 'N/A',
-                'legal_representative_name' => $charge->company ? ($charge->company->legal_representative_name.' '.$charge->company->legal_representative_last_name) : 'N/A',
+                'legal_representative_name' => $charge->company ? ($charge->company->legal_representative_name . ' ' . $charge->company->legal_representative_last_name) : 'N/A',
                 'document_number' => $charge->company ? $charge->company->legal_representative_document_number : 'N/A',
                 'document_number_expedition_place' => $charge->company && $charge->company->municipality ? $charge->company->municipality->name : 'N/A',
                 'company_name' => $charge->company ? $charge->company->business_name : 'N/A',
                 'company_document_number' => $charge->company
-                    ? trim($charge->company->document_number.($charge->company->verification_digit !== null ? '-'.$charge->company->verification_digit : ''))
+                    ? trim($charge->company->document_number . ($charge->company->verification_digit !== null ? '-' . $charge->company->verification_digit : ''))
                     : 'N/A',
                 'vehicle_license_plate' => $charge->vehicle ? $charge->vehicle->vehicle_license_plate : 'N/A',
                 'vehicle_model' => $charge->vehicle ? $charge->vehicle->model : 'N/A',
@@ -1121,7 +1121,7 @@ class PdfService
                 'file_name' => $fileName,
             ];
         } catch (\Exception $e) {
-            Logger::error('PdfService@generateMaintenanceHistoryPdf: '.$e->getMessage());
+            Logger::error('PdfService@generateMaintenanceHistoryPdf: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -1138,7 +1138,17 @@ class PdfService
     public function generateDailyServiceControlSheetPdf(string $uuid): array
     {
         try {
-            $sheet = ServiceDeliveryControlSheet::where('uuid', $uuid)->firstOrFail();
+            $sheet = ServiceDeliveryControlSheet::where('uuid', $uuid)
+                ->with([
+                    'company',
+                    'project',
+                    'routes',
+                    'internalControl.vehicle.vehicleClass',
+                    'internalControl.thirdParty',
+                    'internalControl.fuec.contractor',
+                    'subcontractedControl.vehicleClass',
+                ])
+                ->firstOrFail();
 
             // Obtener datos del vehículo, conductor, contratista y empresa de transporte
             $company = $sheet->company;
@@ -1267,9 +1277,9 @@ class PdfService
             // de firmas, mismo respaldo). La estrategia de E/S no cambia: una
             // lectura por recorrido, igual que antes.
             $resultadoFilas = $this->filas->armarDias($hojasDias, new ServiceControlSheetRowsOptions(
-                proyecto: fn () => $nombreProyecto,
-                rutasDe: fn ($hoja) => $hoja->routes->where('is_active', true)->sortBy('order_index')->values(),
-                firmaHoja: fn ($hoja) => $base64Images["func_{$hoja->id}"] ?? null,
+                proyecto: fn() => $nombreProyecto,
+                rutasDe: fn($hoja) => $hoja->routes->where('is_active', true)->sortBy('order_index')->values(),
+                firmaHoja: fn($hoja) => $base64Images["func_{$hoja->id}"] ?? null,
                 firmasRuta: function ($hoja, $route) use ($routeSignatures) {
                     $sigGroup = $routeSignatures->get($route->id) ?? collect();
                     $base64 = $this->getBase64Parallel([
@@ -1281,8 +1291,8 @@ class PdfService
                 },
                 numeroEntero: true,
                 conRutasDetalle: true,
-                firmaCoordinador: fn ($hoja) => $base64Images["coord_{$hoja->id}"] ?? null,
-                firmaConductor: fn ($hoja) => $base64Images["cond_{$hoja->id}"] ?? null,
+                firmaCoordinador: fn($hoja) => $base64Images["coord_{$hoja->id}"] ?? null,
+                firmaConductor: fn($hoja) => $base64Images["cond_{$hoja->id}"] ?? null,
             ));
             $dias = $resultadoFilas['dias'];
             $rutasDetalle = $resultadoFilas['rutasDetalle'];
@@ -1292,21 +1302,21 @@ class PdfService
 
             // Observaciones: peajes + recorridos + vigencia del proyecto
             $obsPartes = [];
-            $peajes = $this->consolidarPeajes($hojasDias, fn ($hoja) => $hoja->routes);
+            $peajes = $this->consolidarPeajes($hojasDias, fn($hoja) => $hoja->routes);
             $totalPeajes = $peajes['tolls'];
             $valorPeajes = $peajes['valor'];
             if ($totalPeajes > 0 || $valorPeajes > 0) {
-                $obsPartes[] = "Peajes: {$totalPeajes} | Valor: $ ".number_format($valorPeajes, 0, ',', '.');
+                $obsPartes[] = "Peajes: {$totalPeajes} | Valor: $ " . number_format($valorPeajes, 0, ',', '.');
             }
             if ($totalRecorridos > 0) {
                 $obsPartes[] = "Recorridos del día: {$totalRecorridos}";
             } else {
-                $motivos = $hojasDias->map(fn ($h) => $h->motivoDisponibilidad())->filter()->unique();
+                $motivos = $hojasDias->map(fn($h) => $h->motivoDisponibilidad())->filter()->unique();
                 $obsPartes[] = 'Estado: DISPONIBILIDAD (vehículo y conductor disponibles, sin recorridos asignados)'
-                    .($motivos->isNotEmpty() ? ' | Motivo: '.$motivos->implode(' / ') : '');
+                    . ($motivos->isNotEmpty() ? ' | Motivo: ' . $motivos->implode(' / ') : '');
             }
             if ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date) {
-                $obsPartes[] = 'Vigencia proyecto: '.Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y');
+                $obsPartes[] = 'Vigencia proyecto: ' . Carbon::parse($sheet->project->start_date)->format('d/m/Y') . ' - ' . Carbon::parse($sheet->project->completion_date)->format('d/m/Y');
             }
 
             $logoData = $this->resolveLogoWithMime($logoModel, $base64Images['logo'] ?? null);
@@ -1339,7 +1349,7 @@ class PdfService
                         $firmaConductorPie = $extra['firma_cond_extra'] ?? null;
                     }
                 } catch (\Throwable $e) {
-                    Logger::warning('No se pudo cargar firma del conductor (respaldo): '.$e->getMessage());
+                    Logger::warning('No se pudo cargar firma del conductor (respaldo): ' . $e->getMessage());
                 }
             }
 
@@ -1379,7 +1389,7 @@ class PdfService
                 'firma_recibido' => $firmaRecibidoPie,
                 'proyecto' => $nombreProyecto,
                 'proyecto_vigencia' => ($sheet->project && $sheet->project->start_date && $sheet->project->completion_date)
-                    ? Carbon::parse($sheet->project->start_date)->format('d/m/Y').' - '.Carbon::parse($sheet->project->completion_date)->format('d/m/Y')
+                    ? Carbon::parse($sheet->project->start_date)->format('d/m/Y') . ' - ' . Carbon::parse($sheet->project->completion_date)->format('d/m/Y')
                     : null,
                 'rutas_detalle' => $rutasDetalle, // Se conserva por compatibilidad; la vista ya muestra firmas por fila
                 'mapa_recorrido' => $mapaRecorrido['imagen_base64'],
@@ -1407,7 +1417,7 @@ class PdfService
                 'file_name' => $fileName,
             ];
         } catch (\Exception $e) {
-            Logger::error('PdfService@generateDailyServiceControlSheetPdf error: '.$e->getMessage(), $e);
+            Logger::error('PdfService@generateDailyServiceControlSheetPdf error: ' . $e->getMessage(), $e);
             throw $e;
         }
     }
@@ -1436,6 +1446,13 @@ class PdfService
             // Si se requiere ver días abiertos, llamar con $soloFinalizados = false.
             $sheets = ServiceDeliveryControlSheet::query()
                 ->where('company_uuid', $companyUuid)
+                ->with([
+                    'project',
+                    'internalControl.vehicle',
+                    'internalControl.thirdParty',
+                    'internalControl.fuec.contractor',
+                    'subcontractedControl.vehicleClass',
+                ])
                 ->where(function ($query) use ($vehicle) {
                     $query->whereHas('internalControl', function ($q) use ($vehicle) {
                         $q->where('vehicle_uuid', $vehicle->uuid);
@@ -1445,7 +1462,7 @@ class PdfService
                 })
                 ->whereYear('service_date', $year)
                 ->whereMonth('service_date', $month)
-                ->when($soloFinalizados, fn ($q) => $q->where('is_active', false))
+                ->when($soloFinalizados, fn($q) => $q->where('is_active', false))
                 ->orderBy('service_date', 'asc')
                 ->get();
 
@@ -1660,19 +1677,19 @@ class PdfService
 
             // Filas unificadas con diario/filtrado (misma forma, mismo respaldo).
             $resultadoFilas = $this->filas->armarDias($sheets, new ServiceControlSheetRowsOptions(
-                proyecto: fn ($s) => $s->project ? $s->project->project_name : null,
-                rutasDe: fn ($s) => $routesBySheet->get($s->uuid, collect()),
-                firmaHoja: fn ($s) => $firmaHojaMensual[$s->id] ?? null,
-                firmasRuta: fn ($h, $r) => $firmasRutaMensual[$r->id] ?? ['funcionario' => null, 'conductor' => null],
+                proyecto: fn($s) => $s->project ? $s->project->project_name : null,
+                rutasDe: fn($s) => $routesBySheet->get($s->uuid, collect()),
+                firmaHoja: fn($s) => $firmaHojaMensual[$s->id] ?? null,
+                firmasRuta: fn($h, $r) => $firmasRutaMensual[$r->id] ?? ['funcionario' => null, 'conductor' => null],
                 numeroEntero: false,
                 conRutasDetalle: false,
-                firmaCoordinador: fn ($s) => $firmaCoordinadorMensual[$s->id] ?? null,
-                firmaConductor: fn ($s) => $firmaConductorMensualPorHoja[$s->id] ?? null,
+                firmaCoordinador: fn($s) => $firmaCoordinadorMensual[$s->id] ?? null,
+                firmaConductor: fn($s) => $firmaConductorMensualPorHoja[$s->id] ?? null,
             ));
             $dias = $resultadoFilas['dias'];
 
             // Construir observaciones consolidadas del mes: peajes + total recorridos
-            $peajesMes = $this->consolidarPeajes($sheets, fn ($hoja) => $routesBySheet->get($hoja->uuid, collect()));
+            $peajesMes = $this->consolidarPeajes($sheets, fn($hoja) => $routesBySheet->get($hoja->uuid, collect()));
             $totalPeajes = $peajesMes['tolls'];
             $valorPeajes = $peajesMes['valor'];
             $obsPartes = [];
@@ -1680,9 +1697,9 @@ class PdfService
                 $obsPartes[] = 'Solo días FINALIZADOS (cerrados)';
             }
             if ($totalPeajes > 0 || $valorPeajes > 0) {
-                $obsPartes[] = "Total Peajes del Mes: {$totalPeajes} | Valor Consolidado: $ ".number_format($valorPeajes, 0, ',', '.');
+                $obsPartes[] = "Total Peajes del Mes: {$totalPeajes} | Valor Consolidado: $ " . number_format($valorPeajes, 0, ',', '.');
             }
-            $totalRecorridos = $routesBySheet->sum(fn ($grupo) => $grupo->count());
+            $totalRecorridos = $routesBySheet->sum(fn($grupo) => $grupo->count());
             if ($totalRecorridos > 0) {
                 $obsPartes[] = "Total Recorridos del Mes: {$totalRecorridos}";
             }
@@ -1690,7 +1707,7 @@ class PdfService
 
             $proyectoMensual = $sheets->first()?->project;
             $vigenciaMensual = ($proyectoMensual && $proyectoMensual->start_date && $proyectoMensual->completion_date)
-                ? Carbon::parse($proyectoMensual->start_date)->format('d/m/Y').' - '.Carbon::parse($proyectoMensual->completion_date)->format('d/m/Y')
+                ? Carbon::parse($proyectoMensual->start_date)->format('d/m/Y') . ' - ' . Carbon::parse($proyectoMensual->completion_date)->format('d/m/Y')
                 : null;
 
             $logoDataMensual = $this->resolveLogoWithMime($logoModel, $base64Images['logo'] ?? null);
@@ -1758,7 +1775,7 @@ class PdfService
                 'file_name' => $fileName,
             ];
         } catch (\Exception $e) {
-            Logger::error('PdfService@generateMonthlyServiceControlSheetPdf error: '.$e->getMessage(), $e);
+            Logger::error('PdfService@generateMonthlyServiceControlSheetPdf error: ' . $e->getMessage(), $e);
             throw $e;
         }
     }
@@ -1779,7 +1796,13 @@ class PdfService
 
             $query = ServiceDeliveryControlSheet::query()
                 ->where('is_active', false)
-                ->with(['project', 'routes', 'internalControl.vehicle.vehicleClass', 'subcontractedControl.vehicleClass'])
+                ->with([
+                    'project',
+                    'routes',
+                    'internalControl.vehicle.vehicleClass',
+                    'internalControl.thirdParty',
+                    'subcontractedControl.vehicleClass',
+                ])
                 ->orderBy('service_date', 'asc');
 
             if ($companyUuid) {
@@ -1804,15 +1827,15 @@ class PdfService
                 $vehicleUuid = $filtros['vehicle_uuid'];
                 $placaFiltro = Vehicle::where('uuid', $vehicleUuid)->value('vehicle_license_plate');
                 $query->where(function ($q) use ($vehicleUuid, $placaFiltro) {
-                    $q->whereHas('internalControl', fn ($qq) => $qq->where('vehicle_uuid', $vehicleUuid));
+                    $q->whereHas('internalControl', fn($qq) => $qq->where('vehicle_uuid', $vehicleUuid));
                     if ($placaFiltro) {
-                        $q->orWhereHas('subcontractedControl', fn ($qq) => $qq->where('vehicle_license_plate', $placaFiltro));
+                        $q->orWhereHas('subcontractedControl', fn($qq) => $qq->where('vehicle_license_plate', $placaFiltro));
                     }
                 });
             }
             if (! empty($filtros['third_party_uuid'])) {
                 $driverUuid = $filtros['third_party_uuid'];
-                $query->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $driverUuid));
+                $query->whereHas('internalControl', fn($q) => $q->where('third_party_uuid', $driverUuid));
             }
 
             $sheets = $query->limit(500)->get();
@@ -1874,9 +1897,9 @@ class PdfService
             // recorrido usan hora/km del recorrido (no solo globales), el detalle
             // incluye peajes y la firma resuelve igual que en el diario.
             $resultadoFilas = $this->filas->armarDias($sheets, new ServiceControlSheetRowsOptions(
-                proyecto: fn ($s) => $s->project?->project_name,
-                rutasDe: fn ($s) => $routesBySheet->get($s->uuid, collect()),
-                firmaHoja: fn ($s) => $base64Sigs["ff_{$s->id}"] ?? null,
+                proyecto: fn($s) => $s->project?->project_name,
+                rutasDe: fn($s) => $routesBySheet->get($s->uuid, collect()),
+                firmaHoja: fn($s) => $base64Sigs["ff_{$s->id}"] ?? null,
                 firmasRuta: function ($hoja, $route) use ($routeSigs) {
                     $grupoFirmas = $routeSigs->get($route->id, collect());
                     $modelos = [];
@@ -1894,37 +1917,37 @@ class PdfService
                 },
                 numeroEntero: false,
                 conRutasDetalle: false,
-                firmaCoordinador: fn ($s) => $base64Sigs["rc_{$s->id}"] ?? null,
-                firmaConductor: fn ($s) => $base64Sigs["fc_{$s->id}"] ?? null,
+                firmaCoordinador: fn($s) => $base64Sigs["rc_{$s->id}"] ?? null,
+                firmaConductor: fn($s) => $base64Sigs["fc_{$s->id}"] ?? null,
             ));
             $dias = $resultadoFilas['dias'];
 
             $etiquetas = [
-                'rango' => 'RANGO '.($filtros['fecha_desde'] ?? '').' AL '.($filtros['fecha_hasta'] ?? ''),
+                'rango' => 'RANGO ' . ($filtros['fecha_desde'] ?? '') . ' AL ' . ($filtros['fecha_hasta'] ?? ''),
                 'vehiculo' => 'VEHÍCULO',
                 'conductor' => 'CONDUCTOR',
-                'dia' => 'DÍA '.($filtros['fecha'] ?? ''),
-                'mensual' => 'MENSUAL '.($filtros['year'] ?? '').'-'.($filtros['month'] ?? ''),
+                'dia' => 'DÍA ' . ($filtros['fecha'] ?? ''),
+                'mensual' => 'MENSUAL ' . ($filtros['year'] ?? '') . '-' . ($filtros['month'] ?? ''),
             ];
-            $firmaCond = collect($base64Sigs)->first(fn ($v, $k) => str_starts_with($k, 'fc_') && ! empty($v));
+            $firmaCond = collect($base64Sigs)->first(fn($v, $k) => str_starts_with($k, 'fc_') && ! empty($v));
             // Pie derecho: solo la firma del coordinador logístico. Sin ella, la
             // casilla queda pendiente (no se usa la firma del funcionario).
-            $firmaRec = collect($base64Sigs)->first(fn ($v, $k) => str_starts_with($k, 'rc_') && ! empty($v));
+            $firmaRec = collect($base64Sigs)->first(fn($v, $k) => str_starts_with($k, 'rc_') && ! empty($v));
 
             // El encabezado muestra TODOS los proyectos del rango, no solo el de
             // la primera planilla: un rango puede cruzar varios proyectos.
-            $proyectosDistintos = $sheets->map(fn ($s) => $s->project?->project_name)
+            $proyectosDistintos = $sheets->map(fn($s) => $s->project?->project_name)
                 ->filter()->unique()->values();
             $proyectoCabecera = $proyectosDistintos->count() === 1
                 ? $proyectosDistintos->first()
-                : 'VARIOS ('.$proyectosDistintos->count().'): '.$proyectosDistintos->implode(' / ');
+                : 'VARIOS (' . $proyectosDistintos->count() . '): ' . $proyectosDistintos->implode(' / ');
 
             // Un rango puede cruzar varios vehículos: la cabecera no debe mostrar
             // los datos del primero como si fueran de todo el reporte.
-            $placasDistintas = $sheets->map(fn ($s) => $s->vehicle_license_plate)->filter()->unique()->values();
-            $internosDistintos = $sheets->map(fn ($s) => $s->internalControl?->vehicle?->internal_number)->filter()->unique()->values();
-            $clasesDistintas = $sheets->map(fn ($s) => $this->claseDeHoja($s))->reject(fn ($c) => $c === 'N/A')->unique()->values();
-            $valorDeCabecera = fn ($valores) => $valores->count() === 1
+            $placasDistintas = $sheets->map(fn($s) => $s->vehicle_license_plate)->filter()->unique()->values();
+            $internosDistintos = $sheets->map(fn($s) => $s->internalControl?->vehicle?->internal_number)->filter()->unique()->values();
+            $clasesDistintas = $sheets->map(fn($s) => $this->claseDeHoja($s))->reject(fn($c) => $c === 'N/A')->unique()->values();
+            $valorDeCabecera = fn($valores) => $valores->count() === 1
                 ? $valores->first()
                 : ($valores->isEmpty() ? 'N/A' : 'VARIOS');
 
@@ -1932,7 +1955,7 @@ class PdfService
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
-                'periodo' => ($etiquetas[$tipo] ?? 'REPORTE').' — SOLO DÍAS FINALIZADOS',
+                'periodo' => ($etiquetas[$tipo] ?? 'REPORTE') . ' — SOLO DÍAS FINALIZADOS',
                 'es_historial' => false,
                 'solo_finalizados' => true,
                 'placa' => $valorDeCabecera($placasDistintas),
@@ -1943,7 +1966,7 @@ class PdfService
                 'empresa' => $empresaTransportadora,
                 'dias' => $dias,
                 'totales' => $resultadoFilas['totales'],
-                'observaciones' => 'Reporte '.strtoupper($tipo).' | Días cerrados: '.$sheets->count().' | Filas: '.count($dias).($truncado ? ' | MOSTRANDO 500 DE '.$totalPlanillas : ''),
+                'observaciones' => 'Reporte ' . strtoupper($tipo) . ' | Días cerrados: ' . $sheets->count() . ' | Filas: ' . count($dias) . ($truncado ? ' | MOSTRANDO 500 DE ' . $totalPlanillas : ''),
                 'firma_conductor' => $firmaCond,
                 'firma_recibido' => $firmaRec,
                 'proyecto' => $proyectoCabecera,
@@ -1958,13 +1981,13 @@ class PdfService
 
             return [
                 'pdf' => $pdf,
-                'file_name' => self::nombreArchivo('Reporte de Control '.ucfirst($tipo), now()->format('d-m-Y H:i')),
+                'file_name' => self::nombreArchivo('Reporte de Control ' . ucfirst($tipo), now()->format('d-m-Y H:i')),
                 'total_dias' => $sheets->count(),
                 'total_planillas' => $totalPlanillas,
                 'truncado' => $truncado,
             ];
         } catch (\Exception $e) {
-            Logger::error('PdfService@generateFilteredServiceControlSheetPdf error: '.$e->getMessage(), $e);
+            Logger::error('PdfService@generateFilteredServiceControlSheetPdf error: ' . $e->getMessage(), $e);
             throw $e;
         }
     }
@@ -2082,7 +2105,7 @@ class PdfService
                 }
             }
         } catch (\Throwable $e) {
-            Logger::warning('No se pudo cargar logo en disco por empresa: '.$e->getMessage());
+            Logger::warning('No se pudo cargar logo en disco por empresa: ' . $e->getMessage());
         }
 
         return ['logo' => null, 'mime' => $mime];
@@ -2115,7 +2138,7 @@ class PdfService
                 return $logoModel->mime_type;
             }
         } catch (\Throwable $e) {
-            Logger::warning('No se pudo detectar mime del logo: '.$e->getMessage());
+            Logger::warning('No se pudo detectar mime del logo: ' . $e->getMessage());
         }
 
         return null;
@@ -2164,7 +2187,7 @@ class PdfService
                 }
             }
         } catch (\Throwable $e) {
-            Logger::warning('Error optimizando imagen binaria para PDF: '.$e->getMessage());
+            Logger::warning('Error optimizando imagen binaria para PDF: ' . $e->getMessage());
         }
 
         return $content;
@@ -2254,7 +2277,7 @@ class PdfService
         $viewData = [
             'doc' => $doc,
         ];
-        
+
         $viewData = $this->conMarca($viewData, $company, 'contrato_laboral', $logoModel);
 
         $view = 'pdf.hr.employment-contract';
