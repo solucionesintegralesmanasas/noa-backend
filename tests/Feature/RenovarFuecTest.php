@@ -374,4 +374,75 @@ class RenovarFuecTest extends TestCase
         $this->assertEquals('0002', $response->json('data.number_fuec'));
         $this->assertEquals('0001', $response->json('data.contract_number_display'));
     }
+
+    public function test_renovar_fuec_en_cambio_de_anio_continua_consecutivo_y_no_se_reinicia_a_uno(): void
+    {
+        $service = app(FuecService::class);
+        $anioActual = (int) date('Y');
+        $anioAnterior = $anioActual - 1;
+
+        // 1. Crear FUEC base emitido en el año anterior
+        $datosFuecAnterior = [
+            'company_uuid' => $this->empresa,
+            'vehicle_uuid' => $this->vehiculo,
+            'issue_date' => "{$anioAnterior}-12-01",
+            'effective_date' => "{$anioAnterior}-12-01",
+            'expiration_date' => "{$anioAnterior}-12-31",
+            'origin_route' => 'BOGOTÁ',
+            'destination_route' => 'CALI',
+            'object_contract_uuid' => $this->objeto,
+            'main_conductor_uuid' => $this->conductor,
+            'contractor' => [
+                'document_type_uuid' => $this->tipoDocumento,
+                'document_number' => '900111222',
+                'company_name' => 'Cliente Contrato Multianual',
+                'address' => 'Calle 100 #15-20',
+                'telephone' => '3001234567',
+                'contract_number' => '0005',
+                'contracting_party_city' => 'Bogotá',
+                'vehicle_uuid' => $this->vehiculo,
+                'responsible_name' => 'Representante',
+                'responsible_document' => '52123456',
+                'responsible_phone' => '3001234567',
+                'responsible_address' => 'Calle 100 #15-20',
+            ],
+        ];
+        $fuecAnterior = $service->createFuec($datosFuecAnterior);
+        $contractorUuid = $fuecAnterior->contractor_uuid;
+
+        // Asegurar que el extracto del año anterior quedó en 1
+        $this->assertEquals('0001', $fuecAnterior->number_fuec);
+
+        $contractor = DB::table('contractors')->where('uuid', $contractorUuid)->first();
+
+        // Verificar que la secuencia del primer FUEC quedó guardada en el año anterior
+        $seqAnterior = DB::table('fuec_consecutives')
+            ->where('type', 'extract')
+            ->where('contract_id', $contractor->id)
+            ->where('year', $anioAnterior)
+            ->first();
+        $this->assertNotNull($seqAnterior);
+        $this->assertEquals(1, $seqAnterior->current_consecutive);
+
+        // 2. Simular renovación en el año actual
+        $tailActual = $service->generateFuecTail($contractor->id, (int) $contractor->contract_number, $this->empresa, $anioActual);
+
+        // La cola del FUEC tiene: Año actual (YYYY) + Contrato (0005) + Extracto (0002)
+        // El extracto no debe ser 0001, debe ser 0002 continuo!
+        $this->assertStringEndsWith('0002', $tailActual);
+        $this->assertStringStartsWith((string) $anioActual, $tailActual);
+
+        // Verificar que en el año actual la secuencia se creó con consecutivo 2
+        $seqActual = DB::table('fuec_consecutives')
+            ->where('type', 'extract')
+            ->where('contract_id', $contractor->id)
+            ->where('year', $anioActual)
+            ->first();
+        $this->assertNotNull($seqActual);
+        $this->assertEquals(2, $seqActual->current_consecutive);
+
+        // Verificar también que getPreviewFuecNumber resuelva el consecutivo continuo
+        $previewNum = $service->getPreviewFuecNumber($this->empresa, $contractorUuid);
+        $this->assertStringEndsWith('0003', $previewNum);
+    }
 }
