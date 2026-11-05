@@ -13,6 +13,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * Modelo para Inventario de capacidad.
  *
+ * DEPRECADO (2026-11-05): nadie escribe esta tabla. El saldo real de cupos vive
+ * en `conveyor_capacity.current_capacity` y su historial en `capacity_movements`
+ * (App\Services\Fleet\CapacityMovementService). Se conserva solo por los datos
+ * históricos; no usar en código nuevo.
+ *
  * @author   Darwin Montes
  *
  * @version  1.0.0

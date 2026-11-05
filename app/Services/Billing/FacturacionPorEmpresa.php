@@ -7,15 +7,12 @@ namespace App\Services\Billing;
 use App\Models\BillingProvider;
 use App\Models\CommercialInvoice;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Log;
 
 /**
- * Resuelve el driver de facturación electrónica por empresa (persona).
+ * Resuelve el driver de facturación electrónica por empresa.
  *
- * Regla acordada: cada empresa elige su proveedor tecnológico y su driver
- * en `billing_providers` (driver='apidian' con credenciales propias);
- * el valor global FACTURACION_DRIVER ya no decide la emisión.
- * Sin proveedor activo → driver nulo (el histórico de fases 1 y 2).
+ * Driver único: Factus (billing_providers.driver='factus' con credenciales
+ * propias). Sin proveedor activo → driver nulo (genera el UBL sin transmitir).
  */
 class FacturacionPorEmpresa implements ContratoFacturacionElectronica, ContratoNotasElectronica
 {
@@ -49,20 +46,13 @@ class FacturacionPorEmpresa implements ContratoFacturacionElectronica, ContratoN
             ->consultarEstadoNota($nota);
     }
 
-    /** Driver activo de la empresa; nulo si no tiene proveedor configurado. */
+    /** Driver activo de la empresa; nulo si no tiene proveedor Factus configurado. */
     private function paraDocumento(?string $companyUuid): ContratoFacturacionElectronica|ContratoNotasElectronica
     {
         $proveedor = $companyUuid ? $this->proveedorDe($companyUuid) : null;
 
-        if ($proveedor?->usaApiDian()) {
-            return new ApiDianFacturacion($proveedor);
-        }
-
-        if ($proveedor && $proveedor->driver !== BillingProvider::DRIVER_NULO) {
-            Log::warning('Facturación electrónica: la empresa tiene un proveedor con driver sin integración', [
-                'provider' => $proveedor->uuid,
-                'driver' => $proveedor->driver,
-            ]);
+        if ($proveedor?->usaFactus()) {
+            return new FactusFacturacion($proveedor);
         }
 
         return new FacturacionNula;
@@ -73,7 +63,7 @@ class FacturacionPorEmpresa implements ContratoFacturacionElectronica, ContratoN
         return BillingProvider::query()
             ->where('company_uuid', $companyUuid)
             ->where('is_active', true)
-            ->whereIn('driver', [BillingProvider::DRIVER_APIDIAN, BillingProvider::DRIVER_NULO])
+            ->where('driver', BillingProvider::DRIVER_FACTUS)
             ->orderBy('id')
             ->first();
     }

@@ -31,6 +31,12 @@ class RadicacionService extends BaseService
     /** Segundos consecutivos que se prueban antes de fallar por falta de código libre. */
     public const INTENTOS_CODIGO = 120;
 
+    /**
+     * Vinculaciones que consumen un cupo de capacidad transportadora al aprobarse.
+     * La renovación nunca mueve el contador y las desvinculaciones lo liberan.
+     */
+    public const VINCULACIONES_CON_CUPO = ['NUEVO_VEHICULO', 'CAMBIO_DE_EMPRESA'];
+
     protected function getModelInstance(): Model
     {
         return new Procedure;
@@ -90,8 +96,89 @@ class RadicacionService extends BaseService
         return $query->exists();
     }
 
+    /**
+     * Consulta informativa de cupo para un expediente que se va a radicar.
+     * No muta nada: el descuento real ocurre al cerrar CAPACIDAD_TRANSPORTADORA.
+     *
+     * @return array{
+     *     requiere_cupo: bool,
+     *     enforce: bool,
+     *     vehicle_type: string|null,
+     *     capacidad_configurada: bool,
+     *     cupo_disponible: bool,
+     *     authorized_capacity: int,
+     *     current_capacity: int,
+     *     conveyor_capacity_uuid: string|null
+     * }
+     */
+    public function disponibilidadDeCupo(?string $companyUuid, ?string $vehicleUuid = null, ?string $linkType = null): array
+    {
+        $requiere = in_array($linkType, self::VINCULACIONES_CON_CUPO, true);
+        // Sin scope de empresa a propósito: el vehículo de un CAMBIO_DE_EMPRESA puede
+        // pertenecer a la empresa de origen y aun así hay que resolver su tipo.
+        $vehiculo = $vehicleUuid
+            ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first()
+            : null;
+        $tipo = $this->tipoVehiculoParaCapacidad($vehiculo);
+        $cupo = $companyUuid
+            ? app(CapacityMovementService::class)->cupoDisponible($companyUuid, $tipo)
+            : null;
+
+        return [
+            'requiere_cupo' => $requiere,
+            'enforce' => (bool) config('capacity.enforce', true),
+            'vehicle_type' => $tipo,
+            'capacidad_configurada' => $cupo !== null,
+            'cupo_disponible' => (bool) ($cupo['available'] ?? false),
+            'authorized_capacity' => (int) ($cupo['authorized_capacity'] ?? 0),
+            'current_capacity' => (int) ($cupo['current_capacity'] ?? 0),
+            'conveyor_capacity_uuid' => $cupo['conveyor_capacity_uuid'] ?? null,
+        ];
+    }
+
+    /**
+     * Pre-chequeo estricto al crear un expediente que consumirá cupo. Con el motor
+     * en modo estricto (`capacity.enforce`) rechaza con 422 si la empresa no tiene
+     * capacidad configurada o si no le quedan cupos. En modo auditoría solo informa.
+     *
+     * @throws ValidationException
+     */
+    public function validarCupoAlCrear(array $data): void
+    {
+        if (! in_array($data['link_type'] ?? null, self::VINCULACIONES_CON_CUPO, true)) {
+            return;
+        }
+        if (! (bool) config('capacity.enforce', true)) {
+            return;
+        }
+
+        $companyUuid = $data['company_uuid'] ?? null;
+        if (empty($companyUuid)) {
+            throw ValidationException::withMessages([
+                'company_uuid' => 'No se pudo determinar la empresa del expediente.',
+            ]);
+        }
+
+        $disponibilidad = $this->disponibilidadDeCupo($companyUuid, $data['vehicle_uuid'] ?? null, $data['link_type']);
+
+        if (! $disponibilidad['capacidad_configurada']) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'La empresa no tiene capacidad transportadora configurada para el tipo de vehículo.',
+            ]);
+        }
+        if (! $disponibilidad['cupo_disponible']) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'La empresa no tiene cupos disponibles de capacidad transportadora.',
+            ]);
+        }
+    }
+
     public function crearExpediente(array $data): array
     {
+        // Cupo primero: un expediente que nace sin cupo no debería llegar a la
+        // línea de tiempo (el descuento real ocurre al cerrar la capacidad).
+        $this->validarCupoAlCrear($data);
+
         return $this->transaction(function () use ($data) {
             // Código de trámite: si no viene, se genera automáticamente (YYYYMMDDHHmmss)
             // garantizando que no se repita dentro de la empresa.
@@ -103,12 +190,14 @@ class RadicacionService extends BaseService
             $base = [
                 'link_type' => $data['link_type'],
                 'company_uuid' => $data['company_uuid'] ?? null,
+                'origin_company_uuid' => $data['origin_company_uuid'] ?? null,
                 'third_party_uuid' => $data['third_party_uuid'] ?? null,
                 'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
                 'procedure_code' => $codigo,
                 'date_of_creation' => $data['date_of_creation'],
                 'city_uuid' => $data['city_uuid'],
                 'subject' => $data['subject'] ?? null,
+                'paz_y_salvo' => $data['paz_y_salvo'] ?? null,
                 'territorial_director_uuid' => $data['territorial_director_uuid'] ?? null,
                 'territorial_director_name' => $data['territorial_director_name'] ?? null,
                 'territorial_name' => $data['territorial_name'] ?? null,
@@ -180,8 +269,40 @@ class RadicacionService extends BaseService
             case 'DESVINCULACION_UNILATERAL':
                 return ['ok' => true, 'mensaje' => 'Adjunte acta, paz y salvo y tarjeta física para radicar ante el Ministerio.'];
             case 'CAPACIDAD_TRANSPORTADORA':
-                if (($padre?->link_type ?? '') === 'CAMBIO_DE_EMPRESA') {
+                $linkType = $padre?->link_type ?? '';
+                if (! in_array($linkType, self::VINCULACIONES_CON_CUPO, true)) {
                     return ['ok' => true];
+                }
+
+                $companyUuid = $hijo->company_uuid ?? $padre?->company_uuid;
+                if (empty($companyUuid)) {
+                    return ['ok' => false, 'mensaje' => 'No se pudo determinar la empresa que recibe el vehículo.'];
+                }
+
+                // Idempotencia: si el movimiento de este paso ya se registró, no se
+                // vuelve a exigir cupo (el motor tampoco lo movería dos veces).
+                // Sin scope de empresa: la idempotencia es global por paso de trámite.
+                $tipoMovimiento = $linkType === 'NUEVO_VEHICULO'
+                    ? CapacityMovement::DESCUENTO_NUEVO
+                    : CapacityMovement::DESCUENTO_INGRESO;
+                $yaRegistrado = CapacityMovement::withoutGlobalScopes()
+                    ->where('procedure_uuid', $hijo->uuid)
+                    ->where('movement_type', $tipoMovimiento)
+                    ->exists();
+                if ($yaRegistrado || ! (bool) config('capacity.enforce', true)) {
+                    return ['ok' => true];
+                }
+
+                $disponibilidad = $this->disponibilidadDeCupo(
+                    $companyUuid,
+                    $hijo->vehicle_uuid ?: $padre?->vehicle_uuid,
+                    $linkType
+                );
+                if (! $disponibilidad['capacidad_configurada']) {
+                    return ['ok' => false, 'mensaje' => 'La empresa no tiene capacidad transportadora configurada para el tipo de vehículo.'];
+                }
+                if (! $disponibilidad['cupo_disponible']) {
+                    return ['ok' => false, 'mensaje' => 'La empresa no tiene cupos disponibles de capacidad transportadora.'];
                 }
 
                 return ['ok' => true];
@@ -379,6 +500,71 @@ class RadicacionService extends BaseService
         return ['expediente' => $exp, 'ruta' => $ruta, 'linea_tiempo' => $linea, 'pasos' => $hijos, 'propietario' => $propietario, 'contratos' => $contratos, 'documentos' => $documentos];
     }
 
+    /**
+     * Campos que se capturan en un paso antes de avanzarlo (renovación,
+     * desvinculación y referencia del pago). El estado del pago es informativo:
+     * no bloquea el cierre del paso.
+     */
+    private const CAMPOS_EDITABLES_PASO = [
+        'simit_clear',
+        'soat_valid',
+        'rtm_valid',
+        'old_card_number',
+        'radicado_number',
+        'payment_status',
+        'resolution_number',
+        'paz_y_salvo',
+        'subject',
+    ];
+
+    /**
+     * Actualiza los datos del paso (o del expediente si se pasa el padre) y
+     * devuelve el detalle completo. Un paso completado ya no admite cambios.
+     *
+     * @throws \Symfony\Component\HttpKernel\Exception\HttpException
+     */
+    public function actualizarPaso(string $uuid, array $data): array
+    {
+        return $this->transaction(function () use ($uuid, $data) {
+            $query = Procedure::where('uuid', $uuid)->lockForUpdate();
+            $this->aislarPorAfiliado($query);
+            $registro = $query->firstOrFail();
+
+            $esHijo = ! empty($registro->parent_procedure_uuid);
+            $padre = $esHijo
+                ? Procedure::where('uuid', $registro->parent_procedure_uuid)->firstOrFail()
+                : $registro;
+
+            if ($esHijo && $registro->status === 'COMPLETADO') {
+                abort(422, 'Este paso ya fue completado y no admite cambios.');
+            }
+            if (! $esHijo && $padre->global_status === 'COMPLETADO') {
+                abort(422, 'El expediente ya fue completado y no admite cambios.');
+            }
+
+            $cambios = array_intersect_key($data, array_flip(self::CAMPOS_EDITABLES_PASO));
+
+            if ($cambios !== []) {
+                $registro->update($cambios);
+
+                // Datos de cabecera: el asunto y el paz y salvo describen al
+                // expediente, no a un paso suelto; se replican en todas sus filas.
+                $compartidos = array_intersect_key($cambios, array_flip(['subject', 'paz_y_salvo']));
+                if ($compartidos !== [] && $esHijo) {
+                    Procedure::where('uuid', $padre->uuid)->update($compartidos);
+                    Procedure::where('parent_procedure_uuid', $padre->uuid)
+                        ->where('uuid', '!=', $registro->uuid)
+                        ->update($compartidos);
+                }
+                if ($compartidos !== [] && ! $esHijo) {
+                    Procedure::where('parent_procedure_uuid', $padre->uuid)->update($compartidos);
+                }
+            }
+
+            return $this->detalleExpediente($padre->uuid);
+        });
+    }
+
     public function avanzarPaso(string $hijoUuid): array
     {
         return $this->transaction(function () use ($hijoUuid) {
@@ -429,14 +615,10 @@ class RadicacionService extends BaseService
      *
      *  - CAPACIDAD_TRANSPORTADORA de un vehículo NUEVO → descuenta 1 cupo.
      *  - CAPACIDAD_TRANSPORTADORA de un CAMBIO_DE_EMPRESA (ingreso) → descuenta 1 cupo
-     *    en la empresa receptora.
+     *    en la empresa receptora y libera 1 cupo en la empresa de origen.
      *  - DESVINCULACION (mutuo/unilateral) → libera 1 cupo y cancela la tarjeta de operación.
      *
      * La renovación no mueve el contador (no pasa por aquí).
-     *
-     * Nota: en el CAMBIO_DE_EMPRESA la liberación del cupo en la empresa de origen no
-     * se puede registrar desde este expediente porque el trámite solo conoce la empresa
-     * receptora; queda como caso aparte pendiente de modelar el origen.
      */
     private function aplicarMovimientosDeCapacidad(Procedure $padre, Procedure $hijo): void
     {
@@ -446,6 +628,8 @@ class RadicacionService extends BaseService
         }
 
         $vehicleUuid = $hijo->vehicle_uuid ?: $padre->vehicle_uuid;
+        // Sin scope de empresa: el vehículo de un CAMBIO_DE_EMPRESA puede seguir
+        // registrado en la empresa de origen (que es donde se libera el cupo).
         $vehicle = $vehicleUuid
             ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first()
             : null;
@@ -470,6 +654,24 @@ class RadicacionService extends BaseService
                     'movement_type' => $tipo,
                     'notes' => "Descuento de cupo al aprobar la capacidad transportadora ({$padre->link_type}).",
                 ]);
+
+                // Salida por cambio de empresa (Decreto 348/2015): el cupo deja de
+                // pertenecer a la empresa de origen y debe liberarse allí. Idempotente
+                // por (paso, LIBERACION_SALIDA); falla cerrada si el origen no tiene
+                // capacidad configurada.
+                $originUuid = $padre->origin_company_uuid;
+                if ($padre->link_type === 'CAMBIO_DE_EMPRESA'
+                    && ! empty($originUuid)
+                    && $originUuid !== $companyUuid) {
+                    $engine->registrar([
+                        'company_uuid' => $originUuid,
+                        'vehicle_uuid' => $vehicleUuid,
+                        'vehicle_type' => $vehicleType,
+                        'procedure_uuid' => $hijo->uuid,
+                        'movement_type' => CapacityMovement::LIBERACION_SALIDA,
+                        'notes' => 'Liberación de cupo en la empresa de origen por cambio de empresa.',
+                    ]);
+                }
                 break;
 
             case 'DESVINCULACION_MUTUO':

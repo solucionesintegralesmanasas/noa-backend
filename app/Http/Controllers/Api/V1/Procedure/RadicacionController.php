@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Procedure;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Procedure\Radicacion\CuposDisponiblesRequest;
 use App\Http\Requests\Procedure\Radicacion\GenerarTxtRequest;
 use App\Http\Requests\Procedure\Radicacion\SiguienteCodigoRadicacionRequest;
 use App\Http\Requests\Procedure\Radicacion\StoreEnlaceFirmaRequest;
 use App\Http\Requests\Procedure\Radicacion\StoreExpedienteRadicacionRequest;
+use App\Http\Requests\Procedure\Radicacion\UpdatePasoRadicacionRequest;
 use App\Models\Procedure;
 use App\Services\Procedure\ContractSignatureService;
 use App\Services\Procedure\RadicacionDocumentoService;
@@ -54,6 +56,27 @@ class RadicacionController extends Controller
             return $this->successResponse(
                 ['procedure_code' => $this->radicacion->siguienteCodigo($companyUuid)],
                 'Código de trámite disponible.'
+            );
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    /**
+     * Cupo disponible (informativo) para radicar un expediente, sin mutar nada.
+     */
+    public function cuposDisponibles(CuposDisponiblesRequest $request): JsonResponse
+    {
+        try {
+            $data = $request->validated();
+
+            return $this->successResponse(
+                $this->radicacion->disponibilidadDeCupo(
+                    $data['company_uuid'] ?? null,
+                    $data['vehicle_uuid'] ?? null,
+                    $data['link_type'] ?? null
+                ),
+                'Disponibilidad de cupo.'
             );
         } catch (\Throwable $e) {
             return $this->handleException($e);
@@ -137,6 +160,21 @@ class RadicacionController extends Controller
     {
         try {
             return $this->successResponse($this->radicacion->detalleExpediente($uuid), 'Detalle del expediente con línea de tiempo.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    /**
+     * Captura los datos de un paso (renovación, desvinculación, pago) antes de avanzarlo.
+     */
+    public function actualizarPaso(UpdatePasoRadicacionRequest $request, string $uuid): JsonResponse
+    {
+        try {
+            return $this->successResponse(
+                $this->radicacion->actualizarPaso($uuid, $request->validated()),
+                'Paso actualizado.'
+            );
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

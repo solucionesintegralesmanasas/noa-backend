@@ -40,6 +40,8 @@ class FacturacionComercialTest extends TestCase
         parent::setUp();
 
         $this->empresa = $this->insertar('companies', ['business_name' => 'Facturación Test']);
+        // Contexto de empresa requerido por el scope BelongsToCompany (Issue #2).
+        request()->attributes->set('current_company_uuid', $this->empresa);
         $this->cliente = $this->insertar('third_parties', [
             'company_uuid' => $this->empresa,
             'person_type' => 'JURIDICA',
