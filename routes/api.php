@@ -23,13 +23,11 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
-use App\Http\Controllers\Api\V1\Billing\BillingProviderConfigController;
 use App\Http\Controllers\Api\V1\Billing\BillingProviderController;
 use App\Http\Controllers\Api\V1\Billing\BillingResolutionController;
 use App\Http\Controllers\Api\V1\Billing\CommercialInvoiceController;
 use App\Http\Controllers\Api\V1\Billing\CreditNoteController;
 use App\Http\Controllers\Api\V1\Billing\DebitNoteController;
-use App\Http\Controllers\Api\V1\Billing\ElectronicDocumentController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -615,7 +613,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/{uuid}/pdf', [EmploymentContractController::class, 'contractPdf'])->name('api.v1.third-parties.employment-contracts.pdf');
         });
 
-        // ─── MÓDULO FACTURACIÓN (cotización fase 1, factura interna fase 2, sin FE) ───
+        // ─── MÓDULO FACTURACIÓN (cotización fase 1, factura interna fase 2, FE por Factus) ───
         Route::prefix('billing')->group(function () {
             Route::prefix('billing-providers')->group(function () {
                 Route::get('/', [BillingProviderController::class, 'index'])->name('api.v1.billing.billing-providers.index');
@@ -623,21 +621,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [BillingProviderController::class, 'show'])->name('api.v1.billing.billing-providers.show');
                 Route::put('/{uuid}', [BillingProviderController::class, 'update'])->name('api.v1.billing.billing-providers.update');
                 Route::delete('/{uuid}', [BillingProviderController::class, 'destroy'])->name('api.v1.billing.billing-providers.destroy');
-
-                // Módulo 01 - Configuraciones Básicas de ApiDian (por proveedor).
-                // Permisos explícitos: la configuración vive en ApiDian y no
-                // puede quedar solo en la auditoría de `authz` (estaba SIN EVALUAR).
-                Route::prefix('{uuid}/configuracion')->group(function () {
-                    Route::get('/', [BillingProviderConfigController::class, 'show'])->name('api.v1.billing.billing-providers.configuracion.show')->middleware('permission:billing_providers.index');
-                    Route::post('/', [BillingProviderConfigController::class, 'guardarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.guardar')->middleware('permission:billing_providers.create');
-                    Route::put('/software', [BillingProviderConfigController::class, 'software'])->name('api.v1.billing.billing-providers.configuracion.software')->middleware('permission:billing_providers.update');
-                    Route::put('/software-nomina', [BillingProviderConfigController::class, 'softwareNomina'])->name('api.v1.billing.billing-providers.configuracion.software-nomina')->middleware('permission:billing_providers.update');
-                    Route::put('/certificado', [BillingProviderConfigController::class, 'certificado'])->name('api.v1.billing.billing-providers.configuracion.certificado')->middleware('permission:billing_providers.update');
-                    Route::post('/resoluciones', [BillingProviderConfigController::class, 'resoluciones'])->name('api.v1.billing.billing-providers.configuracion.resoluciones')->middleware('permission:billing_providers.create');
-                    Route::put('/ambiente', [BillingProviderConfigController::class, 'ambiente'])->name('api.v1.billing.billing-providers.configuracion.ambiente')->middleware('permission:billing_providers.update');
-                    Route::put('/webhook', [BillingProviderConfigController::class, 'webhook'])->name('api.v1.billing.billing-providers.configuracion.webhook')->middleware('permission:billing_providers.update');
-                    Route::delete('/empresa', [BillingProviderConfigController::class, 'eliminarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.empresa-eliminar')->middleware('permission:billing_providers.delete');
-                });
             });
 
             Route::prefix('billing-resolutions')->group(function () {
@@ -677,16 +660,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [DebitNoteController::class, 'show'])->name('api.v1.billing.debit-notes.show');
                 Route::post('/{uuid}/emitir', [DebitNoteController::class, 'emitir'])->name('api.v1.billing.debit-notes.emitir');
                 Route::post('/{uuid}/anular', [DebitNoteController::class, 'anular'])->name('api.v1.billing.debit-notes.anular');
-            });
-
-            Route::prefix('electronic-documents')->group(function () {
-                Route::get('/', [ElectronicDocumentController::class, 'index'])->name('api.v1.billing.electronic-documents.index')->middleware('permission:electronic_documents.index');
-                Route::post('/', [ElectronicDocumentController::class, 'store'])->name('api.v1.billing.electronic-documents.store')->middleware('permission:electronic_documents.create');
-                Route::get('/{uuid}', [ElectronicDocumentController::class, 'show'])->name('api.v1.billing.electronic-documents.show')->middleware('permission:electronic_documents.profile');
-                Route::put('/{uuid}', [ElectronicDocumentController::class, 'update'])->name('api.v1.billing.electronic-documents.update')->middleware('permission:electronic_documents.update');
-                Route::post('/{uuid}/emitir', [ElectronicDocumentController::class, 'emitir'])->name('api.v1.billing.electronic-documents.emitir')->middleware('permission:electronic_documents.update');
-                Route::get('/{uuid}/estado', [ElectronicDocumentController::class, 'estado'])->name('api.v1.billing.electronic-documents.estado')->middleware('permission:electronic_documents.profile');
-                Route::delete('/{uuid}', [ElectronicDocumentController::class, 'destroy'])->name('api.v1.billing.electronic-documents.destroy')->middleware('permission:electronic_documents.delete');
             });
         });
 

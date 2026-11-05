@@ -19,11 +19,11 @@ use Tests\Support\InsertaFilas;
 use Tests\TestCase;
 
 /**
- * Alta y edición de proveedores tecnológicos por HTTP.
+ * Alta y edición de proveedores tecnológicos (driver único: Factus) por HTTP.
  *
- * Regresión del 2026-10-20: `driver` se validaba con un implode mal armado
- * (string en vez de array) y el POST respondía 500; el flujo solo estaba
- * cubierto insertando filas directamente.
+ * Al guardar con credenciales, NOA inicia sesión OAuth2 con Factus y guarda
+ * access_token + refresh_token cifrados. El `driver` lo fija el backend a
+ * `factus`; el cliente no lo elige.
  */
 class ProveedoresBillingHttpTest extends TestCase
 {
@@ -35,7 +35,7 @@ class ProveedoresBillingHttpTest extends TestCase
     {
         parent::setUp();
 
-        $this->empresa = $this->insertar('companies', ['business_name' => 'Proveedores ApiDian Test']);
+        $this->empresa = $this->insertar('companies', ['business_name' => 'Proveedores Factus Test']);
     }
 
     private function superadmin(): User
@@ -69,33 +69,28 @@ class ProveedoresBillingHttpTest extends TestCase
     {
         return $extra + [
             'company_uuid' => $this->empresa,
-            'name' => 'Conexión ApiDian',
-            'driver' => 'apidian',
-            'server_url' => 'https://apidian-sandbox.test',
-            'test_set_id' => null,
+            'name' => 'Conexión Factus',
+            'server_url' => 'https://factus-sandbox.test',
             'send_to_dian' => false,
-            'settings' => null,
-            'client_id' => 'sandbox@pruebas.test',
-            'client_password' => 'clave_portal',
-            'client_secret' => null,
-            'email' => null,
-            'start_date' => null,
-            'end_date' => null,
-            'description' => null,
+            'settings' => ['numbering_range_id' => 389],
+            'client_id' => '9e1a-4f2c',
+            'client_secret' => 'app_secret',
+            'email' => 'usuario@factus.test',
+            'client_password' => 'clave_factus',
             'is_active' => true,
         ];
     }
 
-    public function test_registra_proveedor_apidian_por_http_sin_devolver_secretos(): void
+    public function test_registra_proveedor_factus_por_http_y_obtiene_tokens(): void
     {
         Sanctum::actingAs($this->superadmin(), ['*']);
 
         Http::fake([
-            'https://apidian-sandbox.test/api/auth/login' => Http::response([
-                'success' => true,
-                'access_token' => 'jwt_creado',
-                'token_type' => 'bearer',
+            'https://factus-sandbox.test/oauth/token' => Http::response([
+                'token_type' => 'Bearer',
                 'expires_in' => 3600,
+                'access_token' => 'access_factus',
+                'refresh_token' => 'refresh_factus',
             ], 200),
         ]);
 
@@ -104,31 +99,36 @@ class ProveedoresBillingHttpTest extends TestCase
         ]);
 
         $respuesta->assertCreated()
-            ->assertJsonPath('data.driver', 'apidian')
-            ->assertJsonPath('data.client_id', 'sandbox@pruebas.test')
+            ->assertJsonPath('data.driver', 'factus')
+            ->assertJsonMissingPath('data.access_token')
+            ->assertJsonMissingPath('data.refresh_token')
             ->assertJsonMissingPath('data.client_secret')
             ->assertJsonMissingPath('data.client_password');
 
         $guardado = BillingProvider::where('company_uuid', $this->empresa)->firstOrFail();
-        $this->assertSame('clave_portal', $guardado->client_password);
-        $this->assertSame('jwt_creado', $guardado->client_secret);
+        $this->assertSame('factus', $guardado->driver);
+        $this->assertSame('access_factus', $guardado->access_token);
+        $this->assertSame('refresh_factus', $guardado->refresh_token);
+        $this->assertSame(389, $guardado->settings['numbering_range_id']);
 
-        // En reposo queda cifrada, no en texto plano.
-        $crudo = (string) DB::table('billing_providers')->where('uuid', $guardado->uuid)->value('client_password');
-        $this->assertNotSame('clave_portal', $crudo);
-        $this->assertSame('clave_portal', Crypt::decryptString($crudo));
+        // En reposo los tokens y secretos quedan cifrados.
+        $this->assertSame('access_factus', Crypt::decryptString((string) DB::table('billing_providers')->where('uuid', $guardado->uuid)->value('access_token')));
+        $this->assertSame('app_secret', Crypt::decryptString((string) DB::table('billing_providers')->where('uuid', $guardado->uuid)->value('client_secret')));
 
-        Http::assertSent(fn ($peticion) => $peticion->url() === 'https://apidian-sandbox.test/api/auth/login'
-            && $peticion['email'] === 'sandbox@pruebas.test'
-            && $peticion['password'] === 'clave_portal');
+        Http::assertSent(fn ($peticion) => $peticion->url() === 'https://factus-sandbox.test/oauth/token'
+            && $peticion['grant_type'] === 'password'
+            && $peticion['client_id'] === '9e1a-4f2c'
+            && $peticion['client_secret'] === 'app_secret'
+            && $peticion['username'] === 'usuario@factus.test'
+            && $peticion['password'] === 'clave_factus');
     }
 
-    public function test_login_fallido_no_guarda_el_proveedor(): void
+    public function test_login_factus_fallido_no_guarda_el_proveedor(): void
     {
         Sanctum::actingAs($this->superadmin(), ['*']);
 
         Http::fake([
-            'https://apidian-sandbox.test/api/auth/login' => Http::response(['message' => 'Credenciales inválidas'], 401),
+            'https://factus-sandbox.test/oauth/token' => Http::response(['message' => 'The user credentials were incorrect.'], 401),
         ]);
 
         $respuesta = $this->postJson('/api/v1/billing/billing-providers', $this->datosProveedor(), [
@@ -136,18 +136,22 @@ class ProveedoresBillingHttpTest extends TestCase
         ]);
 
         $respuesta->assertStatus(422)
-            ->assertJsonPath('error.code', 'VALIDATION_ERROR')
             ->assertJsonPath('error.details.0.field', 'client_password');
 
         $this->assertSame(0, BillingProvider::where('company_uuid', $this->empresa)->count());
     }
 
-    public function test_actualizar_sin_password_conserva_la_guardada(): void
+    public function test_actualizar_sin_password_conserva_las_credenciales(): void
     {
         Sanctum::actingAs($this->superadmin(), ['*']);
 
         Http::fake([
-            'https://apidian-sandbox.test/api/auth/login' => Http::response(['access_token' => 'jwt_creado'], 200),
+            'https://factus-sandbox.test/oauth/token' => Http::response([
+                'token_type' => 'Bearer',
+                'expires_in' => 3600,
+                'access_token' => 'access_factus',
+                'refresh_token' => 'refresh_factus',
+            ], 200),
         ]);
 
         $creado = $this->postJson('/api/v1/billing/billing-providers', $this->datosProveedor(), [
@@ -161,6 +165,8 @@ class ProveedoresBillingHttpTest extends TestCase
             'X-Company-UUID' => $this->empresa,
         ])->assertOk()->assertJsonPath('data.name', 'Conexión renombrada');
 
-        $this->assertSame('clave_portal', BillingProvider::where('uuid', $creado)->firstOrFail()->client_password);
+        $guardado = BillingProvider::where('uuid', $creado)->firstOrFail();
+        $this->assertSame('clave_factus', $guardado->client_password);
+        $this->assertSame('access_factus', $guardado->access_token);
     }
 }

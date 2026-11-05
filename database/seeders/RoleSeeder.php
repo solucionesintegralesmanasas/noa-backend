@@ -341,12 +341,6 @@ class RoleSeeder extends Seeder
             'debit_notes.update',
             'debit_notes.delete',
 
-            'electronic_documents.index',
-            'electronic_documents.create',
-            'electronic_documents.update',
-            'electronic_documents.delete',
-            'electronic_documents.profile',
-
             'locations.view',
             'locations.track',
             'locations.history',

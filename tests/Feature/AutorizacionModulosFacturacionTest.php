@@ -17,9 +17,8 @@ use Tests\Support\InsertaFilas;
 use Tests\TestCase;
 
 /**
- * Las rutas de configuración de ApiDian, documentos electrónicos y combustible
- * exigen permisos explícitos: antes la configuración quedaba SIN EVALUAR en
- * `authz:report` y los otros dos módulos dependían solo del modo auditoría.
+ * Los módulos de facturación y combustible exigen permisos explícitos, en vez
+ * de depender solo del modo auditoría de `authz`.
  */
 class AutorizacionModulosFacturacionTest extends TestCase
 {
@@ -44,9 +43,6 @@ class AutorizacionModulosFacturacionTest extends TestCase
         $permisos = [
             'billing_providers.index', 'billing_providers.create',
             'billing_providers.update', 'billing_providers.delete',
-            'electronic_documents.index', 'electronic_documents.profile',
-            'electronic_documents.create', 'electronic_documents.update',
-            'electronic_documents.delete',
             'fuel_logs.index', 'fuel_logs.create', 'fuel_logs.update', 'fuel_logs.delete',
         ];
         $rol = Role::findOrCreate('ADMIN_EMPRESA', 'api');
@@ -90,48 +86,6 @@ class AutorizacionModulosFacturacionTest extends TestCase
         Sanctum::actingAs($user, ['*']);
 
         return $this->withHeaders(['X-Company-UUID' => $this->empresa]);
-    }
-
-    public function test_la_configuracion_de_apidian_exige_permiso_de_proveedores(): void
-    {
-        $uuid = (string) Str::uuid();
-
-        $this->como($this->sinPermisos)
-            ->getJson("/api/v1/billing/billing-providers/{$uuid}/configuracion")
-            ->assertForbidden();
-
-        $this->como($this->sinPermisos)
-            ->putJson("/api/v1/billing/billing-providers/{$uuid}/configuracion/software", [])
-            ->assertForbidden();
-
-        $this->como($this->sinPermisos)
-            ->deleteJson("/api/v1/billing/billing-providers/{$uuid}/configuracion/empresa")
-            ->assertForbidden();
-    }
-
-    public function test_el_administrador_con_permiso_pasa_la_autorizacion_de_configuracion(): void
-    {
-        $uuid = (string) Str::uuid();
-
-        // No hay proveedor con ese UUID: 404, no 403, así que el middleware lo dejó pasar.
-        $this->como($this->admin)
-            ->getJson("/api/v1/billing/billing-providers/{$uuid}/configuracion")
-            ->assertNotFound();
-    }
-
-    public function test_los_documentos_electronicos_exigen_sus_permisos(): void
-    {
-        $this->como($this->sinPermisos)
-            ->getJson('/api/v1/billing/electronic-documents')
-            ->assertForbidden();
-
-        $this->como($this->sinPermisos)
-            ->postJson('/api/v1/billing/electronic-documents', [])
-            ->assertForbidden();
-
-        $this->como($this->admin)
-            ->getJson('/api/v1/billing/electronic-documents')
-            ->assertOk();
     }
 
     public function test_el_combustible_exige_sus_permisos(): void
