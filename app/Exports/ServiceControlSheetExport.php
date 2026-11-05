@@ -65,6 +65,9 @@ class ServiceControlSheetExport implements FromCollection, WithHeadings
         if (! empty($f['third_party_uuid'])) {
             $query->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $f['third_party_uuid']));
         }
+        if (! empty($f['project_uuid'])) {
+            $query->where('project_uuid', $f['project_uuid']);
+        }
 
         $filas = [];
         foreach ($query->limit(1000)->get() as $sheet) {

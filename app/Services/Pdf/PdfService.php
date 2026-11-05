@@ -1814,6 +1814,9 @@ class PdfService
                 $driverUuid = $filtros['third_party_uuid'];
                 $query->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $driverUuid));
             }
+            if (! empty($filtros['project_uuid'])) {
+                $query->where('project_uuid', $filtros['project_uuid']);
+            }
 
             $sheets = $query->limit(500)->get();
             if ($sheets->isEmpty()) {
@@ -1905,6 +1908,7 @@ class PdfService
                 'conductor' => 'CONDUCTOR',
                 'dia' => 'DÍA '.($filtros['fecha'] ?? ''),
                 'mensual' => 'MENSUAL '.($filtros['year'] ?? '').'-'.($filtros['month'] ?? ''),
+                'proyecto' => 'PROYECTO',
             ];
             $firmaCond = collect($base64Sigs)->first(fn ($v, $k) => str_starts_with($k, 'fc_') && ! empty($v));
             // Pie derecho: solo la firma del coordinador logístico. Sin ella, la
