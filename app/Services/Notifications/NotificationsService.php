@@ -950,7 +950,7 @@ class NotificationsService extends BaseService
         $docUuids = $vehicle->vehicleDocuments()->pluck('uuid')->toArray();
         $opCardUuids = $vehicle->operationCards()->pluck('uuid')->toArray();
         $agreementUuids = $vehicle->businessCollaborationAgreements()->pluck('uuid')->toArray();
-        $inspectionUuids = $vehicle->inspections()->pluck('uuid')->toArray();
+        $inspectionUuids = $vehicle->vehicleInspections()->pluck('uuid')->toArray();
 
         $this->transaction(function () use ($vehicle, $docUuids, $opCardUuids, $agreementUuids, $inspectionUuids) {
             $this->query()
@@ -1058,7 +1058,7 @@ class NotificationsService extends BaseService
     /**
      * Método notificationsForVehicleDocuments.
      */
-    public function notificationsForVehicleDocuments(?string $companyUuid = null, ?string $thirdPartyUuid = null): array
+    public function notificationsForVehicleDocuments(?string $companyUuid = null, ?string $thirdPartyUuid = null, bool $persistirCambios = true): array
     {
         try {
             $today = Carbon::today();
@@ -1083,7 +1083,7 @@ class NotificationsService extends BaseService
             $expiringSoon = [];
             $missing = [];
 
-            $query->chunk(100, function ($vehicles) use (&$expired, &$expiringSoon, &$missing, $today, $alertDate) {
+            $query->chunk(100, function ($vehicles) use (&$expired, &$expiringSoon, &$missing, $today, $alertDate, $persistirCambios) {
                 /** @var Vehicle $vehicle */
                 foreach ($vehicles as $vehicle) {
                     $registeredTypes = $vehicle->vehicleDocuments->pluck('document_type')->map(fn ($t) => strtoupper((string) $t))->toArray();
@@ -1145,7 +1145,7 @@ class NotificationsService extends BaseService
                                 $newStatus = 'NO';
                             }
 
-                            if ($newStatus && $currentStatus !== $newStatus) {
+                            if ($persistirCambios && $newStatus && $currentStatus !== $newStatus) {
                                 try {
                                     $document->status = $newStatus;
                                     $document->save();
@@ -1291,7 +1291,7 @@ class NotificationsService extends BaseService
     /**
      * Método notificationsForDriverLicenses.
      */
-    public function notificationsForDriverLicenses(?string $companyUuid = null, ?string $thirdPartyUuid = null): array
+    public function notificationsForDriverLicenses(?string $companyUuid = null, ?string $thirdPartyUuid = null, bool $persistirCambios = true): array
     {
         try {
             $today = Carbon::today();
@@ -1340,7 +1340,7 @@ class NotificationsService extends BaseService
                 ];
 
                 if ($expirationDate->lt($today)) {
-                    if ($license->status !== 'VENCIDA') {
+                    if ($persistirCambios && $license->status !== 'VENCIDA') {
                         $license->status = 'VENCIDA';
                         $license->save();
                     }
@@ -1463,7 +1463,7 @@ class NotificationsService extends BaseService
     /**
      * Método notificationsForAgreements.
      */
-    public function notificationsForAgreements(?string $companyUuid = null, ?string $thirdPartyUuid = null): array
+    public function notificationsForAgreements(?string $companyUuid = null, ?string $thirdPartyUuid = null, bool $persistirCambios = true): array
     {
         try {
             $today = Carbon::today();
@@ -1510,7 +1510,7 @@ class NotificationsService extends BaseService
                 ];
 
                 if ($expirationDate->lt($today)) {
-                    if ($agreement->status !== 0) {
+                    if ($persistirCambios && $agreement->status !== 0) {
                         $agreement->status = 0;
                         $agreement->save();
                     }
@@ -1623,14 +1623,14 @@ class NotificationsService extends BaseService
     /**
      * Método getAllNotifications.
      */
-    public function getAllNotifications(?string $companyUuid = null, ?string $thirdPartyUuid = null): array
+    public function getAllNotifications(?string $companyUuid = null, ?string $thirdPartyUuid = null, bool $persistirCambios = false): array
     {
         try {
-            $vehicleDocs = $this->notificationsForVehicleDocuments($companyUuid, $thirdPartyUuid);
+            $vehicleDocs = $this->notificationsForVehicleDocuments($companyUuid, $thirdPartyUuid, $persistirCambios);
             $operationCards = $this->notificationsForOperationCards($companyUuid, $thirdPartyUuid);
-            $driverLicenses = $this->notificationsForDriverLicenses($companyUuid, $thirdPartyUuid);
+            $driverLicenses = $this->notificationsForDriverLicenses($companyUuid, $thirdPartyUuid, $persistirCambios);
             $firstRtm = $this->notificationsForFirstRTM($companyUuid, $thirdPartyUuid);
-            $agreements = $this->notificationsForAgreements($companyUuid, $thirdPartyUuid);
+            $agreements = $this->notificationsForAgreements($companyUuid, $thirdPartyUuid, $persistirCambios);
             $affiliateCharges = $this->notificationsForAffiliateCharges($companyUuid, $thirdPartyUuid);
             $preventativeMaintenance = $this->notificationsForPreventativeMaintenance($companyUuid, $thirdPartyUuid);
             $socialSecurity = $this->notificationsForSocialSecurity($companyUuid, $thirdPartyUuid);

@@ -771,15 +771,19 @@ class FuecService extends BaseService
                 return $nextNumber;
             }
 
+            // Si no existe la secuencia en la tabla de consecutivos, verificar si ya existen FUECs para este contrato
+            $contractUuid = DB::table('contractors')->where('id', $contractId)->value('uuid');
+            $nextNumber = $this->ultimoConsecutivoExistente($contractUuid, (int) $year) + 1;
+
             ItWasConsecutive::create([
                 'type' => 'extract',
                 'company_uuid' => $companyUuid,
                 'year' => $year,
                 'contract_id' => $contractId,
-                'current_consecutive' => 1,
+                'current_consecutive' => $nextNumber,
             ]);
 
-            return 1;
+            return $nextNumber;
         });
 
         // Asegurar que el contrato y extracto tengan exactamente 4 dígitos usando el módulo y relleno a la izquierda.
@@ -856,6 +860,22 @@ class FuecService extends BaseService
     }
 
     /**
+     * Mayor consecutivo de extracto ya emitido para un contrato en el año dado (0 si no hay FUEC).
+     * Respaldo cuando aún no existe fila en fuec_consecutives.
+     */
+    private function ultimoConsecutivoExistente(?string $contractorUuid, int $year): int
+    {
+        if (! $contractorUuid) {
+            return 0;
+        }
+
+        return (int) DB::table('fuec')
+            ->where('contractor_uuid', $contractorUuid)
+            ->whereYear('issue_date', $year)
+            ->max('number_fuec');
+    }
+
+    /**
      * Método getPreviewFuecNumber.
      */
     public function getPreviewFuecNumber(string $companyUuid, ?string $contractorUuid = null, ?string $contractNumber = null): string
@@ -903,7 +923,11 @@ class FuecService extends BaseService
                     ->where('contract_id', $contract->id)
                     ->first();
 
-                $extractConsecutive = $sequence ? ($sequence->current_consecutive + 1) : 1;
+                if ($sequence) {
+                    $extractConsecutive = $sequence->current_consecutive + 1;
+                } else {
+                    $extractConsecutive = $this->ultimoConsecutivoExistente($contract->uuid, (int) $year) + 1;
+                }
             }
         } elseif ($contractNumber) {
             $assignedContractNumber = (int) $contractNumber;

@@ -46,6 +46,19 @@ voluminosas: tanqueos, preoperacionales, planillas, proyectos); constante
 dentro del lote y crecimiento SOLO por lote. Memoria del flujo ~70–72 MB (pico
 del arnés, informe y no bloqueante).
 
+## Backend — dashboard sin caché (laboratorio, 2026-11-04, SPEC-010)
+
+Rediseño de `DashboardService` sin `Cache::remember`. Consultas en tiempo real,
+agregación SQL de kilometraje sin volcar inspecciones a PHP y subconsultas indexadas.
+Cero mutaciones en BD (0 `INSERT`, `UPDATE` o `DELETE`) durante peticiones `GET`.
+El presupuesto bloqueante vive en `DashboardConsultasTest`.
+
+| Endpoint / Métrica | Consultas ANTES (con caché) | Consultas DESPUÉS (sin caché) | Memoria / Mutaciones GET |
+|---|---:|---:|---|
+| Resumen de empresa (`/summary`) | 12 | **4** | 0 filas de inspecciones en RAM (1 sola consulta agregada) |
+| Resumen del conductor (`/conductor-summary`) | 24 | 24 | Subconsulta SQL para última inspección (0 volcado histórico) |
+| Alertas del dashboard (`/alerts`) | 12 | 12 | 0 escrituras de actualización en BD al leer |
+
 ## Frontend — peso del bundle (laboratorio, 2026-09-30)
 
 Fuente: `perf-2026-09-30.json` del frontend (`buildId DdH84NX2`).
