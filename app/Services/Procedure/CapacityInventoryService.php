@@ -14,6 +14,9 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Servicio de negocio altamente detallado para la gestión integral de InventarioCapacidad.
  *
+ * DEPRECADO (2026-11-05): sin rutas ni UI. El sistema real de cupos es
+ * `conveyor_capacity.current_capacity` + `capacity_movements`; no usar en código nuevo.
+ *
  * Este servicio asume la responsabilidad exclusiva de procesar, validar internamente
  * y persistir las operaciones de InventarioCapacidad en el dominio del negocio.
  * Se encarga de controlar el inventario de capacidades transportadoras y tarjetas

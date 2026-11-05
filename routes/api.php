@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\Administrations\BankDetailController;
 use App\Http\Controllers\Api\V1\Administrations\BranchController;
+use App\Http\Controllers\Api\V1\Administrations\CapacityMovementController;
 use App\Http\Controllers\Api\V1\Administrations\CompanyController;
 // Controllers de Catálogos
 use App\Http\Controllers\Api\V1\Administrations\ContactController;
@@ -72,7 +73,6 @@ use App\Http\Controllers\Api\V1\Fleet\GeofenceController;
 use App\Http\Controllers\Api\V1\Fleet\LocationHistoryController;
 use App\Http\Controllers\Api\V1\Integration\GoogleDriveController;
 use App\Http\Controllers\Api\V1\Notifications\NotificationsController;
-use App\Http\Controllers\Api\V1\Procedure\CapacityInventoryController;
 use App\Http\Controllers\Api\V1\Procedure\FleetServiceContractController;
 use App\Http\Controllers\Api\V1\Procedure\ProcedureController;
 use App\Http\Controllers\Api\V1\Procedure\RadicacionController;
@@ -505,6 +505,12 @@ Route::prefix('v1')->group(function () {
                 Route::put('/{uuid}', [ConveyorCapacityController::class, 'update'])->name('api.v1.administration.conveyor-capacity.update');
                 Route::delete('/{uuid}', [ConveyorCapacityController::class, 'destroy'])->name('api.v1.administration.conveyor-capacity.destroy');
                 Route::patch('/{uuid}/toggle-status', [ConveyorCapacityController::class, 'toggleStatus'])->name('api.v1.administration.conveyor-capacity.toggle-status');
+            });
+
+            // Movimientos de cupos de capacidad transportadora (libro mayor)
+            Route::prefix('capacity-movements')->group(function () {
+                Route::get('/', [CapacityMovementController::class, 'index'])->middleware('permission:conveyor_capacity.index')->name('api.v1.administration.capacity-movements.index');
+                Route::get('/conciliacion', [CapacityMovementController::class, 'conciliacion'])->middleware('permission:conveyor_capacity.index')->name('api.v1.administration.capacity-movements.conciliacion');
             });
 
             // Experiencias (sin toggle: no tiene campo de estado)
@@ -979,15 +985,10 @@ Route::prefix('v1')->group(function () {
                 Route::patch('/{uuid}/toggle-status', [TerritorialDirectorController::class, 'toggleStatus'])->name('api.v1.procedure.territorial-directors.toggle-status');
             });
 
-            // Inventario de Capacidad
-            Route::prefix('capacity-inventories')->group(function () {
-                Route::get('/', [CapacityInventoryController::class, 'index'])->name('api.v1.procedure.capacity-inventories.index');
-                Route::get('/list', [CapacityInventoryController::class, 'list'])->name('api.v1.procedure.capacity-inventories.list');
-                Route::post('/', [CapacityInventoryController::class, 'store'])->name('api.v1.procedure.capacity-inventories.store');
-                Route::get('/{uuid}', [CapacityInventoryController::class, 'show'])->name('api.v1.procedure.capacity-inventories.show');
-                Route::put('/{uuid}', [CapacityInventoryController::class, 'update'])->name('api.v1.procedure.capacity-inventories.update');
-                Route::delete('/{uuid}', [CapacityInventoryController::class, 'destroy'])->name('api.v1.procedure.capacity-inventories.destroy');
-            });
+            // Inventario de Capacidad: DEPRECADO. El saldo real vive en
+            // `conveyor_capacity.current_capacity` con su libro mayor
+            // `capacity_movements` (ver CapacityMovementService). Se retiraron las
+            // rutas para que nadie escriba un inventario paralelo.
 
             // Contratos de Servicio de Flota
             Route::prefix('fleet-service-contracts')->group(function () {
@@ -1013,8 +1014,10 @@ Route::prefix('v1')->group(function () {
             Route::prefix('radicacion')->group(function () {
                 Route::get('/expedientes', [RadicacionController::class, 'expedientes'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.expedientes');
                 Route::get('/next-code', [RadicacionController::class, 'siguienteCodigo'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.next-code');
+                Route::get('/cupos-disponibles', [RadicacionController::class, 'cuposDisponibles'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.cupos-disponibles');
                 Route::post('/expediente', [RadicacionController::class, 'crearExpediente'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.expediente');
                 Route::get('/{uuid}/detalle', [RadicacionController::class, 'detalle'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.detalle');
+                Route::put('/{uuid}', [RadicacionController::class, 'actualizarPaso'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.actualizar');
                 Route::post('/{uuid}/avanzar', [RadicacionController::class, 'avanzar'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.avanzar');
                 Route::get('/{uuid}/ruta', [RadicacionController::class, 'ruta'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.ruta');
                 Route::get('/{uuid}/validar', [RadicacionController::class, 'validar'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.validar');

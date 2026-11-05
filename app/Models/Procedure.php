@@ -49,8 +49,10 @@ class Procedure extends Model
         'radicado_number',
         'payment_status',
         'resolution_number',
+        'paz_y_salvo',
         'link_type',
         'company_uuid',
+        'origin_company_uuid',
         'third_party_uuid',
         'vehicle_uuid',
         'procedure_code',
@@ -109,6 +111,16 @@ class Procedure extends Model
     public function company()
     {
         return $this->belongsTo(Company::class, 'company_uuid', 'uuid');
+    }
+
+    /**
+     * Relación con la empresa de origen (solo cambio de empresa).
+     *
+     * @return BelongsTo
+     */
+    public function originCompany()
+    {
+        return $this->belongsTo(Company::class, 'origin_company_uuid', 'uuid');
     }
 
     /**

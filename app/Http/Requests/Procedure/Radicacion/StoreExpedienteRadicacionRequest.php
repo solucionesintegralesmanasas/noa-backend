@@ -39,12 +39,18 @@ class StoreExpedienteRadicacionRequest extends FormRequest
         return [
             'link_type' => 'required|in:NUEVO_VEHICULO,CAMBIO_DE_EMPRESA,RENOVACION,DESVINCULACION_MUTUO,DESVINCULACION_UNILATERAL',
             'company_uuid' => ['nullable', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
+            'origin_company_uuid' => [
+                'nullable', 'uuid', 'exists:companies,uuid',
+                Rule::requiredIf(fn () => $this->input('link_type') === 'CAMBIO_DE_EMPRESA'),
+                Rule::notIn([$this->input('company_uuid')]),
+            ],
             'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
             'vehicle_uuid' => 'required|uuid|exists:vehicles,uuid',
             'procedure_code' => [
                 'nullable', 'string', 'max:50',
-                // Sin índice único en BD a propósito: hay códigos repetidos históricos
-                // (ver SPEC-007) que hay que depurar antes; la unicidad se exige aquí.
+                // El índice único (company_uuid, procedure_code) sobre expedientes padre
+                // ya existe en BD (migración 2026_10_28_000001); esta regla da el 422
+                // legible antes de llegar a la restricción de la base.
                 Rule::unique('procedures', 'procedure_code')
                     ->where(fn ($q) => $q->where('company_uuid', $this->input('company_uuid') ?? $this->attributes->get('current_company_uuid'))
                         ->where(fn ($w) => $w->whereNull('parent_procedure_uuid')->orWhere('parent_procedure_uuid', ''))),
@@ -56,6 +62,7 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'territorial_director_uuid' => 'nullable|uuid|exists:territorial_directors,uuid',
             'territorial_director_name' => 'nullable|string|max:200',
             'territorial_name' => 'nullable|string|max:150',
+            'paz_y_salvo' => 'nullable|string|max:100',
         ];
     }
 
@@ -64,6 +71,9 @@ class StoreExpedienteRadicacionRequest extends FormRequest
         return [
             'link_type.required' => 'El tipo de vinculación es obligatorio.',
             'link_type.in' => 'El tipo de vinculación no es válido.',
+            'origin_company_uuid.required' => 'La empresa de origen es obligatoria para el cambio de empresa.',
+            'origin_company_uuid.exists' => 'La empresa de origen no existe.',
+            'origin_company_uuid.not_in' => 'La empresa de origen no puede ser la misma empresa receptora.',
             'third_party_uuid.exists' => 'El tercero no existe.',
             'vehicle_uuid.required' => 'El vehículo es obligatorio.',
             'vehicle_uuid.exists' => 'El vehículo no existe.',
@@ -81,6 +91,7 @@ class StoreExpedienteRadicacionRequest extends FormRequest
         return [
             'link_type' => 'Tipo de vinculación',
             'company_uuid' => 'Empresa',
+            'origin_company_uuid' => 'Empresa de origen',
             'third_party_uuid' => 'Tercero',
             'vehicle_uuid' => 'Vehículo',
             'procedure_code' => 'Código de trámite',
@@ -90,6 +101,7 @@ class StoreExpedienteRadicacionRequest extends FormRequest
             'territorial_director_uuid' => 'Director territorial',
             'territorial_director_name' => 'Nombre de la directora o director',
             'territorial_name' => 'Dirección territorial',
+            'paz_y_salvo' => 'Paz y salvo',
         ];
     }
 
