@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\ServiceDeliveryControlSheet;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -58,8 +59,8 @@ class CreacionMasivaHojasTest extends TestCase
 
         // Tres pares conductor↔vehículo asignados al proyecto A1.
         for ($i = 1; $i <= 3; $i++) {
-            $this->conductores[$i] = $this->crearTercero($this->empresaA, '9100001'.$i, 'T'.$i, $this->sedeA1);
-            $this->vehiculos[$i] = $this->crearVehiculo($this->empresaA, $this->conductores[$i], 'MASA0'.$i, $this->sedeA1);
+            $this->conductores[$i] = $this->crearTercero($this->empresaA, '9100001' . $i, 'T' . $i, $this->sedeA1);
+            $this->vehiculos[$i] = $this->crearVehiculo($this->empresaA, $this->conductores[$i], 'MASA0' . $i, $this->sedeA1);
         }
         $this->proyectoA1 = $this->crearProyecto($this->empresaA, 'Proyecto Masivo A1', [
             ['conductor' => $this->conductores[1], 'vehicle' => $this->vehiculos[1]],
@@ -77,13 +78,24 @@ class CreacionMasivaHojasTest extends TestCase
         $relleno = (string) Str::uuid();
         Schema::disableForeignKeyConstraints();
         DB::table('companies')->insert([
-            'uuid' => $uuid, 'person_type' => 'PERSONA JURIDICA', 'type_of_company' => 'PRIVADO',
-            'document_type_uuid' => $relleno, 'document_number' => (string) random_int(100000000, 999999999),
-            'business_name' => 'Empresa '.Str::random(5), 'municipality_uuid' => $relleno, 'address' => 'Calle 1',
-            'email' => Str::random(6).'@empresa.test', 'tax_regime_uuid' => $relleno, 'web_page' => 'https://e.test',
-            'legal_representative_name' => 'Rep', 'legal_representative_last_name' => 'Legal',
-            'legal_representative_document_type' => 'CC', 'legal_representative_document_number' => '1',
-            'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
+            'uuid' => $uuid,
+            'person_type' => 'PERSONA JURIDICA',
+            'type_of_company' => 'PRIVADO',
+            'document_type_uuid' => $relleno,
+            'document_number' => (string) random_int(100000000, 999999999),
+            'business_name' => 'Empresa ' . Str::random(5),
+            'municipality_uuid' => $relleno,
+            'address' => 'Calle 1',
+            'email' => Str::random(6) . '@empresa.test',
+            'tax_regime_uuid' => $relleno,
+            'web_page' => 'https://e.test',
+            'legal_representative_name' => 'Rep',
+            'legal_representative_last_name' => 'Legal',
+            'legal_representative_document_type' => 'CC',
+            'legal_representative_document_number' => '1',
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
         Schema::enableForeignKeyConstraints();
 
@@ -92,12 +104,12 @@ class CreacionMasivaHojasTest extends TestCase
 
     private function crearSede(string $empresa, string $nombre): string
     {
-        $ciudad = $this->insertar('cities', ['name' => 'Ciudad '.$nombre]);
+        $ciudad = $this->insertar('cities', ['name' => 'Ciudad ' . $nombre]);
 
         return $this->insertar('branches', [
             'company_uuid' => $empresa,
             'name' => $nombre,
-            'address' => 'Calle '.$nombre,
+            'address' => 'Calle ' . $nombre,
             'municipality_uuid' => $ciudad,
             'status' => 1,
         ]);
@@ -111,7 +123,7 @@ class CreacionMasivaHojasTest extends TestCase
             'document_number' => $documento,
             'first_name' => 'CONDUCTOR',
             'last_name' => $sufijo,
-            'email' => 'conductor.'.Str::lower($sufijo).Str::random(3).'@test.local',
+            'email' => 'conductor.' . Str::lower($sufijo) . Str::random(3) . '@test.local',
             'branch_uuid' => $sede,
             'is_driver' => $conductor ? 1 : 0,
         ]);
@@ -168,7 +180,7 @@ class CreacionMasivaHojasTest extends TestCase
         Schema::disableForeignKeyConstraints();
         $user = User::create([
             'uuid' => (string) Str::uuid(),
-            'name' => 'Usuario '.$rol,
+            'name' => 'Usuario ' . $rol,
             'email' => $email,
             'password' => Hash::make('secreto123'),
             'is_active' => true,
@@ -256,7 +268,7 @@ class CreacionMasivaHojasTest extends TestCase
             $padre = DB::table('service_delivery_control_sheet')
                 ->where('uuid', $controlPadre->service_delivery_control_sheet_uuid)->first();
             $this->assertSame('DIRECTO_CON_LA_EMPRESA', $padre->type_of_control_sheet);
-            $this->assertSame('CONDUCTOR T'.$i, $padre->official_name_and_surname);
+            $this->assertSame('CONDUCTOR T' . $i, $padre->official_name_and_surname);
             $this->assertSame('2026-10-10', $padre->start_date);
             $this->assertSame('2026-10-11', $padre->end_date);
 
@@ -270,7 +282,7 @@ class CreacionMasivaHojasTest extends TestCase
                 $hoja = DB::table('service_delivery_control_sheet')
                     ->where('uuid', $hijo->service_delivery_control_sheet_uuid)->first();
                 $this->assertSame($controlPadre->service_delivery_control_sheet_uuid, $hoja->parent_uuid);
-                $this->assertSame('CONDUCTOR T'.$i, $hoja->official_name_and_surname);
+                $this->assertSame('CONDUCTOR T' . $i, $hoja->official_name_and_surname);
                 $this->assertContains($hoja->service_date, ['2026-10-10', '2026-10-11']);
             }
         }
@@ -454,7 +466,7 @@ class CreacionMasivaHojasTest extends TestCase
         // Un día del coche 2 ya se cerró (congelamiento, SPEC-002 §7.2).
         DB::table('service_delivery_control_sheet')
             ->whereNotNull('parent_uuid')
-            ->whereIn('uuid', fn ($q) => $q->select('service_delivery_control_sheet_uuid')
+            ->whereIn('uuid', fn($q) => $q->select('service_delivery_control_sheet_uuid')
                 ->from('service_internal_controls')
                 ->where('vehicle_uuid', $this->vehiculos[2]))
             ->limit(1)
@@ -491,7 +503,7 @@ class CreacionMasivaHojasTest extends TestCase
     private function hojasDe(int $i)
     {
         return DB::table('service_delivery_control_sheet')
-            ->whereIn('uuid', fn ($q) => $q->select('service_delivery_control_sheet_uuid')
+            ->whereIn('uuid', fn($q) => $q->select('service_delivery_control_sheet_uuid')
                 ->from('service_internal_controls')
                 ->where('vehicle_uuid', $this->vehiculos[$i]));
     }
@@ -525,8 +537,8 @@ class CreacionMasivaHojasTest extends TestCase
     public function test_presupuesto_de_tiempo_del_bulk_de_14_coches_por_30_dias(): void
     {        // Amplía el proyecto de 3 a 14 asignaciones activas.
         for ($i = 4; $i <= 14; $i++) {
-            $conductor = $this->crearTercero($this->empresaA, '9100002'.$i, 'T'.$i, $this->sedeA1);
-            $vehiculo = $this->crearVehiculo($this->empresaA, $conductor, 'MASA'.str_pad((string) $i, 2, '0', STR_PAD_LEFT), $this->sedeA1);
+            $conductor = $this->crearTercero($this->empresaA, '9100002' . $i, 'T' . $i, $this->sedeA1);
+            $vehiculo = $this->crearVehiculo($this->empresaA, $conductor, 'MASA' . str_pad((string) $i, 2, '0', STR_PAD_LEFT), $this->sedeA1);
             $this->insertar('project_driver_vehicles', [
                 'project_uuid' => $this->proyectoA1,
                 'third_party_uuid' => $conductor,
@@ -537,6 +549,9 @@ class CreacionMasivaHojasTest extends TestCase
         }
         $coches = array_values($this->vehiculos);
 
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
         $inicio = microtime(true);
         $respuesta = $this->comoAdminA()
             ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos(
@@ -545,12 +560,15 @@ class CreacionMasivaHojasTest extends TestCase
                 '2026-11-08', // 30 días (10-10 → 11-08)
             ));
         $segundos = microtime(true) - $inicio;
+        $totalQueries = count(DB::getQueryLog());
+        DB::disableQueryLog();
 
         $respuesta->assertCreated()
             ->assertJsonPath('data.created', 14)
             ->assertJsonPath('data.daily_sheets', 420);
 
         $this->assertSame(434, DB::table('service_internal_controls')->count());
+        $this->assertLessThan(50, $totalQueries, "El bulk ejecutó {$totalQueries} consultas; el presupuesto SPEC-012 exige drástica reducción (anteriormente más de 1,800 sentencias SQL individuales).");
 
         if (getenv('CI')) {
             $this->addWarning('Medición del bulk deshabilitada en CI.');
@@ -558,7 +576,91 @@ class CreacionMasivaHojasTest extends TestCase
             return; // medición solo en local
         }
 
-        fwrite(STDERR, 'bulk 14x30: '.round($segundos, 2).' s');
+        fwrite(STDERR, 'bulk 14x30: ' . round($segundos, 2) . " s ({$totalQueries} queries)");
         $this->assertLessThan(33.0, $segundos, 'El bulk de 14 coches × 30 días superó el presupuesto de tiempo del worker.');
+    }
+
+    /**
+     * Ausencia de $with global en el modelo ServiceDeliveryControlSheet (SPEC-012).
+     */
+    public function test_modelo_sin_with_global_en_consultas_ligeras(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1, [$this->vehiculos[1]], fin: '2026-10-10'))
+            ->assertCreated();
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $conteo = \App\Models\ServiceDeliveryControlSheet::where('is_active', true)->count();
+        $queriesConteo = DB::getQueryLog();
+        $this->assertSame(1, count($queriesConteo), 'Una consulta de conteo no debe cargar relaciones adicionales ni ejecutar subconsultas.');
+        $this->assertGreaterThan(0, $conteo);
+
+        DB::flushQueryLog();
+        $hoja = \App\Models\ServiceDeliveryControlSheet::whereNull('parent_uuid')->first();
+        $queriesFirst = DB::getQueryLog();
+        $this->assertSame(1, count($queriesFirst), 'Una consulta de primer registro sin with() explícito debe ejecutar exactamente una sentencia SQL.');
+        $this->assertFalse($hoja->relationLoaded('routes'), 'La relación routes no debe cargarse forzosamente por defecto.');
+        $this->assertFalse($hoja->relationLoaded('internalControl'), 'La relación internalControl no debe cargarse forzosamente por defecto.');
+        $this->assertFalse($hoja->relationLoaded('subcontractedControl'), 'La relación subcontractedControl no debe cargarse forzosamente por defecto.');
+
+        DB::disableQueryLog();
+    }
+
+    /**
+     * El listado paginado recupera placas y conductores sin N+1 (SPEC-012).
+     */
+    public function test_listado_paginado_recupera_placas_sin_n_mas_uno(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1))
+            ->assertCreated();
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $respuesta = $this->comoAdminA()
+            ->getJson('/api/v1/control-sheets/service-delivery-control-sheets?per_page=15')
+            ->assertOk();
+
+        $queries = DB::getQueryLog();
+        DB::disableQueryLog();
+
+        $this->assertLessThan(30, count($queries), 'El listado paginado no debe disparar N+1 consultas por fila.');
+        $datos = $respuesta->json('data.data');
+        $this->assertNotEmpty($datos);
+        foreach ($datos as $fila) {
+            $this->assertNotNull($fila['vehicle_license_plate']);
+            $this->assertNotNull($fila['driver_name']);
+        }
+    }
+
+    public function test_resumen_proyectos_en_lote_resuelve_conductor_en_disponibilidad(): void
+    {
+        Sanctum::actingAs($this->adminA, ['*']);
+        app()->instance('current_company_uuid', $this->empresaA);
+
+        ServiceDeliveryControlSheet::create([
+            'company_uuid' => $this->empresaA,
+            'project_uuid' => $this->proyectoA1,
+            'service_date' => '2026-10-15',
+            'start_date' => '2026-10-15',
+            'end_date' => '2026-10-15',
+            'start_time' => '08:00:00',
+            'end_time' => '17:00:00',
+            'official_name_and_surname' => 'JUAN CONDUCTOR',
+            'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+            'day_kind' => ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD,
+            'availability_reason' => 'Vehículo en retén',
+            'is_active' => false,
+            'retirada_de_proyecto' => false,
+        ]);
+
+        $evidence = app(\App\Services\ServiceDeliveryControlSheet\PcpEvidence::class);
+        $resumen = $evidence->resumenProyectosEnLote([$this->proyectoA1]);
+
+        $this->assertArrayHasKey($this->proyectoA1, $resumen);
+        $this->assertSame(1, $resumen[$this->proyectoA1]['total_planillas']);
     }
 }

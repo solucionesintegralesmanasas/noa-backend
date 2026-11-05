@@ -54,3 +54,40 @@ Optimizar la consolidación de evidencias en lote (`resumenProyectosEnLote`) par
 
 - Esta optimización desbloquea un rendimiento notable en el dashboard del conductor y en el monitor de rastreo GPS, que con frecuencia consultan la planilla del día.
 
+## Implementation & Performance Results (2026-11-05)
+
+- **Estado:** IMPLEMENTADO y validado con suite de pruebas completa en commit `db46c3a` (`spec-012-optimizacion-planillas-control`).
+- **Cambios Principales:**
+  1. **Eliminación de `$with` global en `ServiceDeliveryControlSheet`:**
+     - Se suprimió la precarga automática obligatoria de relaciones (`project`, `routes`, `internalControl.vehicle`, `internalControl.thirdParty`, `subcontractedControl.vehicleClass`).
+     - Se crearon las constantes `RELACIONES_BASICAS` y `RELACIONES_DETALLE`, expuestas mediante `scopeConRelacionesCompletas($query)` y `scopeConRelacionesDetalle($query)`.
+     - Los accesores `$appends` (`vehicle_license_plate` y `driver_name`) evalúan `relationLoaded` estricto (retornando `null` si no están cargadas o delegando en el respaldo plano de `official_name_and_surname`), imposibilitando la ejecución inadvertida de consultas N+1 en segundo plano.
+  2. **Inserción Masiva en `createBulkForProject`:**
+     - Validación en lote de vehículos y terceros pertenecientes a la empresa y sede activa mediante consultas agrupadas (`whereIn`), fallando cerrado ante cualquier inconsistencia.
+     - Extracción previa de plantillas de recorridos del proyecto con `order_index` 1-based consistente con `syncRoutes`.
+     - Ensamblado determinista en memoria de identificadores UUID, marcas de tiempo (`created_at`, `updated_at`), planillas padre, hijas diarias y controles internos.
+     - Persistencia en bloque mediante `DB::table(...)->insert($chunk)` en fragmentos de 200 registros dentro de una única transacción de base de datos.
+  3. **Precarga Explícita en Servicios, Controladores y Exportaciones:**
+     - Actualizados `getAllServiceDeliveryControlSheetsWithPagination`, `getAllServiceDeliveryControlSheets` (`/list`), `getServiceDeliveryControlSheetByUuid`, `persistirHoja`, `updateServiceDeliveryControlSheet`, `startServiceDeliveryControlSheet`, `closeServiceDeliveryControlSheet`, `cerrarConExcepcion` y `closeRoute`.
+     - `ServiceControlSheetExport::collection` y `PdfService` (`generateDailyServiceControlSheetPdf`, `generateMonthlyServiceControlSheetPdf`, `generateFilteredServiceControlSheetPdf`) aplican carga explícita de relaciones requeridas.
+     - `PcpEvidence::resumenProyectosEnLote` precarga relaciones en bloque para padres e hijos, garantizando que las jornadas en disponibilidad identifiquen correctamente al conductor responsable sin disparar N+1 ni falsos faltantes.
+
+- **Métricas Cuantitativas de Rendimiento:**
+  | Escenario / Operación | Antes de SPEC-012 | Después de SPEC-012 | Ganancia / Impacto |
+  | :--- | :--- | :--- | :--- |
+  | **Creación masiva de 14 vehículos × 30 días** (434 planillas + 434 controles) | 3.65 segundos | **0.12 segundos** | **~96.7% más rápido** (29x) |
+  | **Consultas SQL en creación masiva** | >1,800 sentencias SQL individuales | **44 consultas HTTP** (20 en el servicio) | **~97.5% menos consultas** |
+  | **Consultas ligeras del modelo** (`count()`, `first()`, `exists()`) | 6 consultas (1 conteo + 5 precargas `$with`) | **1 consulta SQL exacta** | **83.3% menos consultas** |
+  | **Listado paginado general** (15 registros por página) | Consultas variables con N+1 latente | **26 consultas controladas en lote** | Sin N+1 por fila |
+  | **Generación de Reportes / PDF / Excel** | N+1 por cada fila iterada | **1 consulta `whereIn` por relación** | Operación constante en memoria |
+
+- **Cobertura de Pruebas Automatizadas:**
+  - `CreacionMasivaHojasTest`: 14 casos (110 aserciones) en verde.
+  - `EdicionHojaControlTest`: 14 casos (159 aserciones) en verde.
+  - `EvidenceStatusPdfTest`: 3 casos (10 aserciones) en verde.
+  - `PcpAislamientoTest`: 9 casos (35 aserciones) en verde.
+  - `ServiceControlSheetPdfLayoutSmokeTest`: 1 caso (15 aserciones) en verde.
+  - `ServiceControlSheetRowsTest`: 16 casos (54 aserciones) en verde.
+  - `ServiceControlSheetSignaturesTest`: 5 casos (7 aserciones) en verde.
+  - `FirmasDeClasesTest`: 1 caso (6 aserciones) en verde.
+

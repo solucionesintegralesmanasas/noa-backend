@@ -20,6 +20,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -74,7 +75,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     ): LengthAwarePaginator {
         $query = $this->query()
             ->whereNull('parent_uuid')
-            ->with(['project', 'routes', 'children.routes'])
+            ->conRelacionesDetalle()
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => function ($q) {
                 $q->where('is_active', true);
@@ -309,7 +310,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         $query = $this->query()
             ->whereNull('parent_uuid')
             ->where('retirada_de_proyecto', false)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+            ->conRelacionesDetalle();
 
         $this->aplicarFiltroConductor($query);
 
@@ -452,7 +453,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     public function getServiceDeliveryControlSheetByUuid(string $uuid): ?Model
     {
         $query = ServiceDeliveryControlSheet::where('uuid', $uuid)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+            ->conRelacionesDetalle();
 
         $thirdPartyUuid = $this->conductorThirdPartyUuid();
         if ($thirdPartyUuid !== false) {
@@ -823,7 +824,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         $this->applyRouteClosure($route, $data, $record->company_uuid);
 
         return [
-            'planilla' => $record->fresh(['routes']),
+            'planilla' => $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS),
             'route' => $route->fresh(),
         ];
     }
@@ -1036,47 +1037,230 @@ class ServiceDeliveryControlSheetService extends BaseService
         $solicitados = array_values(array_unique(array_filter((array) ($data['vehicle_uuids'] ?? []))));
         $this->validarCochesSolicitados($solicitados, $porVehiculo);
 
+        // Validación de pertenencia en bloque (vehículos y conductores de la empresa activa)
+        $thirdPartyUuids = [];
+        foreach ($solicitados as $vUuid) {
+            $asignacion = $porVehiculo[$vUuid];
+            if ($asignacion->third_party_uuid) {
+                $thirdPartyUuids[] = $asignacion->third_party_uuid;
+            }
+        }
+        $thirdPartyUuids = array_values(array_unique($thirdPartyUuids));
+
+        $validVehiclesCount = Vehicle::query()
+            ->where('company_uuid', $companyUuid)
+            ->whereIn('uuid', $solicitados)
+            ->count();
+        if ($validVehiclesCount !== count($solicitados)) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'El vehículo no pertenece a la empresa o sede activa.',
+            ]);
+        }
+
+        $validThirdPartiesCount = ThirdParty::query()
+            ->where('company_uuid', $companyUuid)
+            ->whereIn('uuid', $thirdPartyUuids)
+            ->count();
+        if ($validThirdPartiesCount !== count($thirdPartyUuids)) {
+            throw ValidationException::withMessages([
+                'third_party_uuid' => 'El tercero no pertenece a la empresa o sede activa.',
+            ]);
+        }
+
         // Fechas y ruta diaria se validan UNA vez para todo el bulk, no por hoja.
         $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
         $endRaw = $data['end_date'] ?? null;
         $this->validateProjectDates($projectUuid, $startRaw, $endRaw);
 
-        $hojas = $this->transaction(function () use ($data, $companyUuid, $projectUuid, $solicitados, $porVehiculo) {
-            $creadas = [];
-            foreach ($solicitados as $vehicleUuid) {
-                $asignacion = $porVehiculo[$vehicleUuid];
+        $dailyRoute = $this->buildDailyRoute($data['daily_route'] ?? null, $data['routes'] ?? null);
 
-                // Ignora cualquier par/responsable/FUEC del cuerpo: la
-                // asignación vigente del proyecto manda (SPEC-009 decisión 5).
-                $datosHoja = $data;
-                $datosHoja['company_uuid'] = $companyUuid;
-                $datosHoja['project_uuid'] = $projectUuid;
-                $datosHoja['type_of_control_sheet'] = 'DIRECTO_CON_LA_EMPRESA';
-                $datosHoja['vehicle_uuid'] = $vehicleUuid;
-                $datosHoja['third_party_uuid'] = $asignacion->third_party_uuid;
-                $datosHoja['official_name_and_surname'] = $this->nombreDeConductor($asignacion->thirdParty);
-                $datosHoja['fuec_uuid'] = null;
-                $datosHoja['vehicle_license_plate'] = null;
-                $datosHoja['driver_name_and_surname'] = null;
-                $datosHoja['driver_license_number'] = null;
-                unset($datosHoja['vehicle_uuids']);
+        // Rutas plantilla del proyecto / petición preparadas una sola vez en memoria (SPEC-012)
+        $templateRoutes = [];
+        if (! empty($data['routes']) && is_array($data['routes'])) {
+            foreach (array_values($data['routes']) as $index => $r) {
+                if (empty($r['origin']) && empty($r['destination'])) {
+                    continue;
+                }
+                $orderIndex = isset($r['order_index']) && (int) $r['order_index'] > 0
+                    ? (int) $r['order_index']
+                    : ($index + 1);
 
-                $creadas[] = $this->persistirHoja($datosHoja, 'DIRECTO_CON_LA_EMPRESA', false);
+                $templateRoutes[] = [
+                    'order_index' => $orderIndex,
+                    'origin' => trim((string) ($r['origin'] ?? '')),
+                    'destination' => trim((string) ($r['destination'] ?? '')),
+                    'funcionario_nombre' => ! empty($r['funcionario_nombre']) ? trim((string) $r['funcionario_nombre']) : null,
+                    'funcionario_cc' => ! empty($r['funcionario_cc']) ? trim((string) $r['funcionario_cc']) : null,
+                ];
+            }
+        }
+
+        // Fechas hijas si es multi-día
+        $startDate = $startRaw ? Carbon::parse($startRaw) : null;
+        $endDate = $endRaw ? Carbon::parse($endRaw) : null;
+        $diasHijos = [];
+        if ($startDate && $endDate && $endDate->greaterThan($startDate)) {
+            $currentDate = $startDate->copy();
+            while (! $currentDate->greaterThan($endDate)) {
+                $diasHijos[] = $currentDate->toDateString();
+                $currentDate->addDay();
+            }
+        }
+
+        $sheetsToInsert = [];
+        $controlsToInsert = [];
+        $routesToInsert = [];
+        $parentUuids = [];
+        $now = now()->toDateTimeString();
+
+        foreach ($solicitados as $vehicleUuid) {
+            $asignacion = $porVehiculo[$vehicleUuid];
+            $parentUuid = (string) Str::uuid();
+            $parentUuids[] = $parentUuid;
+            $conductorNombre = $this->nombreDeConductor($asignacion->thirdParty);
+
+            // 1. Hoja padre
+            $sheetsToInsert[] = [
+                'uuid' => $parentUuid,
+                'company_uuid' => $companyUuid,
+                'project_uuid' => $projectUuid,
+                'official_name_and_surname' => $conductorNombre,
+                'service_date' => $startRaw,
+                'start_date' => $startRaw,
+                'end_date' => $endRaw,
+                'parent_uuid' => null,
+                'daily_route' => $dailyRoute,
+                'start_time' => $data['start_time'] ?? null,
+                'end_time' => $data['end_time'] ?? null,
+                'total_hours' => $data['total_hours'] ?? null,
+                'starting_kilometer' => $data['starting_kilometer'] ?? null,
+                'ending_kilometer' => $data['ending_kilometer'] ?? null,
+                'number_of_tolls' => $data['number_of_tolls'] ?? null,
+                'total_toll_value' => $data['total_toll_value'] ?? null,
+                'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+                'is_active' => $data['is_active'] ?? true,
+                'retirada_de_proyecto' => false,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            // 2. Control interno del padre (is_active = true)
+            $controlsToInsert[] = [
+                'uuid' => (string) Str::uuid(),
+                'company_uuid' => $companyUuid,
+                'vehicle_uuid' => $vehicleUuid,
+                'third_party_uuid' => $asignacion->third_party_uuid,
+                'fuec_uuid' => null,
+                'service_delivery_control_sheet_uuid' => $parentUuid,
+                'is_active' => $data['is_active'] ?? true,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            // 3. Rutas del padre
+            foreach ($templateRoutes as $tr) {
+                $routesToInsert[] = [
+                    'uuid' => (string) Str::uuid(),
+                    'service_delivery_control_sheet_uuid' => $parentUuid,
+                    'order_index' => $tr['order_index'],
+                    'origin' => $tr['origin'],
+                    'destination' => $tr['destination'],
+                    'funcionario_nombre' => $tr['funcionario_nombre'],
+                    'funcionario_cc' => $tr['funcionario_cc'],
+                    'is_active' => true,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
             }
 
-            return $creadas;
+            // 4. Hijos diarios (multi-día)
+            foreach ($diasHijos as $diaFecha) {
+                $childUuid = (string) Str::uuid();
+                $sheetsToInsert[] = [
+                    'uuid' => $childUuid,
+                    'company_uuid' => $companyUuid,
+                    'project_uuid' => $projectUuid,
+                    'official_name_and_surname' => $conductorNombre,
+                    'service_date' => $diaFecha,
+                    'start_date' => $startRaw,
+                    'end_date' => $endRaw,
+                    'parent_uuid' => $parentUuid,
+                    'daily_route' => $dailyRoute,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'total_hours' => null,
+                    'starting_kilometer' => null,
+                    'ending_kilometer' => null,
+                    'number_of_tolls' => null,
+                    'total_toll_value' => null,
+                    'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+                    'is_active' => true,
+                    'retirada_de_proyecto' => false,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+
+                $controlsToInsert[] = [
+                    'uuid' => (string) Str::uuid(),
+                    'company_uuid' => $companyUuid,
+                    'vehicle_uuid' => $vehicleUuid,
+                    'third_party_uuid' => $asignacion->third_party_uuid,
+                    'fuec_uuid' => null,
+                    'service_delivery_control_sheet_uuid' => $childUuid,
+                    'is_active' => false,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+
+                foreach ($templateRoutes as $tr) {
+                    $routesToInsert[] = [
+                        'uuid' => (string) Str::uuid(),
+                        'service_delivery_control_sheet_uuid' => $childUuid,
+                        'order_index' => $tr['order_index'],
+                        'origin' => $tr['origin'],
+                        'destination' => $tr['destination'],
+                        'funcionario_nombre' => $tr['funcionario_nombre'],
+                        'funcionario_cc' => $tr['funcionario_cc'],
+                        'is_active' => true,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+            }
+        }
+
+        // Transacción única con inserciones en bloque (SPEC-012)
+        $this->transaction(function () use ($sheetsToInsert, $controlsToInsert, $routesToInsert) {
+            foreach (array_chunk($sheetsToInsert, 200) as $chunk) {
+                DB::table('service_delivery_control_sheet')->insert($chunk);
+            }
+            foreach (array_chunk($controlsToInsert, 200) as $chunk) {
+                DB::table('service_internal_controls')->insert($chunk);
+            }
+            if (! empty($routesToInsert)) {
+                foreach (array_chunk($routesToInsert, 200) as $chunk) {
+                    DB::table('service_delivery_control_sheet_routes')->insert($chunk);
+                }
+            }
         });
 
-        // Transacción única: o se crean todas (con sus planillas diarias) o no
-        // persiste ninguna.
-        $dailySheets = ServiceDeliveryControlSheet::query()
-            ->whereIn('parent_uuid', array_column($hojas, 'uuid'))
-            ->count('uuid');
+        $hojas = ServiceDeliveryControlSheet::query()
+            ->whereIn('uuid', $parentUuids)
+            ->with([
+                'media',
+                'project:id,uuid,project_name,start_date,completion_date',
+                'routes',
+                'internalControl.vehicle:id,uuid,vehicle_license_plate',
+                'internalControl.thirdParty:id,uuid,first_name,last_name',
+            ])
+            ->get();
+
+        $dailySheets = count($sheetsToInsert) - count($parentUuids);
 
         return [
             'created' => count($hojas),
-            'daily_sheets' => (int) $dailySheets,
-            'sheets' => $hojas,
+            'daily_sheets' => $dailySheets,
+            'sheets' => $hojas->all(),
         ];
     }
 
@@ -1241,7 +1425,7 @@ class ServiceDeliveryControlSheetService extends BaseService
 
                 if (! $tieneDiasAbiertos) {
                     $hojaActualizada->update(['is_active' => false]);
-                    $hojaActualizada = $hojaActualizada->fresh(['project', 'routes', 'internalControl', 'subcontractedControl']);
+                    $hojaActualizada = $hojaActualizada->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
                 }
             }
 
@@ -1389,7 +1573,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             }
         }
 
-        return $record->fresh(['project', 'routes', 'children']);
+        return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_DETALLE);
     }
 
     /**
@@ -1529,7 +1713,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 $this->sincronizarDiasDeLaHoja($record, $data, $type);
             }
 
-            return $record->fresh(['project', 'routes', 'internalControl', 'subcontractedControl']);
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_DETALLE);
         });
     }
 
@@ -1784,7 +1968,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
 
-            return $record->fresh();
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
         });
     }
 
@@ -1883,7 +2067,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
 
-            return $record->fresh();
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
         });
     }
 
@@ -1940,7 +2124,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
 
-            return $record->fresh(['project', 'routes']);
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
         });
     }
 }
