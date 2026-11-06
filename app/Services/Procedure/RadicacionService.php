@@ -10,6 +10,7 @@ use App\Models\FleetServiceContract;
 use App\Models\Procedure;
 use App\Models\RuntTxtBatch;
 use App\Models\ServiceProvisionContract;
+use App\Models\ThirdParty;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Services\BaseService;
@@ -359,25 +360,277 @@ class RadicacionService extends BaseService
         }
     }
 
+    /**
+     * Genera el archivo TXT RUNT para radicación de Tarjeta de Operación.
+     *
+     * Formato de línea (23 campos separados por '|'):
+     *   01  municipality_dane_code       Código DANE del municipio de la empresa
+     *   02  company_name                 Razón social de la empresa
+     *   03  company_address              Dirección de la empresa
+     *   04  company_phone                Teléfono de la empresa
+     *   05  company_email                Correo electrónico de la empresa
+     *   06  legal_representative_fullname Nombre completo del representante legal
+     *   07  legal_rep_document_issue_date Fecha expedición documento rep. legal (YYYYMMDD)
+     *   08  contract_type                Tipo de contrato ('1' vinculación flotas, '2' prestación)
+     *   09  contract_start_date          Fecha inicio contrato (YYYYMMDD)
+     *   10  contract_end_date            Fecha fin contrato (YYYYMMDD)
+     *   11  vehicle_plate                Placa del vehículo
+     *   12  vehicle_class_code           Código clase vehículo (catalog RUNT)
+     *   13  action_type                  Tipo de acción: C=Creación, M=Modificación, E=Eliminación
+     *   14  owner_nit                    NIT/CC del propietario/tercero
+     *   15  owner_name                   Nombre completo del propietario/tercero
+     *   16  owner_address                Dirección del propietario/tercero
+     *   17  owner_phone                  Teléfono del propietario/tercero
+     *   18  owner_email                  Correo del propietario/tercero
+     *   19  contract_issue_date          Fecha del contrato (YYYYMMDD)
+     *   20  duration                     Duración del contrato en días
+     *   21  filler                       Fijo '0050'
+     *   22  status                       Fijo 'S' (Sí, radicado)
+     *
+     * También genera una línea cabecera (3 campos):
+     *   01  municipality_dane_code
+     *   02  current_date (YYYYMMDD)
+     *   03  company_nit (sin dígito de verificación)
+     *
+     * @return RuntTxtBatch
+     */
     public function generarTxt(Procedure $hijoTo, string $origin): RuntTxtBatch
     {
+        // Cargar todas las relaciones necesarias
+        $toHijo = Procedure::with([
+            'vehicle:id,uuid,vehicle_license_plate,vehicle_class_uuid,third_party_uuid',
+            'vehicle.vehicleClass:class_code_class,description',
+            'vehicle.owners:uuid,vehicle_uuid,third_party_uuid,owner_name,document_number',
+            'vehicle.thirdParty:id,uuid,company_name,first_name,last_name,document_number,phone,email,address,municipality_uuid',
+            'company:id,uuid,business_name,address,phone,email,document_number,legal_representative_name,legal_representative_last_name,legal_representative_document_issue_date,municipality_uuid',
+            'company.municipality:id,uuid,dane_code',
+        ])->where('uuid', $hijoTo->uuid)->firstOrFail();
+
+        $company = $toHijo->company;
+        $vehicle = $toHijo->vehicle;
+        $municipality = $company?->municipality;
+        $vehicleClass = $vehicle?->vehicleClass;
+
+        // Determinar datos del tercero/propiedad (propietario)
+        // Prioridad: FleetServiceContract.third_party_uuid → Vehicle.third_party → Vehicle.owners[0].third_party
+        $ownerThirdPartyUuid = null;
+        $contract = null;
+
         if ($origin === 'ADMIN_FLOTA') {
-            $c = FleetServiceContract::where('procedure_uuid', $hijoTo->uuid)->firstOrFail();
-            $linea = implode('|', ['TO', $origin, $c->contract_number, $c->issue_date, $c->start_date, $c->end_date, $c->contract_type, $c->type_of_action]);
+            $contract = FleetServiceContract::where('procedure_uuid', $hijoTo->uuid)
+                ->where(function ($q) use ($vehicle) {
+                    if ($vehicle?->uuid) {
+                        $q->whereNull('vehicle_uuid')->orWhere('vehicle_uuid', $vehicle->uuid);
+                    }
+                })
+                ->first();
+            $ownerThirdPartyUuid = $contract?->third_party_uuid
+                ?? $vehicle?->third_party_uuid;
         } else {
-            $c = ServiceProvisionContract::where('procedure_uuid', $hijoTo->uuid)->firstOrFail();
-            $linea = implode('|', ['TO', $origin, $c->contract_number, $c->issue_date, $c->start_date, $c->end_date, $c->coverage]);
+            $contract = ServiceProvisionContract::where('procedure_uuid', $hijoTo->uuid)
+                ->where(function ($q) use ($vehicle) {
+                    if ($vehicle?->uuid) {
+                        $q->whereNull('vehicle_uuid')->orWhere('vehicle_uuid', $vehicle->uuid);
+                    }
+                })
+                ->first();
+            // Para PRESTACION, buscar también en fleet_service_contracts del mismo procedimiento
+            if (!$contract) {
+                $contract = FleetServiceContract::where('procedure_uuid', $hijoTo->uuid)->first();
+                $ownerThirdPartyUuid = $contract?->third_party_uuid
+                    ?? $vehicle?->third_party_uuid;
+            } else {
+                $ownerThirdPartyUuid = $contract->vehicle?->third_party_uuid
+                    ?? $vehicle?->third_party_uuid;
+            }
         }
-        $seq = (RuntTxtBatch::where('procedure_uuid', $hijoTo->uuid)->where('origin', $origin)->max('sequence') ?? 0) + 1;
+
+        // Cargar terceros/owners necesarios
+        $ownerThirdParty = null;
+        if ($ownerThirdPartyUuid) {
+            $ownerThirdParty = ThirdParty::with('municipality')
+                ->where('uuid', $ownerThirdPartyUuid)->first();
+        }
+
+        // Si no hay tercero asociado, buscar en owners
+        if (!$ownerThirdParty && $vehicle) {
+            $ownerRecord = $vehicle->owners()->first();
+            if ($ownerRecord) {
+                if ($ownerRecord->third_party_uuid) {
+                    $ownerThirdParty = ThirdParty::where('uuid', $ownerRecord->third_party_uuid)->first();
+                }
+                if (!$ownerThirdParty) {
+                    $ownerThirdParty = (object) [
+                        'company_name' => null,
+                        'first_name' => null,
+                        'last_name' => null,
+                        'document_number' => $ownerRecord->document_number ?? null,
+                        'phone' => null,
+                        'email' => null,
+                        'address' => null,
+                        'municipality' => null,
+                    ];
+                    // Construir nombre desde owner_name si existe
+                    $fullName = trim((string) $ownerRecord->owner_name);
+                    if ($fullName !== '') {
+                        $ownerThirdParty = (object) array_merge(
+                            (array) $ownerThirdParty,
+                            ['company_name' => $fullName]
+                        );
+                    }
+                }
+            }
+        }
+
+        // Campo 01: Código DANE del municipio de la empresa
+        $daneCode = str_pad((string) ($municipality?->dane_code ?? ''), 5, '0', STR_PAD_LEFT);
+        // Si no tiene dane_code, usar '00000'
+        if (empty($daneCode) || $daneCode === '00000') {
+            $daneCode = '00000';
+        }
+
+        // Fecha actual formateada
+        $currentDate = now()->format('Ymd');
+
+        // NIT de la empresa sin dígito de verificación
+        $companyNit = (string) $company?->document_number;
+
+        // Línea cabecera
+        $headerLine = implode('|', [$daneCode, $currentDate, $companyNit]);
+
+        // --- Construir datos del owner/tercero ---
+        $ownerName = '';
+        if ($ownerThirdParty) {
+            $ownerName = trim((string) ($ownerThirdParty->getFullNameAttribute()
+                ?? $ownerThirdParty->company_name
+                ?? ''));
+        }
+        $ownerNit = (string) ($ownerThirdParty?->document_number ?? '');
+        $ownerAddress = (string) ($ownerThirdParty?->address ?? '');
+        $ownerPhone = (string) ($ownerThirdParty?->phone ?? '');
+        $ownerEmail = (string) ($ownerThirdParty?->email ?? '');
+
+        // Representante legal completo
+        $legalRepName = trim(
+            ((string) ($company?->legal_representative_name ?? ''))
+            .' '.
+            ((string) ($company?->legal_representative_last_name ?? ''))
+        );
+
+        // Fecha emisión documento representante legal
+        $legalRepDocIssueDate = '';
+        if ($company?->legal_representative_document_issue_date) {
+            $legalRepDocIssueDate = $company->legal_representative_document_issue_date
+                instanceof \Illuminate\Support\Carbon
+                ? $company->legal_representative_document_issue_date->format('Ymd')
+                : \Carbon\Carbon::parse($company->legal_representative_document_issue_date)->format('Ymd');
+        }
+
+        // --- Determinar tipo de contrato y acción ---
+        // Si el contrato encontrado tiene contract_type, usarlo; si no, usar cobertura del ServiceProvisionContract
+        $contractType = '';
+        $actionType = 'C';
+        $contractStartDate = '';
+        $contractEndDate = '';
+        $contractIssueDate = '';
+        $duration = '';
+
+        if ($origin === 'ADMIN_FLOTA' && $contract instanceof FleetServiceContract) {
+            $contractType = (string) ($contract->contract_type ?? '1');
+            $actionType = (string) ($contract->type_of_action ?? 'C');
+            $contractStartDate = $contract->start_date instanceof \Illuminate\Support\Carbon
+                ? $contract->start_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->start_date)->format('Ymd');
+            $contractEndDate = $contract->end_date instanceof \Illuminate\Support\Carbon
+                ? $contract->end_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->end_date)->format('Ymd');
+            $contractIssueDate = $contract->issue_date instanceof \Illuminate\Support\Carbon
+                ? $contract->issue_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->issue_date)->format('Ymd');
+            $duration = (string) ($contract->duration ?? '');
+        } elseif ($contract instanceof ServiceProvisionContract) {
+            // Prestación: contract_type viene del servicio (cobertura indica tipo)
+            $contractType = '2'; // Prestación de servicio
+            $actionType = 'C';
+            $contractStartDate = $contract->start_date instanceof \Illuminate\Support\Carbon
+                ? $contract->start_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->start_date)->format('Ymd');
+            $contractEndDate = $contract->end_date instanceof \Illuminate\Support\Carbon
+                ? $contract->end_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->end_date)->format('Ymd');
+            $contractIssueDate = $contract->issue_date instanceof \Illuminate\Support\Carbon
+                ? $contract->issue_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->issue_date)->format('Ymd');
+            $duration = (string) ($contract->duration ?? '');
+        } elseif ($contract instanceof FleetServiceContract) {
+            // Caso fallback: contrato de flota encontrado pero sin type
+            $contractType = (string) ($contract->contract_type ?? '1');
+            $actionType = (string) ($contract->type_of_action ?? 'C');
+            $contractStartDate = $contract->start_date instanceof \Illuminate\Support\Carbon
+                ? $contract->start_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->start_date)->format('Ymd');
+            $contractEndDate = $contract->end_date instanceof \Illuminate\Support\Carbon
+                ? $contract->end_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->end_date)->format('Ymd');
+            $contractIssueDate = $contract->issue_date instanceof \Illuminate\Support\Carbon
+                ? $contract->issue_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->issue_date)->format('Ymd');
+            $duration = (string) ($contract->duration ?? '');
+        }
+
+        // --- Datos del vehículo ---
+        $plate = (string) ($vehicle?->vehicle_license_plate ?? '');
+        $vehicleClassCode = (string) ($vehicleClass?->class_code_class
+            ?? $vehicleClass?->description
+            ?? '');
+
+        // --- Datos de la empresa ---
+        $companyName = (string) ($company?->business_name ?? '');
+        $companyAddress = (string) ($company?->address ?? '');
+        $companyPhone = (string) ($company?->phone ?? '');
+        $companyEmail = (string) ($company?->email ?? '');
+
+        // Construir línea de datos (23 campos)
+        $dataLine = implode('|', [
+            $daneCode,                         // 01: código DANE municipio
+            $companyName,                      // 02: razón social empresa
+            $companyAddress,                   // 03: dirección empresa
+            $companyPhone,                     // 04: teléfono empresa
+            $companyEmail,                     // 05: correo empresa
+            $legalRepName,                     // 06: nombre representante legal
+            $legalRepDocIssueDate,             // 07: fecha expedición doc. rep. legal
+            $contractType,                     // 08: tipo contrato (1=vinculación flotas, 2=prestación)
+            $contractStartDate,                // 09: fecha inicio contrato
+            $contractEndDate,                  // 10: fecha fin contrato
+            $plate,                            // 11: placa vehículo
+            $vehicleClassCode,                 // 12: código clase vehículo
+            $actionType,                       // 13: tipo acción (C/M/E)
+            $ownerNit,                         // 14: NIT/CC propietario
+            $ownerName,                        // 15: nombre propietario
+            $ownerAddress,                     // 16: dirección propietario
+            $ownerPhone,                       // 17: teléfono propietario
+            $ownerEmail,                       // 18: correo propietario
+            $contractIssueDate,                // 19: fecha contrato
+            $duration,                         // 20: duración días
+            '0050',                            // 21: código fijo
+            'S',                               // 22: estado (S = Sí radicado)
+        ]);
+
+        // Secuencia para este procedure + origin
+        $seq = (RuntTxtBatch::where('procedure_uuid', $hijoTo->uuid)
+            ->where('origin', $origin)
+            ->max('sequence') ?? 0) + 1;
+
+        $fullContent = $headerLine."\r\n".$dataLine."\r\n";
 
         return $this->transaction(fn () => RuntTxtBatch::create([
-            'company_uuid' => $hijoTo->company_uuid,
+            'company_uuid' => $toHijo->company_uuid,
             'procedure_uuid' => $hijoTo->uuid,
             'origin' => $origin,
-            'contract_uuid' => $c->uuid,
+            'contract_uuid' => $contract?->uuid ?? null,
             'sequence' => $seq,
-            'content' => $linea."\r\n",
-            'content_hash' => hash('sha256', $linea),
+            'content' => $fullContent,
+            'content_hash' => hash('sha256', $fullContent),
             'status' => 'GENERADO',
         ]));
     }
