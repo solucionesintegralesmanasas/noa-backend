@@ -206,7 +206,8 @@ class OperationCardService extends BaseService
             }
 
             try {
-                app(\App\Services\Notifications\NotificationsService::class)->syncNotifications($card->company_uuid);
+                // SPEC-014: Sincronización incremental para el vehículo de la tarjeta.
+                app(\App\Services\Notifications\NotificationsService::class)->syncForVehicle($card->vehicle_uuid);
             } catch (\Exception $e) {
                 Logger::error('Error al sincronizar notificaciones tras crear tarjeta de operación: '.$e->getMessage());
             }
@@ -285,7 +286,8 @@ class OperationCardService extends BaseService
             ]);
 
             try {
-                app(\App\Services\Notifications\NotificationsService::class)->syncNotifications($record->company_uuid);
+                // SPEC-014: Sincronización incremental para el vehículo de la tarjeta.
+                app(\App\Services\Notifications\NotificationsService::class)->syncForVehicle($record->vehicle_uuid);
             } catch (\Exception $e) {
                 Logger::error('Error al sincronizar notificaciones tras actualizar tarjeta de operación: '.$e->getMessage());
             }
@@ -325,7 +327,8 @@ class OperationCardService extends BaseService
             ]);
 
             try {
-                app(\App\Services\Notifications\NotificationsService::class)->syncNotifications($record->company_uuid);
+                // SPEC-014: Sincronización incremental para el vehículo de la tarjeta.
+                app(\App\Services\Notifications\NotificationsService::class)->syncForVehicle($record->vehicle_uuid);
             } catch (\Exception $e) {
                 Logger::error('Error al sincronizar notificaciones tras alternar estado de tarjeta de operación: '.$e->getMessage());
             }

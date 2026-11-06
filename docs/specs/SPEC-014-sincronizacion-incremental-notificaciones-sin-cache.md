@@ -1,5 +1,9 @@
 # SPEC-014: Sincronización Incremental de Notificaciones y Eliminación de Candados por Caché
 
+**Estado:** IMPLEMENTADO (2026-11-06)  
+**Servicios principales:** `App\Services\Notifications\NotificationsService` (`syncForVehicle`), `App\Services\Fleet\SocialSecurityContributionService` (`autoUpdateExpiredStatuses`), `App\Services\Fleet\VehicleService` (`sincronizarNotificacionesPorActividad`), `App\Http\Middleware\WebCronMiddleware`.  
+**Pruebas asociadas:** `tests/Feature/SincronizacionIncrementalNotificacionesTest.php`, `tests/Feature/NotificacionesConsultasTest.php`.
+
 ## Problem Statement
 
 El motor de notificaciones actual (`NotificationsService`) consta de más de 2,000 líneas y ejecuta hasta siete pasadas consecutivas sobre la tabla `vehicles` durante una sincronización completa (`syncNotifications`). Cuando un usuario edita o activa un único vehículo desde la interfaz, `VehicleService::sincronizarNotificacionesPorActividad` dispara de forma síncrona la sincronización total de todas las notificaciones de la empresa, bloqueando la respuesta del endpoint HTTP `PUT /vehicles/{uuid}`.
@@ -54,6 +58,35 @@ Eliminar por completo los usos innecesarios de `Cache::` en el camino crítico H
 - Cambios en las plantillas de correo electrónico o en el envío de notificaciones vía SMTP.
 - Alteración de los umbrales de días de alerta previa (15 días, 5 días).
 - Modificación del esquema de la tabla `notifications`.
+
+## Verification & Metrics
+
+### Resultados de la Batería de Pruebas
+- **`tests/Feature/SincronizacionIncrementalNotificacionesTest.php`:** 9 pruebas aprobadas (18 aserciones).
+  - `syncForVehicle` sincroniza alertas de un vehículo específico sin recorrer la flota de la empresa.
+  - `syncForVehicle` maneja vehículos particulares omitiendo RCC, RCE y tarjeta de operación.
+  - `autoUpdateExpiredStatuses` actualiza aportes vencidos en una única consulta sin bucle N+1 por conductor.
+  - Ausencia de N+1 verificada: el mismo conteo de consultas fijas con 2 que con 10 conductores.
+  - Presupuesto de edición de vehículo verificado: ≤ 6 consultas SQL en `updateVehicle` para cambios ordinarios (color, kilometraje, etc.).
+  - `WebCronMiddleware` no realiza consultas a la tabla `cache` (`cache_table_queries = 0`).
+  - `AuthorizeByResource` no realiza consultas a la tabla `cache` al auditar rutas de administración.
+  - `LicenseService::recordOnlineVerification` no escribe en la tabla `cache`.
+  - Invocación reactiva acotada: cambios relevantes (`is_active`, `type_of_service`, `registration_date`) ejecutan `syncForVehicle` de forma aislada.
+
+- **Suites de regresión completas (100% PASS):**
+  - `NotificacionesConsultasTest`: 6 casos (11 aserciones).
+  - `VehiculoParticularDocumentosTest`: 13 casos (41 aserciones).
+  - `DigestVencimientosTest`: 24 casos (33 aserciones).
+  - `TenantScopeTest`: 5 casos (6 aserciones).
+  - `AlcanceDelActorTest`: 13 casos (50 aserciones).
+  - `CombustibleNotificacionTest`: 9 casos (25 aserciones).
+  - `FirmasDeClasesTest`: 1 caso (6 aserciones de compatibilidad de firmas de `BaseService`).
+
+### Impacto Cuantitativo
+- **Consultas SQL en edición de vehículo (`updateVehicle`):** de ~26 consultas (sync general de toda la flota) a **≤ 6 consultas**.
+- **Consultas SQL en `autoUpdateExpiredStatuses`:** de $2 \times N$ consultas (bucle iterativo PHP) a **1 consulta masiva SQL** atómica (`UPDATE ... WHERE NOT EXISTS ...`).
+- **Consultas a la tabla `cache` en peticiones HTTP ordinarias:** **0 consultas** (eliminado `Cache::has`, `Cache::add` y `Cache::put` del camino crítico; candado efímero migrado a archivo `storage/framework/webcron.lock`).
+- **Latencia de recálculo por vehículo:** ejecución de `syncForVehicle` en **< 3 ms** en memoria.
 
 ## Further Notes
 

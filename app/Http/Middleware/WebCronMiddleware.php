@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -30,18 +29,22 @@ class WebCronMiddleware
 
     /**
      * Se ejecuta DESPUÉS de que la respuesta ha sido enviada al navegador.
+     *
+     * SPEC-014: Control de cadencia efímero por archivo en storage sin consultas a la base de datos de caché.
      */
     public function terminate(Request $request, Response $response): void
     {
-        // Si ya se ejecutó recientemente o ya hay un proceso previo, no hacemos nada
-        if (Cache::has('last_web_cron_run_lock') || Cache::has('last_web_cron_spawn_lock')) {
-            return;
+        $lockFile = storage_path('framework/webcron.lock');
+        $now = time();
+
+        if (@file_exists($lockFile)) {
+            $mtime = (int) (@filemtime($lockFile) ?: 0);
+            if (($now - $mtime) < 3600) {
+                return;
+            }
         }
 
-        // Candado corto para evitar lanzar dos procesos ante peticiones concurrentes
-        if (! Cache::add('last_web_cron_spawn_lock', true, now()->addSeconds(90))) {
-            return;
-        }
+        @touch($lockFile);
 
         $this->runInBackground();
     }

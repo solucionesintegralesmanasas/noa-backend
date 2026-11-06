@@ -13,6 +13,7 @@ use App\Models\VehicleDocument;
 use App\Services\BaseService;
 use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -52,13 +53,13 @@ class VehicleService extends BaseService
         // en la paginación (la sede es hasOneThrough y puede tener varias asignaciones).
         $this->sortableFields = [
             'vehicle_license_plate' => 'vehicles.vehicle_license_plate',
-            'vehicle_class.description' => fn (Builder $query, string $direction) => $query->orderBy(
+            'vehicle_class.description' => fn(Builder $query, string $direction) => $query->orderBy(
                 DB::table('vehicle_class')
                     ->select('vehicle_class.description')
                     ->whereColumn('vehicle_class.uuid', 'vehicles.vehicle_class_uuid'),
                 $direction
             ),
-            'brand.description' => fn (Builder $query, string $direction) => $query->orderBy(
+            'brand.description' => fn(Builder $query, string $direction) => $query->orderBy(
                 DB::table('brands')
                     ->select('brands.description')
                     ->whereColumn('brands.uuid', 'vehicles.brand_uuid'),
@@ -66,7 +67,7 @@ class VehicleService extends BaseService
             ),
             'line' => 'vehicles.line',
             'model' => 'vehicles.model',
-            'branch.name' => fn (Builder $query, string $direction) => $query->orderBy(
+            'branch.name' => fn(Builder $query, string $direction) => $query->orderBy(
                 DB::table('branches')
                     ->join('vehicles_branches', 'vehicles_branches.branch_uuid', '=', 'branches.uuid')
                     ->select('branches.name')
@@ -390,6 +391,10 @@ class VehicleService extends BaseService
             }
 
             $estabaActivo = (bool) $record->is_active;
+            $tipoServicioAnterior = $record->type_of_service;
+            $fechaMatriculaAnterior = $record->registration_date;
+            $thirdPartyAnterior = $record->third_party_uuid;
+            $placaAnterior = $record->vehicle_license_plate;
 
             $record->update([
                 'third_party_uuid' => array_key_exists('third_party_uuid', $data) ? $data['third_party_uuid'] : $record->third_party_uuid,
@@ -498,7 +503,21 @@ class VehicleService extends BaseService
                 }
             }
 
-            if ($estabaActivo !== (bool) $record->is_active) {
+            // SPEC-014: Sincronización incremental cuando cambia la actividad o datos que afectan alertas (placa, afiliado, tipo de servicio, fecha matrícula)
+            $fechaMatAnteriorNorm = $fechaMatriculaAnterior
+                ? Carbon::parse($fechaMatriculaAnterior)->toDateString()
+                : null;
+            $fechaMatNuevaNorm = array_key_exists('registration_date', $data) && $data['registration_date']
+                ? Carbon::parse($data['registration_date'])->toDateString()
+                : (array_key_exists('registration_date', $data) ? null : $fechaMatAnteriorNorm);
+
+            $cambioRelevante = $estabaActivo !== (bool) $record->is_active
+                || (array_key_exists('type_of_service', $data) && $data['type_of_service'] !== $tipoServicioAnterior)
+                || ($fechaMatNuevaNorm !== $fechaMatAnteriorNorm)
+                || (array_key_exists('third_party_uuid', $data) && $data['third_party_uuid'] !== $thirdPartyAnterior)
+                || (array_key_exists('vehicle_license_plate', $data) && $data['vehicle_license_plate'] !== $placaAnterior);
+
+            if ($cambioRelevante) {
                 $this->sincronizarNotificacionesPorActividad($record);
             }
 
@@ -553,8 +572,8 @@ class VehicleService extends BaseService
 
     /**
      * Mantiene las notificaciones coherentes con la actividad del vehículo:
-     * inactivo → se limpian sus alertas; activo → se re-sincronizan las de la empresa.
-     * Compartido por toggleVehicleStatus() y updateVehicle() (cambio de is_active desde el formulario).
+     * inactivo → se limpian sus alertas; activo → sincronización incremental de este vehículo (SPEC-014).
+     * Compartido por toggleVehicleStatus() y updateVehicle().
      */
     protected function sincronizarNotificacionesPorActividad(Vehicle $record): void
     {
@@ -565,9 +584,9 @@ class VehicleService extends BaseService
         }
 
         try {
-            app(NotificationsService::class)->syncNotifications($record->company_uuid);
+            app(NotificationsService::class)->syncForVehicle($record);
         } catch (\Throwable $e) {
-            Logger::warning('No se pudieron re-sincronizar notificaciones al activar vehículo: '.$e->getMessage());
+            Logger::warning('No se pudieron sincronizar notificaciones al activar/modificar vehículo: ' . $e->getMessage());
         }
     }
 
@@ -866,9 +885,9 @@ class VehicleService extends BaseService
 
         // Resolución del nombre del propietario (persona natural, jurídica o dueño registrado)
         if ($thirdParty && ($thirdParty->first_name || $thirdParty->last_name)) {
-            $ownerName = trim(($thirdParty->first_name ?? '').' '.($thirdParty->last_name ?? ''));
+            $ownerName = trim(($thirdParty->first_name ?? '') . ' ' . ($thirdParty->last_name ?? ''));
         } elseif ($thirdParty && ($thirdParty->company_name || $thirdParty->trade_name)) {
-            $ownerName = trim(($thirdParty->company_name ?? '').' '.($thirdParty->trade_name ?? ''));
+            $ownerName = trim(($thirdParty->company_name ?? '') . ' ' . ($thirdParty->trade_name ?? ''));
         } elseif ($owner && $owner->owner_name) {
             $ownerName = $owner->owner_name;
         } else {
@@ -879,13 +898,13 @@ class VehicleService extends BaseService
         $ownerDoc = '';
         if ($thirdParty && $thirdParty->document_number) {
             $ownerDoc = ($thirdParty->type_of_document && $thirdParty->type_of_document->prefix
-                ? $thirdParty->type_of_document->prefix.' '
-                : '').$thirdParty->document_number;
+                ? $thirdParty->type_of_document->prefix . ' '
+                : '') . $thirdParty->document_number;
         } elseif ($owner && $owner->document_number) {
             $ownerDoc = ($owner->documentType && $owner->documentType->prefix
-                ? $owner->documentType->prefix.' '
-                : '').$owner->document_number
-                .($owner->verification_digit ? '-'.$owner->verification_digit : '');
+                ? $owner->documentType->prefix . ' '
+                : '') . $owner->document_number
+                . ($owner->verification_digit ? '-' . $owner->verification_digit : '');
         }
 
         // Resolución del número de tecnomecánica (RTM) vigente del vehículo.
@@ -917,7 +936,7 @@ class VehicleService extends BaseService
                 'licencia' => $record->transit_license_number ?? '',
                 'clase_servicio' => $record->type_of_service ?? '',
                 'cilindraje' => $record->engine_displacement
-                    ? $record->engine_displacement.' cc'
+                    ? $record->engine_displacement . ' cc'
                     : '',
                 'motor' => $record->engine_number ?? '',
                 'tecno' => $tecno,

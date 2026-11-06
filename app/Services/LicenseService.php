@@ -6,13 +6,10 @@ use App\Models\License;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Cache;
 
 class LicenseService
 {
     protected $secretKey;
-
-    protected $cacheTtl = 3600; // 1 hora en caché
 
     public function __construct()
     {
@@ -144,7 +141,6 @@ class LicenseService
                 'expires_at' => $decoded['expires_at'],
                 'permissions' => $decoded['permissions'] ?? [],
             ];
-
         } catch (Exception $e) {
             // Cualquier error = licencia inválida
             return null;
@@ -207,15 +203,14 @@ class LicenseService
     }
 
     /**
-     * Registrar verificación online en BD y caché.
+     * Registrar verificación online en BD.
+     *
+     * SPEC-014: Sin escrituras muertas en caché.
      */
     public function recordOnlineVerification(string $licenseKey, string $companyUuid): void
     {
         License::where('license_key', $licenseKey)
             ->increment('online_verifications');
-
-        // También actualizar caché para lecturas rápidas
-        Cache::put("license_{$licenseKey}_online", now()->toDateTimeString(), $this->cacheTtl);
     }
 
     /**
