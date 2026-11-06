@@ -933,7 +933,7 @@ class FuecService extends BaseService
             $contract = DB::table('contractors')->where('uuid', $contractorUuid)->first();
             if ($contract) {
                 $assignedContractNumber = (int) $contract->contract_number;
-                $extractConsecutive = $this->resolverSiguienteConsecutivoExtracto($contract->id, $contract->uuid);
+                $extractConsecutive = $this->resolverSiguienteConsecutivoExtracto((int) $contract->id, $contract->uuid);
             }
         } elseif ($contractNumber) {
             $assignedContractNumber = (int) $contractNumber;
