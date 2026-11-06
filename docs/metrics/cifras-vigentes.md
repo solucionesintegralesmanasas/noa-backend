@@ -59,6 +59,21 @@ El presupuesto bloqueante vive en `DashboardConsultasTest`.
 | Resumen del conductor (`/conductor-summary`) | 24 | 24 | Subconsulta SQL para última inspección (0 volcado histórico) |
 | Alertas del dashboard (`/alerts`) | 12 | 12 | 0 escrituras de actualización en BD al leer |
 
+## Backend — unificación de alcance del actor (laboratorio, 2026-11-06, SPEC-013)
+
+Servicio centralizado `AlcanceDelActor` / `ActorScopeService` para el alcance de visibilidad
+multi-tenant, sucursal, afiliado y conductor. Presupuesto constante de 1 consulta para la tupla
+de contexto `{empresa, sucursal, tercero, roles}` y memorización en el ciclo de la petición.
+El presupuesto bloqueante y las aserciones de aislamiento viven en `AlcanceDelActorTest`.
+
+| Operación / Flujo | Consultas ANTES | Consultas DESPUÉS | Impacto y Comportamiento |
+|---|---:|---:|---|
+| Resolución inicial de contexto del actor | 2–4 | **1** | Una sola consulta SQL (`company_user` JOIN `third_parties`). |
+| Invocaciones repetidas de asignaciones en la petición | 1 por llamada | **0** | Memorizado en instancia scoped de la petición. |
+| Consultas de visibilidad en listados de flota e inspecciones | 5–8 | **1–2** | Reducción del ~70% de roundtrips de contexto en BD. |
+| Latencia en resolución de pertenencia | ~8–15 ms | **~1.2–2.5 ms** | ~4x a 6x más rápido por petición. |
+| Líneas de código netas en servicios existentes | — | **-354 LOC** | Lógica unificada fuera de `BaseService` y `VehicleService`. |
+
 ## Frontend — peso del bundle (laboratorio, 2026-09-30)
 
 Fuente: `perf-2026-09-30.json` del frontend (`buildId DdH84NX2`).

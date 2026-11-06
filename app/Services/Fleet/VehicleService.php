@@ -127,36 +127,11 @@ class VehicleService extends BaseService
             'branch:branches.uuid,branches.name',
         ]);
 
-        // SPEC-005: si la persona es AFILIADO el aislamiento prima aunque también sea CONDUCTOR;
-        // la rama del conductor (asignaciones) aplica solo al conductor puro.
-        // Empresa efectiva: parámetro > cabecera de contexto (SetCompanyContext) > primera empresa del usuario.
-        $user = Auth::user();
-        $esAfiliado = $user && method_exists($user, 'hasRole') && $user->hasRole('AFILIADO');
-        $esConductor = $user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
+        // SPEC-013: Delegación en AlcanceDelActor para unificación de reglas y scopes
+        $actorScope = app(\App\Services\ActorScope\AlcanceDelActor::class);
+        $actorScope->aplicarAVehiculos($query, $companyUuid);
 
-        $companyEfectiva = $companyUuid
-            ?? request()->attributes->get('current_company_uuid')
-            ?? ($user ? $user->companies()->first()?->uuid : null);
-        if ($companyEfectiva && $esAfiliado) {
-            // SPEC-005: para el AFILIADO (puro o combinado) el aislamiento estricto de BaseService
-            // (applyCompanyFilter -> aplicarFiltroAfiliado) es el que manda.
-            $this->applyCompanyFilter($query, $companyEfectiva);
-        } elseif ($companyEfectiva) {
-            // Admin y conductor puro: solo el filtro de empresa. El aislamiento estricto de BaseService
-            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar la regla del listado.
-            $query->where('vehicles.company_uuid', $companyEfectiva);
-        }
-
-        if ($esConductor && ! $esAfiliado) {
-            // Regla estricta (decisión 2026-10-20): el conductor ve SOLO los vehículos asignados
-            // a él (proyectos y FUEC); sin asignaciones ve la lista vacía, no la flota de la empresa.
-            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
-                ?? $user->companies()->first()?->pivot?->third_party_uuid
-                ?? $user->third_party_uuid;
-
-            $allowedUuids = $driverThirdPartyUuid ? $this->getVehicleUuidsForConductor($driverThirdPartyUuid) : [];
-            $query->whereIn('uuid', $allowedUuids); // vacío -> `0=1` -> lista vacía
-        } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
+        if ($thirdPartyUuid && ! $actorScope->esAfiliado() && ! $actorScope->esConductor()) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -218,40 +193,11 @@ class VehicleService extends BaseService
     {
         $query = $this->query();
 
-        if (! $companyUuid) {
-            $companyUuid = request()->attributes->get('current_company_uuid');
-        }
+        // SPEC-013: Delegación en AlcanceDelActor para unificación de reglas y scopes
+        $actorScope = app(\App\Services\ActorScope\AlcanceDelActor::class);
+        $actorScope->aplicarAVehiculos($query, $companyUuid);
 
-        $user = Auth::user();
-
-        // SPEC-005: si la persona es AFILIADO el aislamiento prima aunque también sea CONDUCTOR;
-        // la rama del conductor (asignaciones) aplica solo al conductor puro.
-        $esAfiliado = $user && method_exists($user, 'hasRole') && $user->hasRole('AFILIADO');
-        $esConductor = $user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
-
-        // Fallback de empresa si no viene especificada pero el usuario pertenece a una,
-        $companyEfectiva = $companyUuid ?? ($user ? $user->companies()->first()?->uuid : null);
-        if ($companyEfectiva && $esAfiliado) {
-            // SPEC-005: para el AFILIADO (puro o combinado) el aislamiento estricto de BaseService
-            // (applyCompanyFilter -> aplicarFiltroAfiliado) es el que manda.
-            $this->applyCompanyFilter($query, $companyEfectiva);
-        } elseif ($companyEfectiva) {
-            // Admin y conductor puro: solo el filtro de empresa. El aislamiento estricto de BaseService
-            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar el diseño
-            // "sin asignaciones ve la flota de su empresa" de la rama de abajo.
-            $query->where('vehicles.company_uuid', $companyEfectiva);
-        }
-
-        if ($esConductor && ! $esAfiliado) {
-            // Regla estricta (decisión 2026-10-20): el conductor ve SOLO los vehículos asignados
-            // a él (proyectos y FUEC); sin asignaciones ve la lista vacía, no la flota de la empresa.
-            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
-                ?? $user->companies()->first()?->pivot?->third_party_uuid
-                ?? $user->third_party_uuid;
-
-            $allowedUuids = $driverThirdPartyUuid ? $this->getVehicleUuidsForConductor($driverThirdPartyUuid) : [];
-            $query->whereIn('uuid', $allowedUuids); // vacío -> `0=1` -> lista vacía
-        } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
+        if ($thirdPartyUuid && ! $actorScope->esAfiliado() && ! $actorScope->esConductor()) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {

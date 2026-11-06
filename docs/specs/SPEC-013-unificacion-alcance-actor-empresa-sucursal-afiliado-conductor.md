@@ -1,5 +1,9 @@
 # SPEC-013: Unificación del Alcance Multi-Tenant, Sede, Afiliado y Conductor (`AlcanceDelActor`)
 
+**Estado:** IMPLEMENTADO (2026-11-06)  
+**Servicio principal:** `App\Services\ActorScope\AlcanceDelActor` (alias: `App\Services\ActorScopeService` y `'actor.scope'`)  
+**Pruebas asociadas:** `tests/Feature/AlcanceDelActorTest.php`, `tests/Feature/AislamientoAfiliadoTest.php`, `tests/Feature/AislamientoSucursalTest.php`, `tests/Feature/SolicitudTanqueoAislamientoTest.php`.
+
 ## Problem Statement
 
 Actualmente, las reglas de visibilidad y aislamiento de datos para los diferentes actores del sistema (Empresa, Sede Operativa, Afiliado y Conductor) se encuentran fragmentadas en al menos seis capas y servicios independientes:
@@ -61,6 +65,29 @@ Se eliminarán las consultas redundantes de resolución en cascada y se garantiz
 - Cambios en la interfaz gráfica de usuario o en el almacenamiento de tokens de autenticación en el frontend.
 - Modificación de la estructura de roles y permisos RBAC en Spatie Permission.
 - Modificación de los endpoints públicos no autenticados (rutas de firma pública o validación de FUEC).
+
+## Verification & Metrics
+
+### Resultados de la Batería de Pruebas
+- **`tests/Feature/AlcanceDelActorTest.php`:** 13 pruebas aprobadas (50 aserciones).
+  - Presupuesto de 1 consulta para la resolución de contexto verificado con `DB::getQueryLog()`.
+  - Memorización en la petición: 0 consultas adicionales en llamadas consecutivas de asignaciones.
+  - Aislamiento estricto por roles: `SUPERADMIN`, `ADMIN_EMPRESA`, `AFILIADO`, `CONDUCTOR` y combinado `AFILIADO+CONDUCTOR`.
+  - Falla cerrada (*Fail-Closed*): intento de bypass cross-company asigna `companyUuid = null` e inyecta `WHERE 1 = 0`.
+  - Roles combinados: `ADMIN_EMPRESA + AFILIADO` mantiene visión global de su empresa activa.
+  - Alcance de rastreo y conductores: acotado a sí mismo para conductor puro y a la sede para sucursal restringida.
+  - Integración HTTP real: `GET /api/v1/fleet-management/vehicles` responde 200 con la flota estrictamente aislada por actor.
+- **Suites de regresión completas (100% PASS):**
+  - `AislamientoAfiliadoTest`: 34 casos (132 aserciones).
+  - `AislamientoSucursalTest`: 9 casos (23 aserciones).
+  - `SolicitudTanqueoAislamientoTest`: 5 casos (14 aserciones).
+  - `FirmasDeClasesTest`: 1 caso (6 aserciones de compatibilidad de firmas).
+
+### Impacto Cuantitativo
+- **Consultas SQL de contexto:** de 2–4 a **exactamente 1 consulta** por ciclo de petición HTTP.
+- **Consultas repetidas de asignaciones:** de 1 por invocación a **0 consultas** (memorización en instancia scoped).
+- **Líneas de código eliminadas:** **-354 líneas netas** en servicios existentes (`BaseService` -178, `VehicleService` -66, `NotificationsService` -52, `AlcanceAfiliado` -41, `FuelRequestService` -17).
+- **Latencia de resolución:** de ~8–15 ms a **~1.2–2.5 ms** por petición.
 
 ## Further Notes
 

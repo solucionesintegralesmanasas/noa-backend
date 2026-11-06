@@ -996,59 +996,13 @@ class NotificationsService extends BaseService
 
     /**
      * Aplica el filtro de empresa y aísla las notificaciones por afiliado/conductor basándose en las entidades.
+     *
+     * SPEC-013: Delegación en AlcanceDelActor para unificación de visibilidad y memoria de asignaciones.
      */
     protected function applyCompanyFilter(Builder $query, string $companyUuid): void
     {
-        parent::applyCompanyFilter($query, $companyUuid);
-
-        $user = Auth::user();
-        if ($user && ($user->hasRole('AFILIADO') || $user->hasRole('CONDUCTOR'))) {
-            $thirdPartyUuid = request()->attributes->get('current_third_party_uuid');
-            if ($thirdPartyUuid) {
-                $query->where(function ($q) use ($thirdPartyUuid) {
-                    // 1. Vehículos
-                    $q->orWhere(function ($sub) use ($thirdPartyUuid) {
-                        $sub->where('entity_type', '=', Vehicle::class, 'and')
-                            ->whereIn('entity_uuid', Vehicle::where('third_party_uuid', '=', $thirdPartyUuid, 'and')->select('uuid'), 'and', false);
-                    })
-                    // 2. Documentos de Vehículo
-                        ->orWhere(function ($sub) use ($thirdPartyUuid) {
-                            $sub->where('entity_type', '=', VehicleDocument::class, 'and')
-                                ->whereIn('entity_uuid', VehicleDocument::whereHas('vehicle', function ($vq) use ($thirdPartyUuid) {
-                                    $vq->where('third_party_uuid', '=', $thirdPartyUuid, 'and');
-                                })->select('uuid'), 'and', false);
-                        })
-                    // 3. Tarjetas de Operación
-                        ->orWhere(function ($sub) use ($thirdPartyUuid) {
-                            $sub->where('entity_type', '=', OperationCard::class, 'and')
-                                ->whereIn('entity_uuid', OperationCard::whereHas('vehicle', function ($vq) use ($thirdPartyUuid) {
-                                    $vq->where('third_party_uuid', '=', $thirdPartyUuid, 'and');
-                                })->select('uuid'), 'and', false);
-                        })
-                    // 4. Licencias de Conducción
-                        ->orWhere(function ($sub) use ($thirdPartyUuid) {
-                            $sub->where('entity_type', '=', DriverLicense::class, 'and')
-                                ->whereIn('entity_uuid', DriverLicense::where('third_party_uuid', '=', $thirdPartyUuid, 'and')->select('uuid'), 'and', false);
-                        })
-                    // 5. Convenios
-                        ->orWhere(function ($sub) use ($thirdPartyUuid) {
-                            $sub->where('entity_type', '=', BusinessCollaborationAgreement::class, 'and')
-                                ->whereIn('entity_uuid', BusinessCollaborationAgreement::whereHas('vehicle', function ($vq) use ($thirdPartyUuid) {
-                                    $vq->where('third_party_uuid', '=', $thirdPartyUuid, 'and');
-                                })->select('uuid'), 'and', false);
-                        })
-                    // 6. Cobros
-                        ->orWhere(function ($sub) use ($thirdPartyUuid) {
-                            $sub->where('entity_type', '=', AffiliateAdminCharge::class, 'and')
-                                ->whereIn('entity_uuid', AffiliateAdminCharge::whereHas('vehicle', function ($vq) use ($thirdPartyUuid) {
-                                    $vq->where('third_party_uuid', '=', $thirdPartyUuid, 'and');
-                                })->select('uuid'), 'and', false);
-                        });
-                });
-            } else {
-                $query->whereRaw('1 = 0');
-            }
-        }
+        app(\App\Services\ActorScope\AlcanceDelActor::class)
+            ->aplicarANotificaciones($query, $companyUuid);
     }
 
     // =========================================================================
