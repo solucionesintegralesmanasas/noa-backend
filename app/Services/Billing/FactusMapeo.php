@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Billing;
 
+use App\Models\PaymentMethod;
 use App\Models\ThirdParty;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
@@ -19,8 +20,11 @@ use Illuminate\Support\Str;
  *
  * Los códigos de catálogo DIAN usan valores por defecto y se sobreescriben por
  * empresa con `billing_providers.settings` (claves: numbering_range_id,
- * operation_type, payment_method_code, unit_measure_code, standard_code,
- * tax_code, municipality_code, type_document_ids, customer.*).
+ * numbering_ranges.{bills|credit_notes|debit_notes}, operation_type,
+ * payment_method_code, unit_measure_code, standard_code, tax_code,
+ * municipality_code, type_document_ids, customer.*, send_self_withholdings).
+ *
+ * Referencia: https://developers.factus.com.co (API v2).
  */
 class FactusMapeo
 {
@@ -38,14 +42,22 @@ class FactusMapeo
         'REGISTRO_CIVIL' => '11',
     ];
 
-    /** Códigos de retención (autorretención) de Factus. */
+    /**
+     * Códigos de autorretención aceptados por Factus v2 (tabla "Códigos de
+     * retenciones"): solo 05 (ReteIVA) y 06 (ReteRenta). ReteICA no existe.
+     */
     private const RETENCIONES = [
         'RENTA' => '06',
         'RENTA_FUENTE' => '06',
         'RETEFUENTE' => '06',
         'IVA' => '05',
-        'ICA' => '07',
+        'RETEIVA' => '05',
     ];
+
+    /** customization_id por defecto de cada nota (20 crédito, 30 débito). */
+    public const NOTA_CREDITO = '20';
+
+    public const NOTA_DEBITO = '30';
 
     public function __construct(
         /** Overrides por empresa leídos de billing_providers.settings. */
@@ -58,7 +70,7 @@ class FactusMapeo
     }
 
     /** Punto de entrada de una factura de venta de servicios. */
-    public function factura(Model $factura): array
+    public function factura(Model $factura, ?int $rango = null): array
     {
         $factura->loadMissing('items', 'items.withholdings', 'customer', 'customer.municipality');
 
@@ -71,33 +83,41 @@ class FactusMapeo
             'items' => $this->lineas($factura->items),
         ];
 
-        $this->adjuntarRango($payload);
+        $this->adjuntarRango($payload, $rango);
         $this->adjuntarObservacion($payload, $factura->notes);
 
         return $payload;
     }
 
-    /** Notas crédito y débito (misma estructura salvo el endpoint). */
-    public function nota(Model $nota, string $customizationId = '20'): array
+    /** Notas crédito (customization_id 20) y débito (30) con referencia a factura. */
+    public function nota(Model $nota, string $customizationId = self::NOTA_CREDITO, ?int $rango = null): array
     {
         $nota->loadMissing('items', 'items.withholdings', 'invoice.customer', 'invoice.customer.municipality');
 
         $factura = $nota->invoice;
+        if (! $factura) {
+            throw new \RuntimeException('La nota no está asociada a una factura.');
+        }
+
+        // Factus exige el número que ÉL asignó a la factura (p. ej. SETP990000550).
+        $numeroFactura = (string) ($factura->provider_document_id ?: $factura->invoice_number);
+
+        $concepto = trim((string) ($nota->correction_concept_code ?? ''));
+        if ($concepto === '') {
+            throw new \RuntimeException('La nota no tiene concepto de corrección (correction_concept_code), obligatorio para Factus.');
+        }
 
         $payload = [
             'reference_code' => $this->referencia((string) $nota->note_number, (string) $nota->uuid),
+            'correction_concept_code' => $concepto,
             'customization_id' => $customizationId,
-            'bill_number' => (string) $factura->invoice_number,
+            'bill_number' => $numeroFactura,
             'payment_details' => [$this->detallePago($nota)],
             'customer' => $this->cliente($factura->customer),
             'items' => $this->lineas($nota->items),
         ];
 
-        if ($nota->correction_concept_code !== null && $nota->correction_concept_code !== '') {
-            $payload['correction_concept_code'] = (string) $nota->correction_concept_code;
-        }
-
-        $this->adjuntarRango($payload);
+        $this->adjuntarRango($payload, $rango);
         $this->adjuntarObservacion($payload, $nota->observation);
 
         return $payload;
@@ -173,11 +193,10 @@ class FactusMapeo
 
     // ─── apoyo ────────────────────────────────────────────────────────────
 
-    private function adjuntarRango(array &$payload): void
+    private function adjuntarRango(array &$payload, ?int $rango): void
     {
-        $rango = Arr::get($this->ajustes, 'numbering_range_id');
-        if ($rango !== null && $rango !== '') {
-            $payload['numbering_range_id'] = (int) $rango;
+        if ($rango !== null && $rango > 0) {
+            $payload['numbering_range_id'] = $rango;
         }
     }
 
@@ -201,7 +220,7 @@ class FactusMapeo
 
         $detalle = [
             'payment_form' => $credito ? '2' : '1',
-            'payment_method_code' => (string) $this->valor('payment_method_code', '10'),
+            'payment_method_code' => $this->codigoMedioPago($documento),
             'amount' => $this->dinero($this->totalPagar($documento)),
         ];
 
@@ -212,9 +231,34 @@ class FactusMapeo
         return $detalle;
     }
 
+    /** Medio de pago elegido en el documento (dian_code); si no, el de la empresa. */
+    private function codigoMedioPago(Model $documento): string
+    {
+        $uuid = $documento->payment_method_uuid ?? null;
+        if (is_string($uuid) && $uuid !== '') {
+            $codigo = PaymentMethod::where('uuid', $uuid)->value('dian_code');
+            if (is_string($codigo) && $codigo !== '') {
+                return $codigo;
+            }
+        }
+
+        return (string) $this->valor('payment_method_code', '10');
+    }
+
+    /**
+     * Monto del medio de pago = total que calcula Factus: base neta + impuestos.
+     * Las retenciones que practica el cliente NO restan del total del documento
+     * electrónico (Factus valida que la suma de payment_details cuadre).
+     */
     private function totalPagar(Model $documento): float
     {
-        return (float) ($documento->invoice_total ?? $documento->total ?? 0);
+        if ($documento->subtotal !== null) {
+            return round((float) $documento->subtotal + (float) ($documento->total_tax ?? 0), 2);
+        }
+
+        $total = (float) ($documento->invoice_total ?? $documento->total ?? 0);
+
+        return round($total + (float) ($documento->total_withholding ?? 0), 2);
     }
 
     private function adjuntarDescuento(array &$linea, mixed $item, float $cantidad, float $precio): void
@@ -232,12 +276,18 @@ class FactusMapeo
         }
     }
 
+    /**
+     * `items.*.taxes` es obligatorio en Factus v2: con tarifa > 0 se envía el
+     * IVA (código 01) y, sin tarifa, el servicio va como excluido
+     * (`is_excluded: true`), caso del transporte terrestre (art. 476 E.T.).
+     */
     private function adjuntarImpuestos(array &$linea, mixed $item): void
     {
-        $impuesto = (float) ($item->tax_amount ?? 0);
         $tarifa = (float) ($item->tax_rate ?? 0);
 
-        if ($impuesto <= 0) {
+        if ($tarifa <= 0) {
+            $linea['taxes'] = [['is_excluded' => true]];
+
             return;
         }
 
@@ -247,8 +297,18 @@ class FactusMapeo
         ]];
     }
 
+    /**
+     * `withholding_taxes` en Factus son AUTORRETENCIONES (las que el emisor se
+     * practica a sí mismo), no las retenciones que aplica el cliente. Solo se
+     * envían si la empresa es autorretenedora (`send_self_withholdings`) y con
+     * los códigos que acepta Factus (05/06).
+     */
     private function adjuntarRetenciones(array &$linea, mixed $item): void
     {
+        if (! filter_var(Arr::get($this->ajustes, 'send_self_withholdings', false), FILTER_VALIDATE_BOOLEAN)) {
+            return;
+        }
+
         $withholdings = $item->relationLoaded('withholdings') ? $item->withholdings : null;
         if (! $withholdings || $withholdings->isEmpty()) {
             return;
@@ -257,8 +317,12 @@ class FactusMapeo
         $retenciones = [];
         foreach ($withholdings as $retencion) {
             $tipo = mb_strtoupper((string) ($retencion->withholding_type ?? 'RENTA'));
+            $codigo = self::RETENCIONES[$tipo] ?? null;
+            if ($codigo === null) {
+                continue; // p. ej. ReteICA: Factus no la recibe.
+            }
             $retenciones[] = [
-                'code' => self::RETENCIONES[$tipo] ?? (string) $this->valor('withholding_code', '06'),
+                'code' => $codigo,
                 'rate' => number_format((float) ($retencion->withholding_rate ?? 0), 2, '.', ''),
             ];
         }

@@ -55,7 +55,13 @@ final class FactusCliente
             $respuesta = $this->peticion($metodo, $url, $payload);
         }
 
-        $this->abortarSiTokenInvalido($respuesta->status());
+        if ($respuesta->status() === 429) {
+            $espera = min(10, max(1, (int) ($respuesta->header('Retry-After') ?: 1)));
+            sleep($espera);
+            $respuesta = $this->peticion($metodo, $url, $payload);
+        }
+
+        $this->abortarSiTokenInvalido($respuesta);
 
         return $respuesta;
     }
@@ -212,10 +218,32 @@ final class FactusCliente
         $this->proveedor->refresh();
     }
 
-    private function abortarSiTokenInvalido(int $http): void
+    /**
+     * Tras renovar el token, un 401/403 persistente se explica con el mensaje de
+     * Factus: un 403 no siempre es de token (p. ej. "Version de API no
+     * disponible para esta empresa" cuando la cuenta no tiene habilitada la v2).
+     */
+    private function abortarSiTokenInvalido(Response $respuesta): void
     {
-        if (in_array($http, [401, 403], true)) {
-            throw new \RuntimeException('El token de Factus es inválido o expiró; actualiza las credenciales en el proveedor tecnológico de la empresa.');
+        $http = $respuesta->status();
+        if ($http === 429) {
+            throw new \RuntimeException('Se superó el límite de 80 solicitudes por minuto de Factus; reintenta en un momento.');
         }
+
+        if (! in_array($http, [401, 403], true)) {
+            return;
+        }
+
+        $mensaje = trim((string) ($respuesta->json('message') ?? ''));
+
+        if (stripos($mensaje, 'version de api') !== false || stripos($mensaje, 'versión de api') !== false) {
+            throw new \RuntimeException("Factus rechazó la petición: {$mensaje}. La cuenta de Factus de la empresa no tiene habilitada esta versión del API; solicita a soporte de Factus que la active.");
+        }
+
+        if ($http === 403 && $mensaje !== '' && stripos($mensaje, 'token') === false && stripos($mensaje, 'unauthenticated') === false) {
+            throw new \RuntimeException("Factus denegó el acceso (HTTP 403): {$mensaje}");
+        }
+
+        throw new \RuntimeException('El token de Factus es inválido o expiró; actualiza las credenciales en el proveedor tecnológico de la empresa.');
     }
 }

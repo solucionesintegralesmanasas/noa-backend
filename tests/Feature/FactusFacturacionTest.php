@@ -252,7 +252,10 @@ class FactusFacturacionTest extends TestCase
     public function test_emite_nota_credito_con_referencia_de_factura(): void
     {
         $this->proveedor();
-        $factura = $this->factura(['cufe' => 'cufe-factura-origen']);
+        $factura = $this->factura([
+            'cufe' => 'cufe-factura-origen',
+            'provider_document_id' => 'SETP990002519',
+        ]);
 
         $uuidNota = $this->insertar('credit_notes', [
             'company_uuid' => $this->empresa,
@@ -299,7 +302,7 @@ class FactusFacturacionTest extends TestCase
 
             return str_ends_with($peticion->url(), '/v2/credit-notes/validate')
                 && ($payload['customization_id'] ?? null) === '20'
-                && ($payload['bill_number'] ?? null) === 'TSB-00000001'
+                && ($payload['bill_number'] ?? null) === 'SETP990002519'
                 && ($payload['correction_concept_code'] ?? null) === '2'
                 && count($payload['items'] ?? []) === 1;
         });
@@ -308,7 +311,10 @@ class FactusFacturacionTest extends TestCase
     public function test_nota_debito_va_a_su_endpoint(): void
     {
         $this->proveedor();
-        $factura = $this->factura(['cufe' => 'cufe-factura-origen']);
+        $factura = $this->factura([
+            'cufe' => 'cufe-factura-origen',
+            'provider_document_id' => 'SETP990002519',
+        ]);
 
         $uuidNota = $this->insertar('debit_notes', [
             'company_uuid' => $this->empresa,
@@ -338,7 +344,8 @@ class FactusFacturacionTest extends TestCase
 
         $this->assertSame('VALIDADA_SIN_ENVIO', $respuesta['estado']);
         Http::assertSent(fn ($peticion) => str_ends_with($peticion->url(), '/v2/debit-notes/validate')
-            && ($peticion->data()['bill_number'] ?? null) === 'TSB-00000001');
+            && ($peticion->data()['customization_id'] ?? null) === '30'
+            && ($peticion->data()['bill_number'] ?? null) === 'SETP990002519');
     }
 
     public function test_respuesta_con_errores_marca_rechazada(): void
@@ -351,12 +358,118 @@ class FactusFacturacionTest extends TestCase
                 'status' => 'rejected',
                 'data' => ['is_validated' => false, 'errors' => ['El documento fue rechazado']],
             ], 422),
+            self::BASE.'/v2/bills/destroy/reference/*' => Http::response(['status' => 'OK'], 200),
         ]);
 
         $respuesta = $this->puertoFacturas()->emitir($factura);
 
         $this->assertSame('RECHAZADA_DIAN', $respuesta['estado']);
         $this->assertSame('RECHAZADA_DIAN', $factura->refresh()->electronic_status);
+        Http::assertSent(fn ($peticion) => $peticion->method() === 'DELETE'
+            && str_ends_with($peticion->url(), '/v2/bills/destroy/reference/TSB-00000001'));
+    }
+
+    public function test_servicio_excluido_de_iva_envia_is_excluded_y_links_v2(): void
+    {
+        $this->proveedor(['settings' => json_encode(['numbering_ranges' => ['bills' => 389]])]);
+        $uuidMedioPago = $this->insertar('payment_methods', [
+            'dian_code' => '47',
+            'name' => 'Transferencia',
+            'is_active' => 1,
+        ]);
+        $uuidFactura = $this->insertar('commercial_invoices', [
+            'company_uuid' => $this->empresa,
+            'invoice_type' => 'FACTURA_VENTA',
+            'status' => 'EMITIDA_INTERNA',
+            'invoice_number' => 'TSB-00000002',
+            'issue_date' => '2026-10-05',
+            'third_party_uuid' => $this->cliente,
+            'billing_resolution_uuid' => $this->resolucion,
+            'payment_method_uuid' => $uuidMedioPago,
+            'subtotal' => 1900000,
+            'total_discount' => 0,
+            'total_tax' => 0,
+            'total_withholding' => 19000,
+            'invoice_total' => 1881000,
+            'electronic_status' => 'PENDIENTE_DIAN',
+        ]);
+        $uuidItem = $this->insertar('commercial_invoice_items', [
+            'invoice_uuid' => $uuidFactura,
+            'order_index' => 1,
+            'description' => 'Servicio de transporte terrestre excluido',
+            'quantity' => 1,
+            'unit_price' => 1900000,
+            'tax_rate' => 0,
+            'tax_amount' => 0,
+            'line_total' => 1900000,
+        ]);
+        $this->insertar('commercial_invoice_item_withholdings', [
+            'invoice_item_uuid' => $uuidItem,
+            'withholding_type' => 'RETEICA',
+            'withholding_rate' => 1,
+            'amount' => 19000,
+        ]);
+
+        Http::fake([
+            self::BASE.'/v2/bills/validate' => Http::response([
+                'status' => 'Created',
+                'data' => [
+                    'number' => 'SETP990002530',
+                    'cufe' => 'cufe-excluido',
+                    'is_validated' => true,
+                    'errors' => ['RUT01' => 'Regla: RUT01, Notificación: validar RUT'],
+                    'links' => [
+                        'public_url' => 'https://factus.test/ver/SETP990002530',
+                        'qr' => 'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=cufe-excluido',
+                    ],
+                ],
+            ], 201),
+        ]);
+
+        $factura = CommercialInvoice::where('uuid', $uuidFactura)->firstOrFail();
+        $respuesta = $this->puertoFacturas()->emitir($factura);
+
+        // Las notificaciones informativas (RUT01) NO marcan la factura como rechazada.
+        $this->assertSame('VALIDADA_SIN_ENVIO', $respuesta['estado']);
+        $this->assertSame('https://factus.test/ver/SETP990002530', $respuesta['pdf_url']);
+        $this->assertSame('https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=cufe-excluido', $respuesta['qr']);
+
+        Http::assertSent(function ($peticion) {
+            if (! str_ends_with($peticion->url(), '/v2/bills/validate')) {
+                return false;
+            }
+            $payload = $peticion->data();
+            $pago = $payload['payment_details'][0] ?? [];
+            $item = $payload['items'][0] ?? [];
+
+            return ($payload['numbering_range_id'] ?? null) === 389
+                && ($pago['payment_method_code'] ?? null) === '47'
+                && ($pago['amount'] ?? null) === '1900000.00'
+                && ($item['taxes'] ?? null) === [['is_excluded' => true]]
+                && ! array_key_exists('withholding_taxes', $item);
+        });
+    }
+
+    public function test_error_validacion_422_lanza_excepcion_con_campos_de_factus(): void
+    {
+        $this->proveedor();
+        $factura = $this->factura();
+
+        Http::fake([
+            self::BASE.'/v2/bills/validate' => Http::response([
+                'status' => 'Validation error',
+                'message' => 'Error de validación',
+                'data' => [
+                    'errors' => [
+                        'customer.municipality_code' => ['El código de municipio no es válido.'],
+                    ],
+                ],
+            ], 422),
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('El código de municipio no es válido.');
+        $this->puertoFacturas()->emitir($factura);
     }
 
     public function test_conflicto_409_se_explica_con_mensaje_claro(): void
