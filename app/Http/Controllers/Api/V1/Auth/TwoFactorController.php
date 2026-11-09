@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Services\Auth\AuthenticationService;
 use App\Services\Auth\TwoFactorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,7 +34,8 @@ class TwoFactorController extends Controller
      * Constructor del controlador.
      */
     public function __construct(
-        protected TwoFactorService $twoFactorService
+        protected TwoFactorService $twoFactorService,
+        private readonly AuthenticationService $authService
     ) {}
 
     /**
@@ -204,12 +206,14 @@ class TwoFactorController extends Controller
                 );
             }
 
+            $refreshCookie = $this->authService->createRefreshTokenCookie($result['refresh_token']);
+
             return $this->successResponse([
-                'user' => $user,
+                'user' => $this->authService->buildUserPayload($user),
                 'token' => $result['token'],
                 'two_factor_active' => true,
                 'used_recovery_code' => $result['is_recovery'],
-            ], 'Inicio de sesión completado. Doble factor verificado.');
+            ], 'Inicio de sesión completado. Doble factor verificado.')->withCookie($refreshCookie);
         } catch (Throwable $e) {
             return $this->handleException($e, [
                 'action' => '2fa_verify',
