@@ -130,6 +130,7 @@ class User extends Authenticatable implements TwoFactorAuthenticatable
             'verification_code_expires_at' => 'datetime',
             'last_login_at' => 'datetime',
             'locked_until' => 'datetime',
+            'google_drive_refresh_token' => 'encrypted',
         ];
     }
 
