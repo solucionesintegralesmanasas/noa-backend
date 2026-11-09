@@ -279,7 +279,8 @@ class VehicleInspectionService extends BaseService
                 }
 
                 try {
-                    app(NotificationsService::class)->syncNotifications($existing->company_uuid);
+                    // SPEC-014: Sincronización incremental para el vehículo inspeccionado.
+                    app(NotificationsService::class)->syncForVehicle($existing->vehicle_uuid);
                 } catch (\Exception $e) {
                     Logger::warning('Error syncing notifications after vehicle inspection creation: '.$e->getMessage());
                 }
@@ -305,9 +306,9 @@ class VehicleInspectionService extends BaseService
                 }
             }
 
-            // Sincronizar notificaciones de inmediato para actualizar la inspección pendiente
+            // SPEC-014: Sincronizar notificaciones de forma incremental para este vehículo
             try {
-                app(NotificationsService::class)->syncNotifications($inspection->company_uuid);
+                app(NotificationsService::class)->syncForVehicle($inspection->vehicle_uuid);
             } catch (\Exception $e) {
                 Logger::warning('Error syncing notifications after vehicle inspection creation: '.$e->getMessage());
             }
@@ -345,9 +346,9 @@ class VehicleInspectionService extends BaseService
                 }
             }
 
-            // Sincronizar notificaciones de inmediato para actualizar la inspección pendiente
+            // SPEC-014: Sincronizar notificaciones de forma incremental para este vehículo
             try {
-                app(NotificationsService::class)->syncNotifications($record->company_uuid);
+                app(NotificationsService::class)->syncForVehicle($record->vehicle_uuid);
             } catch (\Exception $e) {
                 Logger::warning('Error syncing notifications after vehicle inspection update: '.$e->getMessage());
             }

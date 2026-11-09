@@ -9,7 +9,6 @@ use App\Services\Notifications\EmailLogService;
 use App\Services\Notifications\NotificationsService;
 use App\Traits\BelongsToCompany;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -41,11 +40,19 @@ class RunWebCron extends Command
         NotificationsService $notificationsService,
         SocialSecurityContributionService $socialSecurityContributionService
     ): int {
-        if (! Cache::add('last_web_cron_run_lock', true, now()->addMinutes(self::LOCK_MINUTES))) {
-            $this->line('WebCron ya fue ejecutado recientemente. Se omite la ejecución.');
+        $runningLock = storage_path('framework/webcron.running');
+        $fp = @fopen($runningLock, 'c+');
+
+        if (! $fp || ! @flock($fp, LOCK_EX | LOCK_NB)) {
+            $this->line('WebCron ya está en ejecución en otro proceso. Se omite.');
+            if ($fp) {
+                @fclose($fp);
+            }
 
             return self::SUCCESS;
         }
+
+        $lockFile = storage_path('framework/webcron.lock');
 
         try {
             Log::info('WebCron: Iniciando ejecución automática en background...');
@@ -61,13 +68,19 @@ class RunWebCron extends Command
             });
 
             Log::info('WebCron: Ejecución automática completada con éxito.');
+            @touch($lockFile);
             $this->info('WebCron completado con éxito.');
         } catch (\Throwable $e) {
             Log::error('WebCron falló: '.$e->getMessage());
             // Si falla, liberamos el candado para permitir reintentar en la siguiente petición
-            Cache::forget('last_web_cron_run_lock');
+            @unlink($lockFile);
 
             return self::FAILURE;
+        } finally {
+            if ($fp) {
+                @flock($fp, LOCK_UN);
+                @fclose($fp);
+            }
         }
 
         return self::SUCCESS;

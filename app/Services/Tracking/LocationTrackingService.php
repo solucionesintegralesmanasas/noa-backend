@@ -9,11 +9,14 @@ use App\Models\DriverLocationAlert;
 use App\Models\DriverLocationDailyStat;
 use App\Models\DriverLocationSession;
 use App\Models\Geofence;
+use App\Models\ServiceDeliveryControlSheet;
 use App\Services\BaseService;
+use App\Utils\Logger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -125,8 +128,10 @@ class LocationTrackingService extends BaseService
             // Reabrir la app o recargar la web NO debe pausar la sesión que el
             // servicio nativo sigue usando: si sigue viva y es el mismo vehículo,
             // se devuelve la misma sesión.
-            if ($activa && $this->sesionVigente($activa)
-                && ($vehicleUuid === null || $activa->vehicle_uuid === null || $activa->vehicle_uuid === $vehicleUuid)) {
+            if (
+                $activa && $this->sesionVigente($activa)
+                && ($vehicleUuid === null || $activa->vehicle_uuid === null || $activa->vehicle_uuid === $vehicleUuid)
+            ) {
                 $cambios = [];
                 if ($vehicleUuid && $activa->vehicle_uuid === null) {
                     $cambios['vehicle_uuid'] = $vehicleUuid;
@@ -210,7 +215,7 @@ class LocationTrackingService extends BaseService
      * Obtiene la lista de conductores con sesión GPS activa en tiempo real.
      * Filtra por sesiones con status='active' y retorna la última ubicación de cada uno.
      */
-    public function getActiveDrivers(?string $companyUuid, ?array $soloConductores = null): \Illuminate\Support\Collection
+    public function getActiveDrivers(?string $companyUuid, ?array $soloConductores = null): Collection
     {
         $activeDriverUuids = DriverLocationSession::query()
             ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
@@ -271,9 +276,9 @@ class LocationTrackingService extends BaseService
      * para las planillas de hoy (con todo lo que usan los accesores precargado) y, solo si algún
      * conductor no tiene planilla con rutas hoy, una única consulta de respaldo para todos ellos.
      *
-     * @param  \Illuminate\Support\Collection<int, DriverLocation>  $ubicaciones
+     * @param  Collection<int, DriverLocation>  $ubicaciones
      */
-    private function adjuntarPlanillaDelDia(\Illuminate\Support\Collection $ubicaciones, ?string $companyUuid): void
+    private function adjuntarPlanillaDelDia(Collection $ubicaciones, ?string $companyUuid): void
     {
         if ($ubicaciones->isEmpty()) {
             return;
@@ -283,15 +288,15 @@ class LocationTrackingService extends BaseService
             $hoy = now()->toDateString();
 
             // `service_date` es DATE: comparación directa (whereDate envuelve la columna y anula el índice).
-            $planillas = \App\Models\ServiceDeliveryControlSheet::query()
+            $planillas = ServiceDeliveryControlSheet::query()
                 ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
                 ->where('service_date', $hoy)
                 ->with($this->relacionesDePlanilla())
                 ->get();
 
-            /** @var \Illuminate\Support\Collection<int, DriverLocation> $necesitanRespaldo */
+            /** @var Collection<int, DriverLocation> $necesitanRespaldo */
             $necesitanRespaldo = collect();
-            /** @var array<int, array{0: object, 1: \Illuminate\Support\Collection}> $deHoySinRutas */
+            /** @var array<int, array{0: object, 1: Collection}> $deHoySinRutas */
             $deHoySinRutas = [];
 
             foreach ($ubicaciones as $ubicacion) {
@@ -381,8 +386,8 @@ class LocationTrackingService extends BaseService
         return $porVehiculo || $porPlaca;
     }
 
-    /** @return \Illuminate\Support\Collection<int, array<string, mixed>> */
-    private function rutasDePlanilla(object $planilla): \Illuminate\Support\Collection
+    /** @return Collection<int, array<string, mixed>> */
+    private function rutasDePlanilla(object $planilla): Collection
     {
         return $planilla->routes->map(fn ($r) => [
             'origin' => $r->origin,
@@ -393,7 +398,7 @@ class LocationTrackingService extends BaseService
     }
 
     /** @return array<string, mixed> */
-    private function planillaDia(object $planilla, \Illuminate\Support\Collection $rutas, object $ubicacion, bool $esHoy): array
+    private function planillaDia(object $planilla, Collection $rutas, object $ubicacion, bool $esHoy): array
     {
         return [
             'uuid' => $planilla->uuid,
@@ -407,13 +412,13 @@ class LocationTrackingService extends BaseService
 
     /**
      * Para varios conductores a la vez: la planilla más reciente (hasta hoy) del mismo vehículo,
-     * y del mismo proyecto si el GPS lo trae, que sí tenga rutas activas. Una sola consulta con
-     * tope de filas, en lugar de una búsqueda por conductor.
+     * y del mismo proyecto si el GPS lo trae, que sí tenga rutas activas. Selección en dos fases
+     * (SPEC-015): consulta ligera con tope proporcional y precarga completa solo para las planillas elegidas.
      *
-     * @param  \Illuminate\Support\Collection<int, DriverLocation>  $ubicaciones
+     * @param  Collection<int, DriverLocation>  $ubicaciones
      * @return array<int, array<string, mixed>> planilla_dia por id de ubicación (solo las que tienen respaldo)
      */
-    private function ultimasRutasConocidas(\Illuminate\Support\Collection $ubicaciones, ?string $companyUuid): array
+    private function ultimasRutasConocidas(Collection $ubicaciones, ?string $companyUuid): array
     {
         try {
             $vehiculos = $ubicaciones->pluck('vehicle_uuid')->filter()->unique()->values()->all();
@@ -422,7 +427,13 @@ class LocationTrackingService extends BaseService
                 return [];
             }
 
-            $candidatas = \App\Models\ServiceDeliveryControlSheet::query()
+            $tope = max(100, $ubicaciones->count() * 50);
+
+            // Fase 1: búsqueda ligera acotada con orden determinista por fecha y desempate por id.
+            // Requiere id, uuid (claves), service_date, project_uuid (filtro), type_of_control_sheet y parent_uuid
+            // (necesarios para el accesor vehicle_license_plate), más company_uuid (multi-tenant).
+            $candidatas = ServiceDeliveryControlSheet::query()
+                ->select(['id', 'uuid', 'service_date', 'project_uuid', 'type_of_control_sheet', 'parent_uuid', 'company_uuid'])
                 ->when($companyUuid, fn ($q) => $q->where('company_uuid', $companyUuid))
                 ->where('service_date', '<=', now()->toDateString())
                 ->whereHas('routes', fn ($q) => $q->where('is_active', true))
@@ -431,12 +442,17 @@ class LocationTrackingService extends BaseService
                         ->orWhereHas('internalControl.vehicle', fn ($v) => $v->whereIn('vehicle_license_plate', $placas))
                         ->orWhereHas('subcontractedControl', fn ($s) => $s->whereIn('vehicle_license_plate', $placas));
                 })
-                ->with($this->relacionesDePlanilla())
+                ->with([
+                    'internalControl:id,service_delivery_control_sheet_uuid,vehicle_uuid',
+                    'internalControl.vehicle:id,uuid,vehicle_license_plate',
+                    'subcontractedControl:id,service_delivery_control_sheet_uuid,vehicle_license_plate',
+                ])
                 ->orderByDesc('service_date')
-                ->limit(500)
+                ->orderByDesc('id')
+                ->limit($tope)
                 ->get();
 
-            $resultado = [];
+            $elegidasPorUbicacion = [];
             foreach ($ubicaciones as $ubicacion) {
                 $elegida = $candidatas->first(function ($p) use ($ubicacion) {
                     if ($ubicacion->project_uuid && $p->project_uuid !== $ubicacion->project_uuid) {
@@ -447,12 +463,42 @@ class LocationTrackingService extends BaseService
                 });
 
                 if ($elegida) {
-                    $resultado[$ubicacion->id] = $this->planillaDia($elegida, $this->rutasDePlanilla($elegida), $ubicacion, false);
+                    $elegidasPorUbicacion[$ubicacion->id] = $elegida->id;
+                }
+            }
+
+            if (empty($elegidasPorUbicacion)) {
+                return [];
+            }
+
+            // Fase 2: precarga de relaciones completas únicamente para las planillas elegidas (≤ total ubicaciones).
+            $idsElegidos = array_values(array_unique($elegidasPorUbicacion));
+            $planillasCompletas = ServiceDeliveryControlSheet::query()
+                ->whereIn('id', $idsElegidos)
+                ->with($this->relacionesDePlanilla())
+                ->get()
+                ->keyBy('id');
+
+            $resultado = [];
+            foreach ($ubicaciones as $ubicacion) {
+                if (isset($elegidasPorUbicacion[$ubicacion->id])) {
+                    $sheetId = $elegidasPorUbicacion[$ubicacion->id];
+                    $sheet = $planillasCompletas->get($sheetId);
+                    if ($sheet) {
+                        $resultado[$ubicacion->id] = $this->planillaDia(
+                            $sheet,
+                            $this->rutasDePlanilla($sheet),
+                            $ubicacion,
+                            false
+                        );
+                    }
                 }
             }
 
             return $resultado;
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Logger::warning('LocationTrackingService: fallo al obtener ultimas rutas conocidas: '.$e->getMessage());
+
             return [];
         }
     }
@@ -996,7 +1042,8 @@ class LocationTrackingService extends BaseService
             $xj = $polygon[$j]['lng'] ?? $polygon[$j][1];
 
             if ((($yi > $lat) !== ($yj > $lat)) &&
-                ($lng < ($xj - $xi) * ($lat - $yi) / ($yj - $yi) + $xi)) {
+                ($lng < ($xj - $xi) * ($lat - $yi) / ($yj - $yi) + $xi)
+            ) {
                 $inside = ! $inside;
             }
         }

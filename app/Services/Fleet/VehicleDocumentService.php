@@ -336,10 +336,10 @@ class VehicleDocumentService extends BaseService
                 $entityUuid = sprintf('%08s-%04s-%04s-%04s-%12s', substr($hash, 0, 8), substr($hash, 8, 4), substr($hash, 12, 4), substr($hash, 16, 4), substr($hash, 20, 12));
                 app(NotificationsService::class)->deleteByEntity($entityUuid, 'VEHICLE_DOCUMENT');
 
-                // 2. Sincronizar notificaciones de la empresa de forma inmediata.
+                // 2. Sincronizar notificaciones del vehículo de forma incremental (SPEC-014).
                 // El aviso por correo lo cubre el digest consolidado (EmailLogService),
                 // que corre en la mañana y en la tarde con su propia cadencia.
-                app(NotificationsService::class)->syncNotifications($document->company_uuid);
+                app(NotificationsService::class)->syncForVehicle($document->vehicle_uuid);
 
             } catch (\Exception $e) {
                 Logger::error('Error en procesos post-registro de documento: '.$e->getMessage());
@@ -394,9 +394,9 @@ class VehicleDocumentService extends BaseService
                 // 1. Limpiar alertas previas ("VENCIDO" / "POR VENCER") en la campanita web
                 app(NotificationsService::class)->deleteByEntity($record->uuid, 'VEHICLE_DOCUMENT');
 
-                // 2. Sincronizar notificaciones de la empresa de forma inmediata.
+                // 2. Sincronizar notificaciones del vehículo de forma incremental (SPEC-014).
                 // El aviso por correo lo cubre el digest consolidado (EmailLogService).
-                app(NotificationsService::class)->syncNotifications($record->company_uuid);
+                app(NotificationsService::class)->syncForVehicle($record->vehicle_uuid);
 
             } catch (\Exception $e) {
                 Logger::error('Error en envío instantáneo de correos tras update: '.$e->getMessage());

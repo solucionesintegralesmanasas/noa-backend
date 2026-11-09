@@ -82,6 +82,9 @@ trait BelongsToCompany
 
             if ($companyUuid) {
                 $builder->where($builder->getModel()->getTable().'.company_uuid', $companyUuid);
+            } elseif (Auth::check() && method_exists(Auth::user(), 'hasRole') && Auth::user()->hasRole('SUPERADMIN')) {
+                // SUPERADMIN opera en cualquier empresa cuando no se ha fijado un contexto específico
+                self::registrarConsultaSinEmpresa($builder->getModel());
             } else {
                 // FALLA CERRADO (Issue #2): Sin contexto de empresa en flujo no exento.
                 // 1. Candado en base de datos: consulta imposible (1 = 0) para nunca filtrar datos ajenos.

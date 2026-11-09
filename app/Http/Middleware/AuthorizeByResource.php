@@ -8,7 +8,6 @@ use App\Exceptions\GeneralException;
 use App\Support\ResourceAuthorization;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -20,6 +19,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AuthorizeByResource
 {
+    /** @var array<string, bool> */
+    private static array $auditoriaEnMemoria = [];
+
     public function __construct(private readonly ResourceAuthorization $reglas) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -53,10 +55,14 @@ class AuthorizeByResource
             || ($exigencia['tipo'] === 'rol' && config('authorization.enforce_catalogs'));
 
         if (! $bloquea) {
-            // Una línea por usuario, ruta y método cada hora: el log de auditoría es para revisar
-            // patrones, no para registrar cada petición.
-            $clave = sprintf('authz-audit:%s:%s:%s', $detalle['usuario'], $detalle['metodo'], $detalle['ruta']);
-            if (Cache::add($clave, true, now()->addHour())) {
+            // SPEC-014: Sin escrituras en caché en el camino crítico HTTP de auditoría.
+            // Deduplicación en memoria para no inundar el log en peticiones repetitivas del mismo endpoint/usuario.
+            $clave = sprintf('%s:%s:%s', $detalle['usuario'], $detalle['metodo'], $detalle['ruta']);
+            if (! isset(self::$auditoriaEnMemoria[$clave])) {
+                if (count(self::$auditoriaEnMemoria) > 500) {
+                    self::$auditoriaEnMemoria = [];
+                }
+                self::$auditoriaEnMemoria[$clave] = true;
                 Log::warning('Autorización (auditoría): se habría rechazado este acceso', $detalle);
             }
 

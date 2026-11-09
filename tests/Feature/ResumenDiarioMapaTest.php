@@ -35,6 +35,7 @@ class ResumenDiarioMapaTest extends TestCase
 
         Schema::disableForeignKeyConstraints();
         $this->companyUuid = (string) Str::uuid();
+        request()->attributes->set('current_company_uuid', $this->companyUuid);
         $this->driverUuid = (string) Str::uuid();
     }
 
