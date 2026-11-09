@@ -92,6 +92,7 @@ class UpdateThirdPartyRequest extends FormRequest
             'roles' => ['nullable', 'array'],
             'roles.*' => ['string', Rule::exists('roles', 'name')],
             'affiliate_uuid' => ['nullable', 'uuid', 'exists:third_parties,uuid'],
+            'license_uuid' => ['nullable', 'uuid', 'exists:driver_licenses,uuid'],
             'license_number' => ['nullable', 'string', 'max:50'],
             'license_category' => ['nullable', 'string', 'in:C1,C2,C3'],
             'license_issue_date' => ['nullable', 'date'],
