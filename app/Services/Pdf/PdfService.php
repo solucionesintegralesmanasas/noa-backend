@@ -525,6 +525,7 @@ class PdfService
         'convenio_colaboracion',
         'recibo_administracion',
         'reporte_vehiculos',
+        'reporte_actividad_vehicular',
         'ficha_tecnica_tercero',
         'inspeccion_preoperacional',
     ];

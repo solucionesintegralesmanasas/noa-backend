@@ -534,4 +534,90 @@ class ReporteActividadVehicularTest extends TestCase
         );
         $this->assertCount(10, array_unique($uuids), 'Las páginas 1 y 2 deben ser disjuntas');
     }
+
+    public function test_usuario_sucursal_solo_ve_actividad_de_los_vehiculos_de_su_sede(): void
+    {
+        $ciudad = $this->insertar('cities', ['name' => 'Cali']);
+        $sedeA = $this->insertar('branches', [
+            'company_uuid' => $this->empresaUuid,
+            'name' => 'Sede Norte',
+            'address' => 'Calle 1',
+            'municipality_uuid' => $ciudad,
+        ]);
+        $sedeB = $this->insertar('branches', [
+            'company_uuid' => $this->empresaUuid,
+            'name' => 'Sede Sur',
+            'address' => 'Calle 2',
+            'municipality_uuid' => $ciudad,
+        ]);
+
+        $terceroA = $this->insertar('third_parties', [
+            'company_uuid' => $this->empresaUuid,
+            'person_type' => 'NATURAL',
+            'document_number' => '88000001',
+            'first_name' => 'COORDINADOR',
+            'last_name' => 'SEDE A',
+            'branch_uuid' => $sedeA,
+            'is_active' => 1,
+        ]);
+
+        $vA = $this->vehiculo('SEDE01');
+        $this->insertar('vehicles_branches', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vA,
+            'branch_uuid' => $sedeA,
+            'entry_date' => '2026-01-01',
+            'exit_date' => '2026-01-01',
+            'exit_type' => 'ENTRADA',
+            'is_active' => 1,
+        ]);
+
+        $vB = $this->vehiculo('SEDE02');
+        $this->insertar('vehicles_branches', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vB,
+            'branch_uuid' => $sedeB,
+            'entry_date' => '2026-01-01',
+            'exit_date' => '2026-01-01',
+            'exit_type' => 'ENTRADA',
+            'is_active' => 1,
+        ]);
+
+        $this->inspeccion('2026-11-05', $vA);
+        $this->mantenimiento('2026-11-05', $vB);
+
+        Schema::disableForeignKeyConstraints();
+        $userSucursal = User::create([
+            'uuid' => (string) Str::uuid(),
+            'name' => 'Usuario Sucursal A',
+            'email' => 'coord.a@test.local',
+            'password' => Hash::make('secreto123'),
+            'is_active' => true,
+        ]);
+        Schema::enableForeignKeyConstraints();
+
+        $userSucursal->assignRole(Role::findOrCreate('SUCURSAL', 'api'));
+        $permIndex = Permission::findOrCreate('reports.vehicle_activity.index', 'api');
+        $userSucursal->givePermissionTo($permIndex);
+
+        \Illuminate\Support\Facades\DB::table('company_user')->insert([
+            'user_id' => $userSucursal->id,
+            'company_uuid' => $this->empresaUuid,
+            'third_party_uuid' => $terceroA,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        Sanctum::actingAs($userSucursal, ['*']);
+
+        $res = $this->withHeaders(['X-Company-UUID' => $this->empresaUuid])
+            ->getJson('/api/v1/reports/vehicle-activity?fecha_desde=2026-11-01&fecha_hasta=2026-11-30');
+
+        $res->assertOk();
+        $filas = $res->json('data.data') ?? [];
+        $this->assertCount(1, $filas);
+        $this->assertSame('SEDE01', $filas[0]['vehicle_license_plate']);
+        $this->assertSame($vA, $filas[0]['vehicle_uuid']);
+    }
 }

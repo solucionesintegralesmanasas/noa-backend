@@ -28,7 +28,7 @@ class VehicleActivityReportRequest extends FormRequest
             'fecha_hasta' => 'required|date|after_or_equal:fecha_desde',
             'vehicle_uuid' => 'nullable|uuid',
             'project_uuid' => 'nullable|uuid',
-            'per_page' => 'nullable|integer|min:1|max:50',
+            'per_page' => 'nullable|integer|min:1|max:100',
             'page' => 'nullable|integer|min:1',
         ];
     }
