@@ -24,7 +24,7 @@ class StoreBillingProviderRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:100'],
-            'server_url' => ['nullable', 'url', 'max:200'],
+            'server_url' => ['nullable', 'url', 'starts_with:https', 'max:200'],
             'send_to_dian' => ['nullable', 'boolean'],
             'settings' => ['nullable', 'array'],
             'client_id' => ['nullable', 'string', 'max:200'],

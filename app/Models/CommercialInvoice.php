@@ -128,6 +128,16 @@ class CommercialInvoice extends Model
         return $this->belongsTo(CommercialInvoice::class, 'origin_uuid', 'uuid');
     }
 
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class, 'payment_method_uuid', 'uuid');
+    }
+
+    public function billingProvider(): BelongsTo
+    {
+        return $this->belongsTo(BillingProvider::class, 'billing_provider_uuid', 'uuid');
+    }
+
     public function esCotizacion(): bool
     {
         return $this->invoice_type === self::TIPO_COTIZACION;

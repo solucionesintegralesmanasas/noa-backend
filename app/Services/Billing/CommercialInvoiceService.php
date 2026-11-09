@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Billing;
 
+use App\Models\BillingProvider;
 use App\Models\BillingResolution;
 use App\Models\CommercialInvoice;
 use App\Models\CommercialInvoiceItem;
@@ -19,8 +20,8 @@ use Illuminate\Support\Facades\Auth;
 /**
  * Documentos comerciales: cotizaciones (fase 1) y facturas internas (fase 2).
  *
- * La factura interna se genera completa pero queda en PENDIENTE_DIAN: el UBL
- * se guarda sin transmitir (driver nulo) hasta activar el proveedor real.
+ * La factura interna se genera completa pero queda en PENDIENTE_DIAN. La
+ * transmisión a la DIAN es un paso aparte (emitirFactura), a petición del usuario.
  */
 class CommercialInvoiceService extends BaseService
 {
@@ -133,10 +134,41 @@ class CommercialInvoiceService extends BaseService
             $this->guardarItems($factura, $data['items']);
 
             ElectronicInvoice::create(['invoice_uuid' => $factura->uuid, 'status' => 'PENDIENTE']);
-            $this->facturacionElectronica->emitir($factura->fresh());
 
             return $this->getDetalle($factura->uuid);
         });
+    }
+
+    /**
+     * Envía a la DIAN una factura ya creada. La emisión es manual: crear la
+     * factura solo consume el consecutivo y la deja en PENDIENTE_DIAN.
+     */
+    public function emitirFactura(string $uuid): Model
+    {
+        /** @var CommercialInvoice|null $factura */
+        $factura = $this->findByUuid($uuid);
+        if (! $factura || ! $factura->esFactura()) {
+            throw new \RuntimeException('La factura no existe.');
+        }
+        if ($factura->status === 'ANULADA') {
+            throw new \RuntimeException('Una factura anulada no se puede enviar a la DIAN.');
+        }
+        if (in_array($factura->electronic_status, ['ACEPTADA_DIAN', 'VALIDADA_SIN_ENVIO'], true)) {
+            throw new \RuntimeException('La factura ya fue emitida electrónicamente.');
+        }
+
+        $hayProveedor = BillingProvider::query()
+            ->where('company_uuid', $factura->company_uuid)
+            ->where('is_active', true)
+            ->where('driver', BillingProvider::DRIVER_FACTUS)
+            ->exists();
+        if (! $hayProveedor) {
+            throw new \RuntimeException('La empresa no tiene un proveedor de facturación electrónica activo.');
+        }
+
+        $this->facturacionElectronica->emitir($factura);
+
+        return $this->getDetalle($factura->uuid);
     }
 
     /** Convierte una cotización aprobada en factura interna. */
@@ -304,10 +336,16 @@ class CommercialInvoiceService extends BaseService
     {
         return $this->findByUuid($uuid, ['*'], [
             'items.withholdings',
+            'items.vehicle',
+            'items.measurementUnit',
             'payments',
-            'customer',
+            'customer.municipality.department',
+            'customer.documentType',
+            'customer.taxResponsibility',
             'project',
             'resolution',
+            'paymentMethod',
+            'billingProvider',
             'relatedDocuments',
             'electronicInvoice',
         ]);

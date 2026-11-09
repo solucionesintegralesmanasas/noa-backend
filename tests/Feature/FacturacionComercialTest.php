@@ -8,8 +8,10 @@ use App\Models\User;
 use App\Services\Billing\CommercialInvoiceService;
 use App\Services\Billing\CreditNoteService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
@@ -22,8 +24,8 @@ use Tests\TestCase;
 /**
  * Módulo de facturación comercial: cotización (fase 1) y factura interna (fase 2).
  *
- * La factura interna queda en PENDIENTE_DIAN: se genera completa (incluido el
- * UBL guardado) pero nada se transmite al proveedor tecnológico.
+ * La factura interna queda en PENDIENTE_DIAN: se genera completa pero nada se
+ * transmite al proveedor tecnológico hasta que el usuario pide el envío.
  */
 class FacturacionComercialTest extends TestCase
 {
@@ -71,6 +73,33 @@ class FacturacionComercialTest extends TestCase
     private function servicio(): CommercialInvoiceService
     {
         return app(CommercialInvoiceService::class);
+    }
+
+    private function proveedorFactus(): void
+    {
+        $this->insertar('billing_providers', [
+            'company_uuid' => $this->empresa,
+            'name' => 'Factus',
+            'driver' => 'factus',
+            'server_url' => 'https://factus-test.local',
+            'send_to_dian' => 1,
+            'client_id' => 'client-id',
+            'client_secret' => Crypt::encryptString('client-secret'),
+            'email' => 'factus@test.local',
+            'client_password' => Crypt::encryptString('clave'),
+            'access_token' => Crypt::encryptString('token'),
+            'access_token_expires_at' => '2099-01-01 00:00:00',
+            'is_active' => 1,
+        ]);
+    }
+
+    /** Factura recién creada, sin transmitir. */
+    private function facturaPendiente(): \Illuminate\Database\Eloquent\Model
+    {
+        $datos = $this->datosCotizacion();
+        $datos['billing_resolution_uuid'] = $this->resolucion;
+
+        return $this->servicio()->crearFactura($datos);
     }
 
     /** @return array<string, mixed> */
@@ -176,8 +205,11 @@ class FacturacionComercialTest extends TestCase
         $this->assertSame('APROBADA', $cotizacion->status);
     }
 
-    public function test_crear_factura_consume_consecutivo_y_queda_pendiente_dian(): void
+    public function test_crear_factura_consume_consecutivo_y_queda_pendiente_dian_sin_transmitir(): void
     {
+        Http::fake();
+        $this->proveedorFactus();
+
         $datos = $this->datosCotizacion();
         $datos['billing_resolution_uuid'] = $this->resolucion;
         $datos['due_date'] = '2026-11-01';
@@ -190,9 +222,105 @@ class FacturacionComercialTest extends TestCase
         $this->assertSame('EMITIDA_INTERNA', $factura->status);
         $this->assertSame('PENDIENTE_DIAN', $factura->electronic_status);
         $this->assertNull($factura->cufe);
-        $this->assertNotEmpty($factura->fresh()->ubl_document);
+        $this->assertNull($factura->fresh()->ubl_document);
         $this->assertNotNull($factura->electronicInvoice);
         $this->assertSame(1, (int) DB::table('billing_resolutions')->where('uuid', $this->resolucion)->value('last_consecutive'));
+        Http::assertNothingSent();
+    }
+
+    public function test_enviar_factura_a_la_dian_transmite_y_guarda_estado(): void
+    {
+        $this->proveedorFactus();
+        $factura = $this->facturaPendiente();
+
+        Http::fake([
+            'https://factus-test.local/v2/bills/validate' => Http::response([
+                'status' => 'created',
+                'data' => ['number' => 'SETP990000001', 'cufe' => 'cufe-manual', 'is_validated' => true],
+            ], 200),
+        ]);
+
+        $actualizada = $this->servicio()->emitirFactura($factura->uuid);
+
+        $this->assertSame('ACEPTADA_DIAN', $actualizada->electronic_status);
+        $this->assertSame('cufe-manual', $actualizada->cufe);
+        $this->assertSame('SETP990000001', $actualizada->provider_document_id);
+        Http::assertSent(fn ($peticion) => str_ends_with($peticion->url(), '/v2/bills/validate')
+            && $peticion->data()['reference_code'] === 'TSB1');
+    }
+
+    public function test_no_se_puede_enviar_dos_veces_la_misma_factura(): void
+    {
+        $this->proveedorFactus();
+        $factura = $this->facturaPendiente();
+
+        Http::fake([
+            'https://factus-test.local/v2/bills/validate' => Http::response([
+                'status' => 'created',
+                'data' => ['number' => 'SETP990000002', 'cufe' => 'cufe-doble', 'is_validated' => true],
+            ], 200),
+        ]);
+
+        $this->servicio()->emitirFactura($factura->uuid);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('ya fue emitida');
+        $this->servicio()->emitirFactura($factura->uuid);
+    }
+
+    public function test_no_se_envia_una_factura_anulada(): void
+    {
+        $this->proveedorFactus();
+        $factura = $this->facturaPendiente();
+        $this->servicio()->anular($factura->uuid);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('anulada');
+        $this->servicio()->emitirFactura($factura->uuid);
+    }
+
+    public function test_no_se_envia_sin_proveedor_activo(): void
+    {
+        $factura = $this->facturaPendiente();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('proveedor de facturación electrónica activo');
+        $this->servicio()->emitirFactura($factura->uuid);
+    }
+
+    public function test_el_pdf_de_la_factura_incluye_la_informacion_dian(): void
+    {
+        $factura = $this->facturaPendiente();
+        $factura->update([
+            'electronic_status' => 'ACEPTADA_DIAN',
+            'cufe' => 'cufe-pdf-123456',
+            'provider_document_id' => 'SETP990000099',
+            'dian_response' => [
+                'status' => 'Created',
+                'message' => 'Factura creada correctamente',
+                'data' => [
+                    'number' => 'SETP990000099',
+                    'cufe' => 'cufe-pdf-123456',
+                    'is_validated' => true,
+                    'links' => ['public_url' => 'https://factus.test/ver/SETP990000099'],
+                    'errors' => ['RUT01' => 'Notificación: validar RUT'],
+                ],
+            ],
+        ]);
+        \App\Models\ElectronicInvoice::where('invoice_uuid', $factura->uuid)->update([
+            'status' => 'ACEPTADA_DIAN',
+            'cufe' => 'cufe-pdf-123456',
+            'provider_document_id' => 'SETP990000099',
+            'validated_at' => now(),
+            'raw_response' => $factura->dian_response,
+        ]);
+
+        Sanctum::actingAs($this->superadmin(), ['*']);
+
+        $pdf = $this->getJson("/api/v1/billing/commercial-invoices/{$factura->uuid}/pdf", ['X-Company-UUID' => $this->empresa]);
+
+        $pdf->assertOk();
+        $this->assertStringContainsString($factura->invoice_number, $pdf->headers->get('Content-Disposition'));
     }
 
     public function test_no_se_factura_dos_veces_el_mismo_fuec(): void

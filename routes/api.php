@@ -648,6 +648,9 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{uuid}/convertir', [CommercialInvoiceController::class, 'convertir'])->name('api.v1.billing.commercial-invoices.convertir');
                 Route::post('/{uuid}/pagos', [CommercialInvoiceController::class, 'pago'])->name('api.v1.billing.commercial-invoices.pago');
                 Route::post('/{uuid}/anular', [CommercialInvoiceController::class, 'anular'])->name('api.v1.billing.commercial-invoices.anular');
+                Route::post('/{uuid}/emitir', [CommercialInvoiceController::class, 'emitir'])
+                    ->middleware('permission:commercial_invoices.update')
+                    ->name('api.v1.billing.commercial-invoices.emitir');
                 Route::get('/{uuid}/pdf', [CommercialInvoiceController::class, 'pdf'])->name('api.v1.billing.commercial-invoices.pdf');
                 Route::delete('/{uuid}', [CommercialInvoiceController::class, 'destroy'])->name('api.v1.billing.commercial-invoices.destroy');
             });

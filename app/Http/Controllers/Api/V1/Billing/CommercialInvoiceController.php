@@ -12,6 +12,7 @@ use App\Http\Requests\Billing\UpdateCommercialInvoiceRequest;
 use App\Services\Billing\CommercialInvoiceService;
 use App\Services\Pdf\PdfService;
 use App\Models\Company;
+use App\Support\Billing\QrDian;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -164,6 +165,18 @@ class CommercialInvoiceController extends Controller
         }
     }
 
+    #[OA\Post(path: '/api/v1/billing/commercial-invoices/{uuid}/emitir', summary: 'Enviar factura a la DIAN', operationId: 'emitCommercialInvoice', tags: ['Facturación'], security: [['bearerAuth' => []]])]
+    public function emitir(string $uuid): JsonResponse
+    {
+        try {
+            $registro = $this->documentos->emitirFactura($uuid);
+
+            return $this->successResponse($registro, 'Factura enviada a la DIAN con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     #[OA\Get(path: '/api/v1/billing/commercial-invoices/{uuid}/pdf', summary: 'Descargar PDF del documento', operationId: 'pdfCommercialInvoice', tags: ['Facturación'], security: [['bearerAuth' => []]])]
     public function pdf(string $uuid): Response|JsonResponse
     {
@@ -174,14 +187,29 @@ class CommercialInvoiceController extends Controller
             }
 
             $pdfService = app(PdfService::class);
-            $empresa = Company::where('uuid', $registro->company_uuid)->first();
+            $empresa = Company::with([
+                'municipality.department',
+                'taxRegime',
+                'bankDetails',
+                'enablingResolutions',
+                'economicActivities',
+                'taxInformation',
+            ])->where('uuid', $registro->company_uuid)->first();
             $logoModel = PdfService::logoParaMarca($empresa);
             $imagenes = $pdfService->getBase64Parallel(['logo' => $logoModel]);
+
+            $qrUrl = data_get($registro->electronicInvoice?->raw_response, 'data.links.qr')
+                ?: ($registro->cufe
+                    ? 'https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=' . $registro->cufe
+                    : null);
 
             $data = [
                 'documento' => $registro,
                 'empresa' => $empresa,
-                'data' => ['logo' => $imagenes['logo'] ?? null],
+                'data' => [
+                    'logo' => $imagenes['logo'] ?? null,
+                    'qr' => QrDian::pngBase64($qrUrl),
+                ],
             ];
             $data = $pdfService->conMarca(
                 $data,
@@ -197,7 +225,7 @@ class CommercialInvoiceController extends Controller
                 $registro->issue_date?->format('Y-m-d') ?? ''
             );
 
-            return $pdfService->downloadFromView('pdf.commercial-invoice', $data, $nombre);
+            return $pdfService->downloadFromView('pdf.commercial-invoice', $data, $nombre, ['sello' => false]);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
