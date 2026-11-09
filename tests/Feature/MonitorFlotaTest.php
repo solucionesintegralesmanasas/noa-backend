@@ -39,7 +39,12 @@ class MonitorFlotaTest extends TestCase
 
     private function empresa(): string
     {
-        return $this->empresa ??= $this->insertar('companies', ['business_name' => 'Empresa de prueba', 'is_active' => true]);
+        if (! isset($this->empresa)) {
+            $this->empresa = $this->insertar('companies', ['business_name' => 'Empresa de prueba', 'is_active' => true]);
+            request()->attributes->set('current_company_uuid', $this->empresa);
+        }
+
+        return $this->empresa;
     }
 
     /**
@@ -210,5 +215,76 @@ class MonitorFlotaTest extends TestCase
 
         [$pocos, $muchos] = $this->assertConteoConstante($medir, $ampliar, 'Monitor de flota');
         $this->assertLessThanOrEqual(25, $pocos, "Monitor de flota hizo $pocos consultas con 2 conductores");
+    }
+
+    public function test_respaldo_gps_ignora_planillas_futuras_y_sin_rutas_eligiendo_la_reciente_valida(): void
+    {
+        $d = $this->conductor('JJJ000');
+        $otroProyecto = $this->insertar('projects', ['company_uuid' => $this->empresa(), 'project_name' => 'Otro Proyecto']);
+
+        // Futura (mañana) con rutas -> debe ignorarse
+        $this->planilla($d['vehiculo'], '2026-10-01', 2, $d['proyecto']);
+        // Sin rutas (ayer) -> debe ignorarse
+        $this->planilla($d['vehiculo'], '2026-09-29', 0, $d['proyecto']);
+        // Con rutas de otro proyecto (antier) -> debe ignorarse porque el GPS trae proyecto
+        $this->planilla($d['vehiculo'], '2026-09-28', 2, $otroProyecto);
+        // Válida más reciente (hace 3 días) con rutas y mismo proyecto -> debe ser elegida
+        $valida = $this->planilla($d['vehiculo'], '2026-09-27', 1, $d['proyecto']);
+        // Más antigua con rutas -> no debe pisar a la más reciente
+        $this->planilla($d['vehiculo'], '2026-09-25', 1, $d['proyecto']);
+
+        $r = $this->planillaDelMonitor($d['conductor']);
+
+        $this->assertNotNull($r);
+        $this->assertSame($valida, $r['uuid']);
+        $this->assertFalse($r['es_planilla_hoy']);
+        $this->assertSame('2026-09-27', Carbon::parse($r['service_date'])->toDateString());
+    }
+
+    public function test_el_conteo_de_consultas_es_constante_independiente_del_volumen_de_planillas_historicas(): void
+    {
+        $medir = fn () => app(LocationTrackingService::class)->getActiveDrivers($this->empresa());
+
+        // Conductor con sesión activa pero sin planilla de hoy (necesita respaldo)
+        $d = $this->conductor('VOL001');
+        $this->planilla($d['vehiculo'], '2026-09-28', 1, $d['proyecto']);
+
+        // Conductor sin ninguna planilla
+        $this->conductor('VOL002');
+
+        // Ampliar agregando 25 planillas históricas adicionales en los días anteriores
+        $ampliar = function () use ($d) {
+            for ($dia = 1; $dia <= 25; $dia++) {
+                $fecha = Carbon::parse('2026-09-20')->subDays($dia)->toDateString();
+                $this->planilla($d['vehiculo'], $fecha, 1, $d['proyecto']);
+            }
+        };
+
+        [$pocos, $muchos] = $this->assertConteoConstante($medir, $ampliar, 'Monitor con histórico masivo');
+        $this->assertLessThanOrEqual(25, $pocos, "Monitor de flota con histórico hizo $pocos consultas");
+    }
+
+    public function test_ultimas_rutas_conocidas_registra_warning_si_ocurre_error_sin_romper_monitor(): void
+    {
+        \Illuminate\Support\Facades\Log::spy();
+
+        $d = $this->conductor('ERR999');
+
+        // Simular excepción únicamente al consultar el respaldo en ultimasRutasConocidas
+        DB::listen(function ($query) {
+            if (str_contains(strtolower($query->sql), 'order by `service_date` desc') || str_contains(strtolower($query->sql), 'order by service_date desc')) {
+                throw new \RuntimeException('Error simulado en base de datos');
+            }
+        });
+
+        $conductores = app(LocationTrackingService::class)->getActiveDrivers($this->empresa());
+
+        $this->assertNotEmpty($conductores);
+        $ubicacion = $conductores->firstWhere('third_party_uuid', $d['conductor']);
+        $this->assertNotNull($ubicacion);
+        $this->assertNull($ubicacion->planilla_dia);
+
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')
+            ->withArgs(fn ($msg) => str_contains((string) $msg, 'LocationTrackingService: fallo al obtener ultimas rutas conocidas'));
     }
 }

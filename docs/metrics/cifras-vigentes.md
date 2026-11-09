@@ -84,7 +84,7 @@ El presupuesto bloqueante vive en `SincronizacionIncrementalNotificacionesTest`.
 | Operación / Flujo | Consultas ANTES | Consultas DESPUÉS | Impacto y Comportamiento |
 |---|---:|---:|---|
 | Edición ordinaria de vehículo (`PUT /vehicles/{uuid}`) | ~26 (sync total de flota) | **≤ 6** | 0 pasadas por la flota completa; solo actualiza datos del vehículo. |
-| Actualización reactiva por cambio relevante (`is_active`, `type_of_service`) | ~26 | **9** | Carga exclusiva del vehículo y sus documentos en memoria (`syncForVehicle`). |
+| Actualización reactiva por cambio relevante (`is_active`, `type_of_service`, placa, afiliado) | ~26 | **9** | Carga exclusiva del vehículo y sus documentos en memoria (`syncForVehicle`). |
 | Seguridad social vencida (`autoUpdateExpiredStatuses`) | $2 \times N$ (bucle iterativo N+1) | **1** | Una sola consulta SQL masiva (`UPDATE ... WHERE NOT EXISTS ...`). |
 | Consultas a la tabla `cache` en peticiones HTTP | 1–3 por petición | **0** | Candado por archivo `storage/framework/webcron.lock`, sin bloqueos de tabla. |
 | Latencia de sincronización por vehículo | ~40–80 ms | **< 3 ms** | Evaluación directa en memoria de documentos obligatorios y tarjetas. |
