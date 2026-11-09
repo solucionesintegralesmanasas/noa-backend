@@ -2035,6 +2035,31 @@ class PdfService
     }
 
     /**
+     * Reporte consolidado de actividad vehicular (inspecciones, mantenimiento,
+     * combustible, tanqueos y hojas de control).
+     *
+     * El render no consulta: la empresa viene precargada en los filtros desde
+     * el controlador, igual que en el reporte de vehículos.
+     */
+    public function generateVehicleActivityReportPdf($filas, array $filtros = []): array
+    {
+        $reportCompany = ($filtros['company'] ?? null) instanceof object ? $filtros['company'] : null;
+        $reportLogoModel = self::logoParaMarca($reportCompany);
+
+        $pdf = Pdf::loadView('pdf.fleet.vehicle-activity-report', $this->conMarca([
+            'filas' => $filas,
+            'filtros' => $filtros,
+        ], $reportCompany, 'reporte_actividad_vehicular', $reportLogoModel));
+        $pdf->setPaper('letter', 'portrait');
+        $this->sellarPaginado($pdf);
+
+        return [
+            'pdf' => $pdf,
+            'file_name' => self::nombreArchivo('Reporte de Actividad Vehicular', now()->format('d-m-Y H:i')),
+        ];
+    }
+
+    /**
      * Resuelve el logo de la empresa con respaldo en disco cuando MediaLibrary no tiene imagen.
      * Retorna el base64 ya codificado y el mime para usar en el data-uri del PDF.
      *

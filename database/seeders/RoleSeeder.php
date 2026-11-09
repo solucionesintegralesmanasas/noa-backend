@@ -161,6 +161,10 @@ class RoleSeeder extends Seeder
             'reports.vehicles.export-excel',
             'reports.vehicles.export-pdf',
 
+            'reports.vehicle_activity.index',
+            'reports.vehicle_activity.export-excel',
+            'reports.vehicle_activity.export-pdf',
+
             'vehicle_documents.index',
             'vehicle_documents.create',
             'vehicle_documents.update',
@@ -462,6 +466,10 @@ class RoleSeeder extends Seeder
             'reports.vehicles.index',
             'reports.vehicles.export-excel',
             'reports.vehicles.export-pdf',
+
+            'reports.vehicle_activity.index',
+            'reports.vehicle_activity.export-excel',
+            'reports.vehicle_activity.export-pdf',
 
             'vehicle_documents.index',
             'vehicle_documents.create',

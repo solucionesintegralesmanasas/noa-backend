@@ -1122,6 +1122,11 @@ Route::prefix('v1')->group(function () {
                 Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'excel'])->middleware('permission:reports.vehicles.export-excel')->name('api.v1.reports.vehicles.excel');
                 Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'pdf'])->middleware('permission:reports.vehicles.export-pdf')->name('api.v1.reports.vehicles.pdf');
             });
+            Route::prefix('vehicle-activity')->group(function () {
+                Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleActivityReportController::class, 'index'])->middleware('permission:reports.vehicle_activity.index')->name('api.v1.reports.vehicle-activity.index');
+                Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleActivityReportController::class, 'excel'])->middleware('permission:reports.vehicle_activity.export-excel')->name('api.v1.reports.vehicle-activity.excel');
+                Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleActivityReportController::class, 'pdf'])->middleware('permission:reports.vehicle_activity.export-pdf')->name('api.v1.reports.vehicle-activity.pdf');
+            });
         });
 
         // ─── MÓDULO CONFIGURACIONES ───
