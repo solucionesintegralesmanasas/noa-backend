@@ -596,7 +596,7 @@ class ThirdPartyService extends BaseService
         $lastName = $data['last_name'] ?? $thirdParty->last_name ?? '';
         $fullName = mb_strtoupper(trim($firstName.' '.$lastName), 'UTF-8');
 
-        // user_name y contraseña temporal = número de documento (el usuario debe cambiarla)
+        // user_name = número de documento; contraseña temporal aleatoria (el usuario debe cambiarla)
         $documentNumber = $data['document_number'] ?? $thirdParty->document_number;
 
         /** @var User $user */
@@ -605,7 +605,7 @@ class ThirdPartyService extends BaseService
             [
                 'name' => $fullName,
                 'user_name' => $documentNumber,
-                'password' => Hash::make($documentNumber),
+                'password' => Hash::make(\Illuminate\Support\Str::password(12)),
                 'email_verified_at' => now(),
                 'status' => 1,
             ]
