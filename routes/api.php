@@ -126,6 +126,7 @@ Route::prefix('v1')->group(function () {
     // ─── RUTAS PÚBLICAS (Sin Autenticación) ───
     Route::prefix('public')->group(function () {
         Route::get('/fuecs/{code}', [FuecController::class, 'validatePublic'])
+            ->middleware('throttle:30,1')
             ->name('api.v1.public.fuecs.validate');
 
         Route::get('/fuel-requests/{token}', [FuelRequestController::class, 'publicShow'])

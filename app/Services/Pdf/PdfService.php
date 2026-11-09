@@ -749,7 +749,7 @@ class PdfService
                 $ch = curl_init($url);
                 curl_setopt_array($ch, [
                     CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYPEER => true,
                     CURLOPT_TIMEOUT => 5,
                 ]);
                 curl_multi_add_handle($multi, $ch);
