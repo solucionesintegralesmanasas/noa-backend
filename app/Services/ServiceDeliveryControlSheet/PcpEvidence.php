@@ -268,11 +268,11 @@ final class PcpEvidence
             ->with([
                 'routes:id,service_delivery_control_sheet_uuid,origin,destination,funcionario_nombre,funcionario_cc',
                 'internalControl.thirdParty:id,uuid,first_name,last_name',
-                'subcontractedControl:id,uuid,service_delivery_control_sheet_uuid,driver_name,driver_signature',
-                'children:id,uuid,parent_uuid,project_uuid,service_date,is_active,type_of_control_sheet,has_exception,exception_notes,starting_kilometer,ending_kilometer,start_time,end_time',
+                'subcontractedControl:id,uuid,service_delivery_control_sheet_uuid,driver_name_and_surname,vehicle_license_plate',
+                'children:id,uuid,parent_uuid,project_uuid,service_date,is_active,type_of_control_sheet,day_kind,availability_reason,exception_reason,starting_kilometer,ending_kilometer,start_time,end_time',
                 'children.routes:id,service_delivery_control_sheet_uuid,origin,destination,funcionario_nombre,funcionario_cc',
                 'children.internalControl.thirdParty:id,uuid,first_name,last_name',
-                'children.subcontractedControl:id,uuid,service_delivery_control_sheet_uuid,driver_name,driver_signature',
+                'children.subcontractedControl:id,uuid,service_delivery_control_sheet_uuid,driver_name_and_surname,vehicle_license_plate',
             ])
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => fn($q) => $q->where('is_active', true)]);
