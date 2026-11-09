@@ -73,7 +73,7 @@ class AlcanceDelActor
 
     private bool $esSucursalRestringida = false;
 
-    private ?int $currentRequestId = null;
+    private ?string $currentContextFingerprint = null;
 
     /** @var array<int, string>|null */
     private ?array $vehiculosAfiliado = null;
@@ -113,6 +113,7 @@ class AlcanceDelActor
         $this->vehiculosConductor = null;
         $this->conductoresRastreo = null;
         $this->licenciasOwnersDrivers = null;
+        $this->currentContextFingerprint = null;
     }
 
     /**
@@ -144,13 +145,18 @@ class AlcanceDelActor
             return $this;
         }
 
+        $rawRoles = [];
         if ($this->usuario->relationLoaded('roles')) {
-            $this->roles = $this->usuario->roles->pluck('name')->all();
+            $rawRoles = $this->usuario->roles->pluck('name')->all();
         } elseif (method_exists($this->usuario, 'getRoleNames')) {
-            $this->roles = $this->usuario->getRoleNames()->all();
-        } else {
-            $this->roles = [];
+            $rawRoles = $this->usuario->getRoleNames()->all();
         }
+
+        $this->roles = array_values(array_unique(array_map(function ($r) {
+            return method_exists(User::class, 'normalizeRoleName')
+                ? User::normalizeRoleName($r)
+                : strtoupper(trim((string) $r));
+        }, $rawRoles)));
 
         $this->esSuperadmin = in_array('SUPERADMIN', $this->roles, true);
         $this->esAdminEmpresa = in_array('ADMIN_EMPRESA', $this->roles, true);
@@ -341,10 +347,10 @@ class AlcanceDelActor
         }
 
         $vehiculos = Vehicle::withoutGlobalScopes()
-            ->when($this->companyUuid, fn ($q) => $q->where('vehicles.company_uuid', $this->companyUuid))
+            ->when($this->companyUuid, fn($q) => $q->where('vehicles.company_uuid', $this->companyUuid))
             ->where(function ($q) use ($targetAffiliate) {
                 $q->where('vehicles.third_party_uuid', $targetAffiliate)
-                    ->orWhereHas('owners', fn ($o) => $o->where('third_party_uuid', $targetAffiliate));
+                    ->orWhereHas('owners', fn($o) => $o->where('third_party_uuid', $targetAffiliate));
             })
             ->pluck('uuid')
             ->values()
@@ -475,8 +481,8 @@ class AlcanceDelActor
                 $asignados = empty($vehiculos)
                     ? collect()
                     : ProjectDriverVehicle::withoutGlobalScopes()
-                        ->whereIn('vehicle_uuid', $vehiculos)
-                        ->pluck('third_party_uuid');
+                    ->whereIn('vehicle_uuid', $vehiculos)
+                    ->pluck('third_party_uuid');
 
                 $this->conductoresRastreo = collect($vinculados)
                     ->merge($asignados)
@@ -772,47 +778,47 @@ class AlcanceDelActor
                     $sub->where('entity_type', Vehicle::class)
                         ->whereIn('entity_uuid', $vehiculos);
                 })
-                // 2. Documentos de vehículo
-                ->orWhere(function (Builder $sub) use ($vehiculos) {
-                    $sub->where('entity_type', VehicleDocument::class)
-                        ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
-                            $sq->select('uuid')->from('vehicle_documents')->whereIn('vehicle_uuid', $vehiculos);
-                        });
-                })
-                // 3. Tarjetas de operación
-                ->orWhere(function (Builder $sub) use ($vehiculos) {
-                    $sub->where('entity_type', OperationCard::class)
-                        ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
-                            $sq->select('uuid')->from('operation_cards')->whereIn('vehicle_uuid', $vehiculos);
-                        });
-                })
-                // 4. Licencias de conducción (sus conductores vinculados y licencias propias)
-                ->orWhere(function (Builder $sub) use ($conductores, $licenciasPropias) {
-                    $sub->where('entity_type', DriverLicense::class)
-                        ->where(function (Builder $lq) use ($conductores, $licenciasPropias) {
-                            $lq->whereIn('entity_uuid', function ($sq) use ($conductores) {
-                                $sq->select('uuid')->from('driver_licenses')->whereIn('third_party_uuid', $conductores);
-                            })->orWhereIn('entity_uuid', $licenciasPropias);
-                        });
-                })
-                // 5. Convenios de colaboración
-                ->orWhere(function (Builder $sub) use ($vehiculos) {
-                    $sub->where('entity_type', BusinessCollaborationAgreement::class)
-                        ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
-                            $sq->select('uuid')->from('business_collaboration_agreements')->whereIn('vehicle_uuid', $vehiculos);
-                        });
-                })
-                // 6. Cobros de administración de afiliado
-                ->orWhere(function (Builder $sub) use ($affiliateUuid, $vehiculos) {
-                    $sub->where('entity_type', AffiliateAdminCharge::class)
-                        ->where(function (Builder $cq) use ($affiliateUuid, $vehiculos) {
-                            $cq->whereIn('entity_uuid', function ($sq) use ($affiliateUuid) {
-                                $sq->select('uuid')->from('affiliate_admin_charges')->where('third_party_uuid', $affiliateUuid);
-                            })->orWhereIn('entity_uuid', function ($sq) use ($vehiculos) {
-                                $sq->select('uuid')->from('affiliate_admin_charges')->whereIn('vehicle_uuid', $vehiculos);
+                    // 2. Documentos de vehículo
+                    ->orWhere(function (Builder $sub) use ($vehiculos) {
+                        $sub->where('entity_type', VehicleDocument::class)
+                            ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
+                                $sq->select('uuid')->from('vehicle_documents')->whereIn('vehicle_uuid', $vehiculos);
                             });
-                        });
-                });
+                    })
+                    // 3. Tarjetas de operación
+                    ->orWhere(function (Builder $sub) use ($vehiculos) {
+                        $sub->where('entity_type', OperationCard::class)
+                            ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
+                                $sq->select('uuid')->from('operation_cards')->whereIn('vehicle_uuid', $vehiculos);
+                            });
+                    })
+                    // 4. Licencias de conducción (sus conductores vinculados y licencias propias)
+                    ->orWhere(function (Builder $sub) use ($conductores, $licenciasPropias) {
+                        $sub->where('entity_type', DriverLicense::class)
+                            ->where(function (Builder $lq) use ($conductores, $licenciasPropias) {
+                                $lq->whereIn('entity_uuid', function ($sq) use ($conductores) {
+                                    $sq->select('uuid')->from('driver_licenses')->whereIn('third_party_uuid', $conductores);
+                                })->orWhereIn('entity_uuid', $licenciasPropias);
+                            });
+                    })
+                    // 5. Convenios de colaboración
+                    ->orWhere(function (Builder $sub) use ($vehiculos) {
+                        $sub->where('entity_type', BusinessCollaborationAgreement::class)
+                            ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
+                                $sq->select('uuid')->from('business_collaboration_agreements')->whereIn('vehicle_uuid', $vehiculos);
+                            });
+                    })
+                    // 6. Cobros de administración de afiliado
+                    ->orWhere(function (Builder $sub) use ($affiliateUuid, $vehiculos) {
+                        $sub->where('entity_type', AffiliateAdminCharge::class)
+                            ->where(function (Builder $cq) use ($affiliateUuid, $vehiculos) {
+                                $cq->whereIn('entity_uuid', function ($sq) use ($affiliateUuid) {
+                                    $sq->select('uuid')->from('affiliate_admin_charges')->where('third_party_uuid', $affiliateUuid);
+                                })->orWhereIn('entity_uuid', function ($sq) use ($vehiculos) {
+                                    $sq->select('uuid')->from('affiliate_admin_charges')->whereIn('vehicle_uuid', $vehiculos);
+                                });
+                            });
+                    });
             });
 
             return $query;
@@ -885,7 +891,7 @@ class AlcanceDelActor
         }
 
         if ($companyEfectiva) {
-            $query->where($query->getModel()->getTable().'.company_uuid', $companyEfectiva);
+            $query->where($query->getModel()->getTable() . '.company_uuid', $companyEfectiva);
         }
 
         $alcance = $this->obtenerAlcanceRastreo();
@@ -899,7 +905,7 @@ class AlcanceDelActor
             }
 
             if ($table === 'driver_locations' || $table === 'driver_location_sessions' || $table === 'driver_location_alerts') {
-                $query->whereIn($table.'.third_party_uuid', $conductores);
+                $query->whereIn($table . '.third_party_uuid', $conductores);
             }
         }
 
@@ -953,7 +959,7 @@ class AlcanceDelActor
         $table = $model->getTable();
         $fillable = $model->getFillable();
         $thirdPartyUuid = $this->thirdPartyUuid;
-        $affiliateUuid = $this->affiliateUuid ?? $thirdPartyUuid;
+        $affiliateUuid = $this->affiliateUuid() ?? $thirdPartyUuid;
 
         if ($this->esAfiliado && ! $affiliateUuid) {
             $query->whereRaw('1 = 0');
@@ -973,9 +979,9 @@ class AlcanceDelActor
                     [$affiliateUuid],
                     $this->obtenerConductoresDeAfiliado($affiliateUuid)
                 ));
-                $query->whereIn($table.'.uuid', $allowedUuids);
+                $query->whereIn($table . '.uuid', $allowedUuids);
             } elseif ($this->esConductor) {
-                $query->where($table.'.uuid', $thirdPartyUuid);
+                $query->where($table . '.uuid', $thirdPartyUuid);
             }
         } elseif ($table === 'driver_licenses') {
             if ($this->esAfiliado) {
@@ -983,12 +989,12 @@ class AlcanceDelActor
                 $licenciasPropias = $this->obtenerLicenciasDeOwnersDrivers($affiliateUuid);
 
                 $query->where(function (Builder $q) use ($table, $affiliateUuid, $driverUuids, $licenciasPropias) {
-                    $q->where($table.'.third_party_uuid', $affiliateUuid)
-                        ->orWhereIn($table.'.third_party_uuid', $driverUuids)
-                        ->orWhereIn($table.'.uuid', $licenciasPropias);
+                    $q->where($table . '.third_party_uuid', $affiliateUuid)
+                        ->orWhereIn($table . '.third_party_uuid', $driverUuids)
+                        ->orWhereIn($table . '.uuid', $licenciasPropias);
                 });
             } elseif ($this->esConductor) {
-                $query->where($table.'.third_party_uuid', $thirdPartyUuid);
+                $query->where($table . '.third_party_uuid', $thirdPartyUuid);
             }
         } elseif ($table === 'social_security_contributions') {
             if ($this->esAfiliado) {
@@ -996,19 +1002,19 @@ class AlcanceDelActor
                     [$affiliateUuid],
                     $this->obtenerConductoresDeAfiliado($affiliateUuid)
                 ));
-                $query->whereIn($table.'.third_party_uuid', $allowedUuids);
+                $query->whereIn($table . '.third_party_uuid', $allowedUuids);
             } elseif ($this->esConductor) {
-                $query->where($table.'.third_party_uuid', $thirdPartyUuid);
+                $query->where($table . '.third_party_uuid', $thirdPartyUuid);
             }
         } elseif ($table === 'owners_drivers') {
             if ($this->esAfiliado) {
-                $query->where($table.'.third_party_uuid', $affiliateUuid);
+                $query->where($table . '.third_party_uuid', $affiliateUuid);
             } elseif ($this->esConductor) {
                 $driverLicenseUuids = DriverLicense::withoutGlobalScopes()
                     ->where('third_party_uuid', $thirdPartyUuid)
                     ->pluck('uuid')
                     ->toArray();
-                $query->whereIn($table.'.driver_license_uuid', $driverLicenseUuids);
+                $query->whereIn($table . '.driver_license_uuid', $driverLicenseUuids);
             }
         } elseif ($table === 'vehicles') {
             $this->aplicarAVehiculos($query, $companyUuid);
@@ -1033,20 +1039,37 @@ class AlcanceDelActor
                     $q->where('procedures.third_party_uuid', $affiliateUuid)
                         ->orWhereHas('vehicle', function (Builder $vq) use ($affiliateUuid) {
                             $vq->where('vehicles.third_party_uuid', $affiliateUuid)
-                                ->orWhereHas('owners', fn (Builder $o) => $o->where('third_party_uuid', $affiliateUuid));
+                                ->orWhereHas('owners', fn(Builder $o) => $o->where('third_party_uuid', $affiliateUuid));
                         });
                 });
             }
+        } elseif ($table === 'fuec' || $table === 'fuecs') {
+            if ($this->esAfiliado) {
+                $query->whereHas('vehicle', function (Builder $q) use ($affiliateUuid) {
+                    $q->where('vehicles.third_party_uuid', $affiliateUuid)
+                        ->orWhereHas('owners', function (Builder $oq) use ($affiliateUuid) {
+                            $oq->where('third_party_uuid', $affiliateUuid);
+                        });
+                });
+            } elseif ($this->esConductor) {
+                $allowedVehicles = $this->obtenerVehiculosDeConductor($thirdPartyUuid);
+                $query->where(function (Builder $q) use ($thirdPartyUuid, $allowedVehicles) {
+                    $q->where('fuec.main_conductor_uuid', $thirdPartyUuid)
+                        ->orWhere('fuec.secondary_conductor_uuid', $thirdPartyUuid)
+                        ->orWhere('fuec.tertiary_conductor_uuid', $thirdPartyUuid)
+                        ->orWhereIn('fuec.vehicle_uuid', $allowedVehicles);
+                });
+            }
         } elseif (in_array('third_party_uuid', $fillable, true)) {
-            $targetTp = $this->esAfiliado ? $affiliateUuid : $thirdPartyUuid;
-            $query->where($table.'.third_party_uuid', $targetTp);
+            $targetTp = $this->esAfiliado ? $affiliateUuid : ($this->affiliateUuid() ?? $thirdPartyUuid);
+            $query->where($table . '.third_party_uuid', $targetTp);
         } elseif (method_exists($model, 'third_party')) {
-            $targetTp = $this->esAfiliado ? $affiliateUuid : $thirdPartyUuid;
+            $targetTp = $this->esAfiliado ? $affiliateUuid : ($this->affiliateUuid() ?? $thirdPartyUuid);
             $query->whereHas('third_party', function (Builder $q) use ($targetTp) {
                 $q->where('third_parties.uuid', $targetTp);
             });
         } elseif (method_exists($model, 'thirdParty')) {
-            $targetTp = $this->esAfiliado ? $affiliateUuid : $thirdPartyUuid;
+            $targetTp = $this->esAfiliado ? $affiliateUuid : ($this->affiliateUuid() ?? $thirdPartyUuid);
             $query->whereHas('thirdParty', function (Builder $q) use ($targetTp) {
                 $q->where('third_parties.uuid', $targetTp);
             });
@@ -1054,7 +1077,7 @@ class AlcanceDelActor
             $query->whereHas('vehicle', function (Builder $q) use ($affiliateUuid) {
                 $q->where(function (Builder $w) use ($affiliateUuid) {
                     $w->where('vehicles.third_party_uuid', $affiliateUuid)
-                        ->orWhereHas('owners', fn (Builder $o) => $o->where('third_party_uuid', $affiliateUuid));
+                        ->orWhereHas('owners', fn(Builder $o) => $o->where('third_party_uuid', $affiliateUuid));
                 });
             });
         }
@@ -1063,17 +1086,20 @@ class AlcanceDelActor
     private function asegurarContexto(): void
     {
         $req = request();
-        $reqId = $req ? spl_object_id($req) : null;
+        $reqId = $req ? spl_object_id($req) : 0;
+        $authId = Auth::id() ?? 0;
+        $reqCompany = $req?->attributes->get('current_company_uuid') ?? '';
+        $reqBranch = $req?->attributes->get('current_branch_uuid') ?? '';
+        $contextFingerprint = "{$reqId}|{$authId}|{$reqCompany}|{$reqBranch}";
 
-        if ($this->currentRequestId !== null && $this->currentRequestId !== $reqId) {
+        if ($this->currentContextFingerprint !== null && $this->currentContextFingerprint !== $contextFingerprint) {
             $this->limpiarCache();
         }
 
-        $this->currentRequestId = $reqId;
+        $this->currentContextFingerprint = $contextFingerprint;
 
         if (! $this->contextoResuelto) {
             $this->resolverContexto();
         }
     }
 }
-

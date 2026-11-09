@@ -42,9 +42,9 @@ final class PcpEvidence
         $todas = $padres->flatMap(function ($padre) {
             return collect([$padre])->concat($padre->relationLoaded('children') ? $padre->children : collect());
         })->values();
-        $planillaIds = $todas->map(fn ($h) => $h->id)->filter()->values()->all();
-        $rutaIds = $todas->flatMap(fn ($hoja) => $hoja->relationLoaded('routes')
-            ? $hoja->routes->map(fn ($r) => $r->id)->all()
+        $planillaIds = $todas->map(fn($h) => $h->id)->filter()->values()->all();
+        $rutaIds = $todas->flatMap(fn($hoja) => $hoja->relationLoaded('routes')
+            ? $hoja->routes->map(fn($r) => $r->id)->all()
             : [])->all();
         $mapa = $this->mapaFirmas($planillaIds, $rutaIds);
 
@@ -88,27 +88,27 @@ final class PcpEvidence
                         : 'Fecha desconocida';
 
                     return collect($hijo->firmas_pendientes ?? [])->map(function (array $pendiente) use ($fecha) {
-                        $pendiente['clave'] = 'dia:'.$fecha.':'.$pendiente['clave'];
-                        $pendiente['etiqueta'] = $fecha.' — '.$pendiente['etiqueta'];
+                        $pendiente['clave'] = 'dia:' . $fecha . ':' . $pendiente['clave'];
+                        $pendiente['etiqueta'] = $fecha . ' — ' . $pendiente['etiqueta'];
 
                         return $pendiente;
                     });
                 })->values()->all();
                 $item->setAttribute('firmas_pendientes', $pendientesHijos);
                 $operativamenteCompletaPadre = $item->children->every(
-                    fn ($hijo) => ($hijo->operativamente_completa ?? false)
+                    fn($hijo) => ($hijo->operativamente_completa ?? false)
                         || $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION
                 );
                 $item->setAttribute('operativamente_completa', $operativamenteCompletaPadre);
                 $item->setAttribute('dias_evidencia_incompleta', $item->children->filter(
-                    fn ($hijo) => ! ($hijo->operativamente_completa ?? false)
+                    fn($hijo) => ! ($hijo->operativamente_completa ?? false)
                         && ! $hijo->esCerradaConExcepcion()
                 )->count());
                 $item->setAttribute('dias_pendientes_certificacion', $item->children->filter(
-                    fn ($hijo) => $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_OPERATIVAMENTE
+                    fn($hijo) => $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_OPERATIVAMENTE
                 )->count());
                 $item->setAttribute('dias_excepcion', $item->children->filter(
-                    fn ($hijo) => $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION
+                    fn($hijo) => $hijo->estado === ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION
                 )->count());
                 $estadosHijos = $item->children->pluck('estado')->all();
                 $estadoPadre = $this->estado($item, $certificadaPadre, $operativamenteCompletaPadre, $estadosHijos);
@@ -153,7 +153,7 @@ final class PcpEvidence
     {
         return array_values(array_filter(
             $pendientes,
-            fn (array $pendiente) => ($pendiente['rol'] ?? null) !== Signature::ROL_COORDINADOR
+            fn(array $pendiente) => ($pendiente['rol'] ?? null) !== Signature::ROL_COORDINADOR
         ));
     }
 
@@ -187,7 +187,7 @@ final class PcpEvidence
             return [];
         }
 
-        $sinRelaciones = $records->filter(fn (ServiceDeliveryControlSheet $record) => ! $record->relationLoaded('routes'));
+        $sinRelaciones = $records->filter(fn(ServiceDeliveryControlSheet $record) => ! $record->relationLoaded('routes'));
         if ($sinRelaciones->isNotEmpty()) {
             $porPlanilla = ServiceDeliveryControlSheetRoute::query()
                 ->whereIn('service_delivery_control_sheet_uuid', $sinRelaciones->pluck('uuid')->all())
@@ -200,7 +200,7 @@ final class PcpEvidence
             }
         }
 
-        $routeIds = $records->flatMap(fn ($record) => $record->routes->pluck('id'))->all();
+        $routeIds = $records->flatMap(fn($record) => $record->routes->pluck('id'))->all();
         $mapa = $this->mapaFirmas($records->pluck('id')->all(), $routeIds);
 
         $pendientes = [];
@@ -266,15 +266,16 @@ final class PcpEvidence
             ->whereIn('project_uuid', $projectUuids)
             ->where('retirada_de_proyecto', false)
             ->with([
-                'routes',
-                'internalControl.thirdParty',
-                'subcontractedControl',
-                'children.routes',
-                'children.internalControl.thirdParty',
-                'children.subcontractedControl',
+                'routes:id,service_delivery_control_sheet_uuid,origin,destination,funcionario_nombre,funcionario_cc',
+                'internalControl.thirdParty:id,uuid,first_name,last_name',
+                'subcontractedControl:id,uuid,service_delivery_control_sheet_uuid,driver_name,driver_signature',
+                'children:id,uuid,parent_uuid,project_uuid,service_date,is_active,type_of_control_sheet,has_exception,exception_notes,starting_kilometer,ending_kilometer,start_time,end_time',
+                'children.routes:id,service_delivery_control_sheet_uuid,origin,destination,funcionario_nombre,funcionario_cc',
+                'children.internalControl.thirdParty:id,uuid,first_name,last_name',
+                'children.subcontractedControl:id,uuid,service_delivery_control_sheet_uuid,driver_name,driver_signature',
             ])
             ->withCount(['children as children_total'])
-            ->withCount(['children as children_open' => fn ($q) => $q->where('is_active', true)]);
+            ->withCount(['children as children_open' => fn($q) => $q->where('is_active', true)]);
 
         if ($filtroAdicional !== null) {
             $filtroAdicional($query);
@@ -288,13 +289,13 @@ final class PcpEvidence
             }
 
             $units = $parents->flatMap(
-                fn (ServiceDeliveryControlSheet $parent) => $parent->children->isNotEmpty()
+                fn(ServiceDeliveryControlSheet $parent) => $parent->children->isNotEmpty()
                     ? $parent->children
                     : collect([$parent])
             )->values();
 
             $planillaIds = $units->pluck('id')->all();
-            $routeIds = $units->flatMap(fn ($unit) => $unit->routes->pluck('id'))->all();
+            $routeIds = $units->flatMap(fn($unit) => $unit->routes->pluck('id'))->all();
             $mapa = $this->mapaFirmas($planillaIds, $routeIds);
             $parentProjectMap = $parents->pluck('project_uuid', 'uuid')->all();
 
@@ -369,8 +370,10 @@ final class PcpEvidence
 
             // Un padre multi-día resume a sus unidades hijas. No se certifica
             // por la firma del padre si un día hijo sigue incompleto.
-            if (in_array(ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION, $estadosHijos, true)
-                || $record->esCerradaConExcepcion()) {
+            if (
+                in_array(ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION, $estadosHijos, true)
+                || $record->esCerradaConExcepcion()
+            ) {
                 return ServiceDeliveryControlSheet::ESTADO_CERRADA_CON_EXCEPCION;
             }
             if (in_array(ServiceDeliveryControlSheet::ESTADO_PARCIAL, $estadosHijos, true)) {
@@ -378,7 +381,7 @@ final class PcpEvidence
             }
             if ($estadosHijos !== [] && count(array_filter(
                 $estadosHijos,
-                fn (string $estado) => $estado === ServiceDeliveryControlSheet::ESTADO_CERTIFICADA
+                fn(string $estado) => $estado === ServiceDeliveryControlSheet::ESTADO_CERTIFICADA
             )) === count($estadosHijos)) {
                 return ServiceDeliveryControlSheet::ESTADO_CERTIFICADA;
             }
@@ -504,35 +507,35 @@ final class PcpEvidence
                 // La novedad tipificada los excuse (§5.1).
                 if (empty($route->end_time) && ! $tieneNovedad) {
                     $pendientes[] = [
-                        'clave' => 'ruta:'.$route->uuid.':hora_fin',
+                        'clave' => 'ruta:' . $route->uuid . ':hora_fin',
                         'etiqueta' => "Recorrido {$n}: falta hora de llegada (o novedad que la excuse)",
                         'rol' => null,
                     ];
                 }
                 if (($route->ending_kilometer === null || $route->ending_kilometer === '') && ! $tieneNovedad) {
                     $pendientes[] = [
-                        'clave' => 'ruta:'.$route->uuid.':km_final',
+                        'clave' => 'ruta:' . $route->uuid . ':km_final',
                         'etiqueta' => "Recorrido {$n}: falta kilometraje final (o novedad que lo excuse)",
                         'rol' => null,
                     ];
                 }
                 if (empty($route->funcionario_nombre) || empty($route->funcionario_cc)) {
                     $pendientes[] = [
-                        'clave' => 'ruta:'.$route->uuid.':funcionario_datos',
+                        'clave' => 'ruta:' . $route->uuid . ':funcionario_datos',
                         'etiqueta' => "Recorrido {$n}: falta identificar al funcionario",
                         'rol' => null,
                     ];
                 }
                 if (! isset($roles[Signature::ROL_FUNCIONARIO])) {
                     $pendientes[] = [
-                        'clave' => 'ruta:'.$route->uuid.':'.Signature::ROL_FUNCIONARIO,
+                        'clave' => 'ruta:' . $route->uuid . ':' . Signature::ROL_FUNCIONARIO,
                         'etiqueta' => "Recorrido {$n}: falta firma del funcionario",
                         'rol' => Signature::ROL_FUNCIONARIO,
                     ];
                 }
                 if (! isset($roles[Signature::ROL_CONDUCTOR])) {
                     $pendientes[] = [
-                        'clave' => 'ruta:'.$route->uuid.':'.Signature::ROL_CONDUCTOR,
+                        'clave' => 'ruta:' . $route->uuid . ':' . Signature::ROL_CONDUCTOR,
                         'etiqueta' => "Recorrido {$n}: falta firma del conductor",
                         'rol' => Signature::ROL_CONDUCTOR,
                     ];
@@ -554,8 +557,10 @@ final class PcpEvidence
                     'rol' => null,
                 ];
             }
-            if ($record->day_kind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
-                && $record->motivoDisponibilidad() === null) {
+            if (
+                $record->day_kind === ServiceDeliveryControlSheet::DIA_DISPONIBILIDAD
+                && $record->motivoDisponibilidad() === null
+            ) {
                 $pendientes[] = [
                     'clave' => 'disponibilidad:motivo',
                     'etiqueta' => 'Falta el motivo de la jornada en disponibilidad',
@@ -564,7 +569,7 @@ final class PcpEvidence
             }
             if (! isset($rolesPlanilla[Signature::ROL_CONDUCTOR])) {
                 $pendientes[] = [
-                    'clave' => 'planilla:'.Signature::ROL_CONDUCTOR,
+                    'clave' => 'planilla:' . Signature::ROL_CONDUCTOR,
                     'etiqueta' => 'Falta firma del conductor',
                     'rol' => Signature::ROL_CONDUCTOR,
                 ];

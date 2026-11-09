@@ -107,9 +107,9 @@ class VehicleReportService extends BaseService
             $start = Carbon::createFromDate($y, $m, 1)->startOfMonth()->toDateString();
             $end = Carbon::createFromDate($y, $m, 1)->endOfMonth()->toDateString();
             $query->where(function (Builder $sub) use ($start, $end) {
-                $sub->whereHas('vehicleDocuments', fn ($d) => $d->whereBetween('expiry_date', [$start, $end]))
-                    ->orWhereHas('operationCards', fn ($c) => $c->whereBetween('expiration_date', [$start, $end]))
-                    ->orWhereHas('businessCollaborationAgreements', fn ($a) => $a->whereBetween('expiry_date', [$start, $end]));
+                $sub->whereHas('vehicleDocuments', fn($d) => $d->whereBetween('expiry_date', [$start, $end]))
+                    ->orWhereHas('operationCards', fn($c) => $c->whereBetween('expiration_date', [$start, $end]))
+                    ->orWhereHas('businessCollaborationAgreements', fn($a) => $a->whereBetween('expiry_date', [$start, $end]));
             });
         }
 
@@ -159,7 +159,7 @@ class VehicleReportService extends BaseService
                     $uuid = $filtros['third_party_uuid'];
                     $query->where(function ($q) use ($uuid) {
                         $q->where('vehicles.third_party_uuid', $uuid)
-                            ->orWhereHas('owners', fn ($oq) => $oq->where('third_party_uuid', $uuid));
+                            ->orWhereHas('owners', fn($oq) => $oq->where('third_party_uuid', $uuid));
                     });
                 }
                 // Si se combina con filtro de documento, tarjeta o convenio
@@ -177,14 +177,14 @@ class VehicleReportService extends BaseService
             case self::FILTER_DRIVER:
                 if (! empty($filtros['third_party_uuid'])) {
                     $uuid = $filtros['third_party_uuid'];
-                    $query->whereHas('driverVehicleAssignments', fn ($q) => $q->where('third_party_uuid', $uuid)->where('is_active', 1));
+                    $query->whereHas('driverVehicleAssignments', fn($q) => $q->where('third_party_uuid', $uuid)->where('is_active', 1));
                 }
                 break;
 
             case self::FILTER_PROJECT:
                 if (! empty($filtros['project_uuid'])) {
                     $uuid = $filtros['project_uuid'];
-                    $query->whereHas('driverVehicleAssignments', fn ($q) => $q->where('project_uuid', $uuid)->where('is_active', 1));
+                    $query->whereHas('driverVehicleAssignments', fn($q) => $q->where('project_uuid', $uuid)->where('is_active', 1));
                 }
                 break;
 
@@ -218,8 +218,8 @@ class VehicleReportService extends BaseService
     {
         $uuids = \App\Models\ProjectDriverVehicle::query()
             ->where('is_active', 1)
-            ->whereHas('vehicle', fn ($v) => $v->where('vehicles.is_active', true)
-                ->when($companyUuid, fn ($w) => $w->where('vehicles.company_uuid', $companyUuid)))
+            ->whereHas('vehicle', fn($v) => $v->where('vehicles.is_active', true)
+                ->when($companyUuid, fn($w) => $w->where('vehicles.company_uuid', $companyUuid)))
             ->distinct()
             ->pluck('third_party_uuid');
 
@@ -240,7 +240,7 @@ class VehicleReportService extends BaseService
         $query = \App\Models\OperationCard::query()
             ->whereNotNull('affiliated_company')
             ->where('affiliated_company', '<>', '')
-            ->whereHas('vehicle', fn ($v) => $v->where('vehicles.is_active', true));
+            ->whereHas('vehicle', fn($v) => $v->where('vehicles.is_active', true));
         if ($companyUuid) {
             $query->where('company_uuid', $companyUuid);
         }
@@ -256,7 +256,7 @@ class VehicleReportService extends BaseService
         $query = \App\Models\BusinessCollaborationAgreement::query()
             ->whereNotNull('contracting_entity_name')
             ->where('contracting_entity_name', '<>', '')
-            ->whereHas('vehicle', fn ($v) => $v->where('vehicles.is_active', true));
+            ->whereHas('vehicle', fn($v) => $v->where('vehicles.is_active', true));
         if ($companyUuid) {
             $query->where('company_uuid', $companyUuid);
         }
@@ -281,25 +281,25 @@ class VehicleReportService extends BaseService
     protected function applyOperationCardFilter(Builder $query, array $filtros): void
     {
         $filtrosDeTarjeta = ['affiliated_company', 'operating_card_number', 'operation_card_status', 'operation_card_expiry_from', 'operation_card_expiry_to'];
-        if (array_filter(array_intersect_key($filtros, array_flip($filtrosDeTarjeta)), fn ($v) => $v !== null && $v !== '')) {
+        if (array_filter(array_intersect_key($filtros, array_flip($filtrosDeTarjeta)), fn($v) => $v !== null && $v !== '')) {
             // Un vehículo particular no tiene tarjeta de operación: nunca coincide con estos filtros.
             $query->where('vehicles.type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR);
         }
 
         if (! empty($filtros['affiliated_company'])) {
             $company = trim((string) $filtros['affiliated_company']);
-            $query->whereHas('operationCards', fn ($q) => $q->where('affiliated_company', $company));
+            $query->whereHas('operationCards', fn($q) => $q->where('affiliated_company', $company));
         }
 
         if (! empty($filtros['operating_card_number'])) {
             $num = trim((string) $filtros['operating_card_number']);
-            $query->whereHas('operationCards', fn ($q) => $q->where('operating_card_number', 'like', "%{$num}%"));
+            $query->whereHas('operationCards', fn($q) => $q->where('operating_card_number', 'like', "%{$num}%"));
         }
 
         if (! empty($filtros['operation_card_status'])) {
             $status = $filtros['operation_card_status'];
             if (in_array($status, ['0', '1', 0, 1, true, false], true)) {
-                $query->whereHas('operationCards', fn ($q) => $q->where('status', (bool) $status));
+                $query->whereHas('operationCards', fn($q) => $q->where('status', (bool) $status));
             } else {
                 $this->filterRelationByExpiry($query, 'operationCards', 'expiration_date', $status);
             }
@@ -350,7 +350,7 @@ class VehicleReportService extends BaseService
                         $subQ->whereIn('document_type', ['SOAT', 'RTM'])
                             ->orWhere(function ($pubQ) {
                                 $pubQ->whereIn('document_type', ['RCC', 'RCE'])
-                                    ->whereHas('vehicle', fn ($v) => $v->where('type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR));
+                                    ->whereHas('vehicle', fn($v) => $v->where('type_of_service', '!=', Vehicle::SERVICIO_PARTICULAR));
                             });
                     });
                 }
@@ -376,7 +376,7 @@ class VehicleReportService extends BaseService
                 $this->applyDateStatusCondition($q, 'expiry_date', $status);
             });
         } elseif (! $isAllAgreements) {
-            $query->whereHas('businessCollaborationAgreements', fn ($q) => $q->where('contracting_entity_name', $name));
+            $query->whereHas('businessCollaborationAgreements', fn($q) => $q->where('contracting_entity_name', $name));
         } else {
             $query->has('businessCollaborationAgreements');
         }
@@ -406,7 +406,7 @@ class VehicleReportService extends BaseService
                 $q->whereNull('runt_status')
                     ->orWhere('runt_status', '!=', 'CANCELADA');
             })
-            ->whereRaw('operation_cards.uuid = (
+                ->whereRaw('operation_cards.uuid = (
                 select oc_sub.uuid
                 from operation_cards as oc_sub
                 where oc_sub.vehicle_uuid = operation_cards.vehicle_uuid
@@ -414,11 +414,11 @@ class VehicleReportService extends BaseService
                 order by oc_sub.expiration_date desc
                 limit 1
             )')
-            ->where(function ($nq) use ($terminosLike) {
-                foreach ($terminosLike as $termino) {
-                    $nq->orWhere('affiliated_company', 'like', "%{$termino}%");
-                }
-            });
+                ->where(function ($nq) use ($terminosLike) {
+                    foreach ($terminosLike as $termino) {
+                        $nq->orWhere('affiliated_company', 'like', "%{$termino}%");
+                    }
+                });
         };
 
         if ($ownershipType === 'propios') {
@@ -514,8 +514,10 @@ class VehicleReportService extends BaseService
     public function paginateReport(array $filtros, int $perPage = 15, int $page = 1): LengthAwarePaginator
     {
         $perPage = min(max($perPage, 1), 50);
+        $companyUuid = $filtros['company_uuid'] ?? request()->attributes->get('current_company_uuid');
+        $nombresPropios = $companyUuid ? \App\Utils\OwnCompany::nombresPropios($companyUuid) : [];
         $paginator = $this->baseQuery($filtros)->paginate($perPage, ['*'], 'page', $page);
-        $paginator->getCollection()->transform(fn ($vehicle) => $this->mapRow($vehicle));
+        $paginator->getCollection()->transform(fn($vehicle) => $this->mapRow($vehicle, $nombresPropios));
 
         return $paginator;
     }
@@ -525,13 +527,18 @@ class VehicleReportService extends BaseService
      */
     public function allForExport(array $filtros, int $limit = 1000): Collection
     {
-        return $this->baseQuery($filtros)->limit($limit)->get()->map(fn ($vehicle) => $this->mapRow($vehicle));
+        $companyUuid = $filtros['company_uuid'] ?? request()->attributes->get('current_company_uuid');
+        $nombresPropios = $companyUuid ? \App\Utils\OwnCompany::nombresPropios($companyUuid) : [];
+
+        return $this->baseQuery($filtros)->limit($limit)->get()->map(fn($vehicle) => $this->mapRow($vehicle, $nombresPropios));
     }
 
     /**
      * Mapea un vehículo a la fila plana del reporte.
+     *
+     * @param array<int, string>|null $nombresPropios Nombres propios precalculados para evitar N+1 (SPEC-011).
      */
-    public function mapRow(Vehicle $vehicle): array
+    public function mapRow(Vehicle $vehicle, ?array $nombresPropios = null): array
     {
         // Por tipo: vencimiento y uuid del documento más reciente (el frontend enlaza a su edición).
         $docs = [];
@@ -550,14 +557,14 @@ class VehicleReportService extends BaseService
         $card = null;
         if ($vehicle->requiereTarjetaOperacion() && $vehicle->relationLoaded('operationCards') && $vehicle->operationCards->isNotEmpty()) {
             $card = $vehicle->operationCards
-                ->filter(fn ($c) => $c->runt_status !== 'CANCELADA')
+                ->filter(fn($c) => $c->runt_status !== 'CANCELADA')
                 ->sortByDesc('expiration_date')->first();
         }
 
         $agreement = null;
         if ($vehicle->relationLoaded('businessCollaborationAgreements') && $vehicle->businessCollaborationAgreements->isNotEmpty()) {
             $agreement = $vehicle->businessCollaborationAgreements
-                ->filter(fn ($a) => (bool) $a->status)
+                ->filter(fn($a) => (bool) $a->status)
                 ->sortByDesc('expiry_date')
                 ->first() ?? $vehicle->businessCollaborationAgreements->sortByDesc('expiry_date')->first();
         }
@@ -573,11 +580,11 @@ class VehicleReportService extends BaseService
         $project = $assignment && $assignment->relationLoaded('project') ? $assignment->project : null;
 
         $affiliateName = $affiliate
-            ? ($affiliate->company_name ?: trim(($affiliate->first_name ?? '').' '.($affiliate->last_name ?? '')))
+            ? ($affiliate->company_name ?: trim(($affiliate->first_name ?? '') . ' ' . ($affiliate->last_name ?? '')))
             : null;
 
         $branch = $vehicle->relationLoaded('branch') ? $vehicle->branch : null;
-        $isOwn = $vehicle->esParticular() || \App\Utils\OwnCompany::esVehiculoPropio($vehicle, $vehicle->company_uuid);
+        $isOwn = $vehicle->esParticular() || \App\Utils\OwnCompany::esVehiculoPropio($vehicle, $vehicle->company_uuid, $nombresPropios);
 
         return [
             'uuid' => $vehicle->uuid,
@@ -608,7 +615,7 @@ class VehicleReportService extends BaseService
             'agreement_expiry' => $agreement?->expiry_date ? Carbon::parse($agreement->expiry_date)->toDateString() : null,
             'affiliate_name' => $affiliateName,
             'driver_name' => $driver
-                ? ($driver->company_name ?: trim(($driver->first_name ?? '').' '.($driver->last_name ?? '')))
+                ? ($driver->company_name ?: trim(($driver->first_name ?? '') . ' ' . ($driver->last_name ?? '')))
                 : null,
             'project_name' => $project?->project_name,
         ];
@@ -622,17 +629,35 @@ class VehicleReportService extends BaseService
      */
     public function calendarEvents(array $filtros = []): array
     {
-        $filas = $this->allForExport($filtros, 1000);
-        $today = Carbon::today();
-        $todayStr = $today->toDateString();
-
-        $rawCategory = strtoupper(trim((string) ($filtros['category'] ?? 'ALL')));
-        $categoryFilter = in_array($rawCategory, ['', 'ALL', 'TODOS'], true) ? 'ALL' : $rawCategory;
+        $companyUuid = $filtros['company_uuid'] ?? request()->attributes->get('current_company_uuid');
+        $nombresPropios = $companyUuid ? \App\Utils\OwnCompany::nombresPropios($companyUuid) : [];
 
         [$windowStart, $windowEnd] = $this->resolveCalendarWindow(
             isset($filtros['month']) && $filtros['month'] !== '' ? (int) $filtros['month'] : null,
             isset($filtros['year']) && $filtros['year'] !== '' ? (int) $filtros['year'] : null
         );
+
+        $filtrosVentana = $filtros;
+        unset($filtrosVentana['month'], $filtrosVentana['year']);
+
+        // Consulta dedicada para el calendario mensual con la ventana extendida ±14 días colindantes (SPEC-011)
+        $query = $this->baseQuery($filtrosVentana);
+        if ($windowStart && $windowEnd) {
+            $query->where(function (Builder $sub) use ($windowStart, $windowEnd) {
+                $sub->whereHas('vehicleDocuments', fn($d) => $d->whereBetween('expiry_date', [$windowStart, $windowEnd]))
+                    ->orWhereHas('operationCards', fn($c) => $c->whereBetween('expiration_date', [$windowStart, $windowEnd]))
+                    ->orWhereHas('businessCollaborationAgreements', fn($a) => $a->whereBetween('expiry_date', [$windowStart, $windowEnd]));
+            });
+        }
+
+        $filas = $query->limit(1000)->get()->map(fn($vehicle) => $this->mapRow($vehicle, $nombresPropios));
+        $totalVehicles = $this->baseQuery($filtrosVentana)->count();
+
+        $today = Carbon::today();
+        $todayStr = $today->toDateString();
+
+        $rawCategory = strtoupper(trim((string) ($filtros['category'] ?? 'ALL')));
+        $categoryFilter = in_array($rawCategory, ['', 'ALL', 'TODOS'], true) ? 'ALL' : $rawCategory;
 
         $kpis = [
             'soat_alert' => 0,
@@ -642,7 +667,7 @@ class VehicleReportService extends BaseService
             'agreement_upcoming' => 0,
             'agreement_nearest_name' => null,
             'up_to_date_docs' => 0,
-            'total_vehicles' => $filas->count(),
+            'total_vehicles' => $totalVehicles,
         ];
 
         $categoryCounts = [
@@ -870,11 +895,11 @@ class VehicleReportService extends BaseService
         if ($code === 'AGREEMENT' && ! empty($row['agreement_name'])) {
             $subtitle = (string) $row['agreement_name'];
         } elseif ($code === 'OPERATION_CARD' && ! empty($row['operation_card_number'])) {
-            $subtitle = 'Habilitación MinTransporte · N.º '.$row['operation_card_number'];
+            $subtitle = 'Habilitación MinTransporte · N.º ' . $row['operation_card_number'];
         }
 
         return [
-            'id' => $row['uuid'].'_'.$code.'_'.$expiryDate,
+            'id' => $row['uuid'] . '_' . $code . '_' . $expiryDate,
             'date' => $expiryDate,
             'vehicle_uuid' => $row['uuid'],
             'vehicle_license_plate' => $row['vehicle_license_plate'],

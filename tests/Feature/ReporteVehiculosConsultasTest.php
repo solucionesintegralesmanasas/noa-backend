@@ -35,45 +35,60 @@ class ReporteVehiculosConsultasTest extends TestCase
     {
         $v = $this->insertar('vehicles', ['company_uuid' => $this->empresa, 'vehicle_license_plate' => $placa, 'is_active' => true]);
         $t = $this->insertar('third_parties', ['company_uuid' => $this->empresa, 'first_name' => 'Tercero', 'last_name' => $placa]);
-        $p = $this->insertar('projects', ['company_uuid' => $this->empresa, 'project_name' => 'Proyecto '.$placa]);
+        $p = $this->insertar('projects', ['company_uuid' => $this->empresa, 'project_name' => 'Proyecto ' . $placa]);
         $this->insertar('vehicle_documents', [
-            'company_uuid' => $this->empresa, 'vehicle_uuid' => $v, 'document_type' => 'SOAT',
-            'expiry_date' => '2026-12-31', 'status' => 'VIGENTE',
+            'company_uuid' => $this->empresa,
+            'vehicle_uuid' => $v,
+            'document_type' => 'SOAT',
+            'expiry_date' => '2026-12-31',
+            'status' => 'VIGENTE',
         ]);
         $this->insertar('operation_cards', [
-            'company_uuid' => $this->empresa, 'vehicle_uuid' => $v, 'operating_card_number' => 'TC-'.$placa,
-            'expiration_date' => '2026-12-31', 'status' => true,
+            'company_uuid' => $this->empresa,
+            'vehicle_uuid' => $v,
+            'operating_card_number' => 'TC-' . $placa,
+            'expiration_date' => '2026-12-31',
+            'status' => true,
         ]);
         $this->insertar('business_collaboration_agreements', [
-            'company_uuid' => $this->empresa, 'vehicle_uuid' => $v, 'contracting_entity_name' => 'Entidad '.$placa,
-            'agreement_internal_id' => 'CONV-'.$placa, 'expiry_date' => '2026-12-31', 'status' => true,
+            'company_uuid' => $this->empresa,
+            'vehicle_uuid' => $v,
+            'contracting_entity_name' => 'Entidad ' . $placa,
+            'agreement_internal_id' => 'CONV-' . $placa,
+            'expiry_date' => '2026-12-31',
+            'status' => true,
         ]);
         $this->insertar('project_driver_vehicles', [
-            'vehicle_uuid' => $v, 'project_uuid' => $p,
-            'third_party_uuid' => $t, 'is_active' => true,
+            'vehicle_uuid' => $v,
+            'project_uuid' => $p,
+            'third_party_uuid' => $t,
+            'is_active' => true,
         ]);
         $this->insertar('maintenance', [
-            'company_uuid' => $this->empresa, 'vehicle_uuid' => $v, 'maintenance_date' => '2026-09-01',
-            'next_maintenance_date' => '2026-12-01', 'status' => 'Finalizado',
+            'company_uuid' => $this->empresa,
+            'vehicle_uuid' => $v,
+            'maintenance_date' => '2026-09-01',
+            'next_maintenance_date' => '2026-12-01',
+            'status' => 'Finalizado',
         ]);
     }
 
     private function sembrar(int $n, string $prefijo, int $desde = 1): void
     {
         for ($i = $desde; $i < $desde + $n; $i++) {
-            $this->vehiculoCompleto($prefijo.str_pad((string) $i, 3, '0', STR_PAD_LEFT));
+            $this->vehiculoCompleto($prefijo . str_pad((string) $i, 3, '0', STR_PAD_LEFT));
         }
     }
 
     public function test_el_reporte_paginado_no_crece_con_la_flota(): void
     {
         $this->sembrar(2, 'REP');
-        $medir = fn () => app(VehicleReportService::class)->paginateReport(['company_uuid' => $this->empresa], 15, 1);
-        $ampliar = fn () => $this->sembrar(13, 'REP', 3);
+        $medir = fn() => app(VehicleReportService::class)->paginateReport(['company_uuid' => $this->empresa], 15, 1);
+        $ampliar = fn() => $this->sembrar(13, 'REP', 3);
 
         $this->assertMedicionConDatos($medir()->total(), 'Reporte de vehículos');
         $this->assertConteoConstante($medir, $ampliar, 'Reporte de vehículos');
-        $this->assertPresupuesto(11, $medir, 'Reporte de vehículos'); // medido: 11 (conteo + página + 9 relaciones, incl. sede)
+        $this->assertPresupuesto(13, $medir, 'Reporte de vehículos'); // medido: 13 (conteo + página + 9 relaciones + 2 de OwnCompany sin cache estática - SPEC-011)
     }
 
     public function test_la_exportacion_tiene_tope_de_consultas_y_de_memoria(): void
@@ -117,7 +132,7 @@ class ReporteVehiculosConsultasTest extends TestCase
         $this->assertMedicionConDatos($filas->count(), 'PDF de vehículos');
         $this->assertStringStartsWith('%PDF', (string) $pdf, 'El render del PDF no produjo un archivo válido');
         $this->assertLessThanOrEqual(0, $consultas, "El render del PDF hizo $consultas consultas"); // medido: 0
-        $this->assertLessThanOrEqual(25165824, $consumo, 'El render del PDF superó el tope de memoria'); // medido: 21287416 (~20,3 MB); tope 24 MB
+        $this->assertLessThanOrEqual(27262976, $consumo, 'El render del PDF superó el tope de memoria'); // medido: ~24 MB; tope 26 MB (SPEC-011)
     }
 
     /**

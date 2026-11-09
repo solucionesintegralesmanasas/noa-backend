@@ -188,6 +188,29 @@ class SystemConfiguration extends Model implements HasMedia
         }
     }
 
+    public function setOwnCompanyNamesAttribute($value): void
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) ? $decoded : [$value];
+        }
+
+        if (is_array($value)) {
+            $normalizados = [];
+            foreach ($value as $item) {
+                if (is_string($item) && trim($item) !== '') {
+                    $normalizado = \App\Utils\OwnCompany::normalizarNombre($item);
+                    if ($normalizado !== '' && ! in_array($normalizado, $normalizados, true)) {
+                        $normalizados[] = $normalizado;
+                    }
+                }
+            }
+            $this->attributes['own_company_names'] = json_encode(array_values($normalizados));
+        } else {
+            $this->attributes['own_company_names'] = null;
+        }
+    }
+
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class, 'company_uuid', 'uuid');

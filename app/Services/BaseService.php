@@ -91,15 +91,6 @@ abstract class BaseService
     }
 
     /**
-     * Tablas de flota cuyo acceso por UUID (show, update, delete) se limita al afiliado dueño.
-     * Fuera de esta lista el comportamiento no cambia; ampliarla exige su prueba en AislamientoAfiliadoTest.
-     */
-    private const TABLAS_AISLADAS_POR_AFILIADO = [
-        'vehicles', 'vehicle_documents', 'operation_cards', 'vehicle_inspections', 'owners_drivers',
-        'third_parties', 'contractors', 'fuec', 'procedures',
-    ];
-
-    /**
      * Sede efectiva del usuario para escrituras:
      * - null: sin restricción (administradores).
      * - '': restringido pero sin sede asignada.
@@ -489,18 +480,5 @@ abstract class BaseService
     {
         app(\App\Services\ActorScope\AlcanceDelActor::class)
             ->aplicarFiltroAfiliado($query, $this->model, $companyUuid, $incluirConductor);
-    }
-
-    /**
-     * Conductores visibles para un afiliado según la pivote nueva y el legado
-     * de owners_drivers. Se centraliza aquí para no duplicar la regla en cada
-     * rama del aislamiento.
-     *
-     * @return array<int, string>
-     */
-    private function conductoresVinculadosAlAfiliado(string $affiliateUuid): array
-    {
-        return app(\App\Services\ActorScope\AlcanceDelActor::class)
-            ->obtenerConductoresDeAfiliado($affiliateUuid);
     }
 }
