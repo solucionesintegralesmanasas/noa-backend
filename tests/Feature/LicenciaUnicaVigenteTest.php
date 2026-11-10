@@ -182,4 +182,35 @@ class LicenciaUnicaVigenteTest extends TestCase
         $respuesta->assertStatus(201);
         $this->assertDatabaseCount('driver_licenses', 2);
     }
+
+    public function test_editar_tercero_conductor_con_licencia_renovada_edita_la_vigente(): void
+    {
+        Sanctum::actingAs($this->usuario(), ['*']);
+
+        $branch = $this->insertar('branches', [
+            'company_uuid' => $this->empresa,
+            'name' => 'Sede Prueba',
+            'address' => 'Calle 1',
+        ]);
+
+        // Renovación real: una VENCIDA vieja (la BD la devuelve primero) y una ACTIVA.
+        $vieja = $this->crear(['status' => 'VENCIDA', 'expiration_date' => '2023-01-01', 'number' => 'V-VIEJA']);
+        $vigente = $this->crear(['number' => 'A-NUEVA']);
+
+        $respuesta = $this->withHeaders(['X-Company-UUID' => $this->empresa])
+            ->putJson('/api/v1/third-parties/'.$this->conductor, [
+                'is_driver' => true,
+                'license_number' => 'A-NUEVA',
+                'license_category' => 'C2',
+                'license_issue_date' => '2022-01-01',
+                'license_expiration_date' => '2030-01-01',
+                'license_status' => 'ACTIVA',
+                'branch_uuid' => $branch,
+            ]);
+
+        $respuesta->assertOk();
+        $this->assertSame('VENCIDA', DB::table('driver_licenses')->where('uuid', $vieja)->value('status'));
+        $this->assertSame('ACTIVA', DB::table('driver_licenses')->where('uuid', $vigente)->value('status'));
+        $this->assertSame('A-NUEVA', DB::table('driver_licenses')->where('uuid', $vigente)->value('number'));
+    }
 }

@@ -752,7 +752,7 @@ class ThirdPartyService extends BaseService
 
             // Actualizamos o creamos la licencia de conducción si es conductor
             if (($data['is_driver'] ?? $record->is_driver) && ! empty($data['license_number'])) {
-                $license = $this->driverLicenseService->getAllDriverLicenses($record->company_uuid, $record->uuid)->first();
+                $license = $this->driverLicenseService->licenciaParaEdicion($record->uuid, $record->company_uuid);
                 $isAffiliate = isset($data['is_affiliate']) ? (bool) $data['is_affiliate'] : (bool) $record->is_affiliate;
                 $affiliateUuid = $data['affiliate_uuid'] ?? ($isAffiliate ? $record->uuid : null);
 
