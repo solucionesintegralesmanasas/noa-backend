@@ -24,11 +24,13 @@ class StoreServiceProvisionContractRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'company_uuid' => 'nullable|uuid|exists:companies,uuid',
+            'company_uuid' => 'required|uuid|exists:companies,uuid',
             'procedure_uuid' => 'required|uuid|exists:procedures,uuid',
             'vehicle_uuid' => 'nullable|uuid|exists:vehicles,uuid',
             'third_party_uuid' => 'nullable|uuid|exists:third_parties,uuid',
-            'contract_number' => 'required|string|max:50|unique:service_provision_contracts,contract_number',
+            'contract_number' => 'nullable|string|max:50',
+            'type_of_action' => 'nullable|in:C,M,E',
+            'contract_type' => 'nullable|in:1,2',
             'issue_date' => 'required|date',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',

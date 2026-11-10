@@ -549,9 +549,9 @@ class RadicacionService extends BaseService
                 : \Carbon\Carbon::parse($contract->issue_date)->format('Ymd');
             $duration = (string) ($contract->duration ?? '');
         } elseif ($contract instanceof ServiceProvisionContract) {
-            // Prestación: contract_type viene del servicio (cobertura indica tipo)
-            $contractType = '2'; // Prestación de servicio
-            $actionType = 'C';
+            // Prestación: tipo y acción se capturan en el formulario del contrato.
+            $contractType = (string) ($contract->contract_type ?? '2');
+            $actionType = (string) ($contract->type_of_action ?? 'C');
             $contractStartDate = $contract->start_date instanceof \Illuminate\Support\Carbon
                 ? $contract->start_date->format('Ymd')
                 : \Carbon\Carbon::parse($contract->start_date)->format('Ymd');
@@ -750,7 +750,24 @@ class RadicacionService extends BaseService
 
         $documentos = app(RadicacionDocumentoService::class)->documentosPorPaso($exp, $hijos);
 
-        return ['expediente' => $exp, 'ruta' => $ruta, 'linea_tiempo' => $linea, 'pasos' => $hijos, 'propietario' => $propietario, 'contratos' => $contratos, 'documentos' => $documentos];
+        // Datos registrados de la empresa: ambos formularios de contrato los
+        // muestran en solo lectura y de ellos salen los TXT/PDF.
+        $company = \App\Models\Company::with('municipality')->where('uuid', $exp->company_uuid)->first();
+        $empresa = [
+            'razon_social' => $company?->business_name,
+            'nit' => $company?->document_number,
+            'direccion' => $company?->address,
+            'telefono' => $company?->phone,
+            'correo' => $company?->email,
+            'ciudad' => $company?->municipality?->name,
+            'representante_legal' => trim((string) $company?->legal_representative_name.' '.(string) $company?->legal_representative_last_name),
+        ];
+        // Número que se asignará al próximo contrato (compartido por ambos).
+        $siguienteContrato = $exp->company_uuid
+            ? app(ContractNumberService::class)->siguiente($exp->company_uuid)
+            : null;
+
+        return ['expediente' => $exp, 'ruta' => $ruta, 'linea_tiempo' => $linea, 'pasos' => $hijos, 'propietario' => $propietario, 'contratos' => $contratos, 'documentos' => $documentos, 'empresa' => $empresa, 'siguiente_contrato' => $siguienteContrato];
     }
 
     /**

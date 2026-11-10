@@ -39,7 +39,7 @@ class StoreFleetServiceContractRequest extends FormRequest
     {
         return [
             'procedure_uuid' => 'required|uuid|exists:procedures,uuid',
-            'company_uuid' => 'nullable|uuid',
+            'company_uuid' => 'required|uuid|exists:companies,uuid',
             'vehicle_uuid' => 'nullable|uuid',
             'third_party_uuid' => 'nullable|uuid',
             'item' => 'nullable|integer',
@@ -49,7 +49,7 @@ class StoreFleetServiceContractRequest extends FormRequest
             'end_date' => 'required|date|after_or_equal:start_date',
             'duration' => 'required|integer',
             'contract_type' => 'nullable|in:1,2',
-            'contract_number' => 'required|string|max:50',
+            'contract_number' => 'nullable|string|max:50',
             'signature_validation' => 'nullable|string|max:5',
             'valuation_amount' => 'nullable|numeric',
         ];

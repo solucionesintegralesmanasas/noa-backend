@@ -83,7 +83,9 @@ class FleetServiceContractService extends BaseService
             'end_date' => $data['end_date'],
             'duration' => $data['duration'],
             'contract_type' => $data['contract_type'] ?? '1',
-            'contract_number' => $data['contract_number'],
+            // El número siempre lo asigna el consecutivo compartido de la
+            // empresa; el formulario ya no lo captura.
+            'contract_number' => app(ContractNumberService::class)->reservar($data['company_uuid']),
             'signature_validation' => $data['signature_validation'] ?? 'S',
             'valuation_amount' => $data['valuation_amount'] ?? 0,
         ]));
