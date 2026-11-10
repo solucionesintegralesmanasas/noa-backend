@@ -7,5 +7,7 @@ return [
     'allowed_headers' => ['*'],
     'exposed_headers' => ['X-API-Version', 'Sunset', 'X-API-Deprecation-Notice', 'Content-Disposition'],
     'max_age' => 3600,
-    'supports_credentials' => false, // Usar Bearer tokens
+    // La cookie HTTP-only del refresh token debe viajar entre el frontend y la
+    // API (subdominios distintos). allowed_origins es una lista explícita, no '*'.
+    'supports_credentials' => true,
 ];

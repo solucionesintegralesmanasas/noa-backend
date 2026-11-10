@@ -11,12 +11,18 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Env;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Middleware\PermissionMiddleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
 use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
+
+// Windows + Apache (mpm_winnt): putenv/getenv no son thread-safe y el .env puede no verse en
+// peticiones concurrentes (503 PDO_ERROR intermitente). Sin putenv, env() usa $_SERVER/$_ENV,
+// que son por-petición y thread-safe.
+Env::disablePutenv();
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
