@@ -110,23 +110,23 @@ class ContratoConsecutivoTest extends TestCase
         $admin = $this->withHeader('X-Company-UUID', $this->empresa)
             ->postJson("$base/fleet-service-contracts", $this->contrato(['type_of_action' => 'M']));
         $admin->assertCreated();
-        $this->assertSame('000001', $admin->json('data.contract_number'));
+        $this->assertSame('0001', $admin->json('data.contract_number'));
         $this->assertSame('1', $admin->json('data.contract_type'));
 
         $prest = $this->withHeader('X-Company-UUID', $this->empresa)
             ->postJson("$base/service-provision-contracts", $this->contrato(['type_of_action' => 'E', 'coverage' => 'NACIONAL']));
         $prest->assertCreated();
-        $this->assertSame('000002', $prest->json('data.contract_number'));
+        $this->assertSame('0002', $prest->json('data.contract_number'));
         $this->assertSame('2', $prest->json('data.contract_type'));
         $this->assertSame('E', $prest->json('data.type_of_action'));
 
         $this->assertDatabaseHas('fleet_service_contracts', [
-            'contract_number' => '000001',
+            'contract_number' => '0001',
             'contract_type' => '1',
             'type_of_action' => 'M',
         ]);
         $this->assertDatabaseHas('service_provision_contracts', [
-            'contract_number' => '000002',
+            'contract_number' => '0002',
             'contract_type' => '2',
             'type_of_action' => 'E',
         ]);
@@ -165,21 +165,36 @@ class ContratoConsecutivoTest extends TestCase
                 'coverage' => 'NACIONAL',
             ]))
             ->assertCreated()
-            ->assertJsonPath('data.contract_number', '000001');
+            ->assertJsonPath('data.contract_number', '0001');
     }
 
-    public function test_el_detalle_expone_los_datos_de_la_empresa_y_el_proximo_numero(): void
+    public function test_el_detalle_expone_los_datos_para_contratos_y_el_proximo_numero(): void
     {
+        // Datos para contratos: viven en la configuración del sistema, no en Empresas.
+        $this->insertar('system_configuration', [
+            'company_uuid' => $this->empresa,
+            'contract_company_name' => 'Razón Social Contrato S.A.S',
+            'contract_company_nit' => '901234567',
+            'contract_company_address' => 'Dirección Contrato 1-2',
+            'contract_company_phone' => '3011111111',
+            'contract_company_email' => 'contratos@razoncontrato.test',
+            'contract_company_rep_name' => 'Juan',
+            'contract_company_rep_last_name' => 'Contrato',
+            'contract_company_rep_document' => '123456789',
+        ]);
+
         Sanctum::actingAs($this->admin(), ['*']);
 
         $res = $this->withHeader('X-Company-UUID', $this->empresa)
             ->getJson("/api/v1/procedure/radicacion/{$this->expediente}/detalle");
 
         $res->assertOk()
-            ->assertJsonPath('data.empresa.razon_social', 'Transportes Consecutivo S.A.S')
-            ->assertJsonPath('data.empresa.direccion', 'Calle 10 # 20-30')
-            ->assertJsonPath('data.empresa.telefono', '3001234567')
-            ->assertJsonPath('data.empresa.representante_legal', 'Ana Pérez')
-            ->assertJsonPath('data.siguiente_contrato', '000001');
+            ->assertJsonPath('data.empresa.razon_social', 'Razón Social Contrato S.A.S')
+            ->assertJsonPath('data.empresa.nit', '901234567')
+            ->assertJsonPath('data.empresa.direccion', 'Dirección Contrato 1-2')
+            ->assertJsonPath('data.empresa.telefono', '3011111111')
+            ->assertJsonPath('data.empresa.correo', 'contratos@razoncontrato.test')
+            ->assertJsonPath('data.empresa.representante_legal', 'Juan Contrato')
+            ->assertJsonPath('data.siguiente_contrato', '0001');
     }
 }

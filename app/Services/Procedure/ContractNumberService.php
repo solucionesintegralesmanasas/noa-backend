@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
  */
 class ContractNumberService
 {
-    public const LONGITUD = 6;
+    public const LONGITUD = 4;
 
     /**
      * Número que se asignaría en la próxima creación. No lo consume: dos
