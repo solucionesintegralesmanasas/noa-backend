@@ -9,6 +9,7 @@ use App\Models\Project;
 use App\Models\ProjectDriverVehicle;
 use App\Models\ServiceDeliveryControlSheet;
 use App\Models\ServiceDeliveryControlSheetRoute;
+use App\Models\ServiceInternalControl;
 use App\Models\Signature;
 use App\Models\ThirdParty;
 use App\Models\Vehicle;
@@ -1461,6 +1462,64 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
 
         return $porVehiculo;
+    }
+
+    /**
+     * Vehículos con asignación activa en el proyecto que aún no tienen ninguna
+     * hoja de control (SPEC-009, alta pendiente). Devuelve placa, interno,
+     * modelo y conductor para que el frontend los liste y cree sus hojas.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function vehiculosAsignadosSinHojas(string $projectUuid): array
+    {
+        $companyUuid = $this->resolverEmpresa(null);
+        if (! $companyUuid || ! Project::query()->where('company_uuid', $companyUuid)->where('uuid', $projectUuid)->exists()) {
+            throw ValidationException::withMessages([
+                'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
+            ]);
+        }
+
+        $porVehiculo = $this->asignacionesActivasPorVehiculo($projectUuid);
+        if (empty($porVehiculo)) {
+            return [];
+        }
+
+        $conHoja = ServiceInternalControl::query()
+            ->whereIn('vehicle_uuid', array_keys($porVehiculo))
+            ->whereHas('serviceDeliveryControlSheet', fn ($q) => $q
+                ->where('project_uuid', $projectUuid)
+                ->where('retirada_de_proyecto', false))
+            ->distinct()
+            ->pluck('vehicle_uuid')
+            ->all();
+
+        $sinHoja = [];
+        foreach ($porVehiculo as $vehicleUuid => $asignacion) {
+            if (in_array($vehicleUuid, $conHoja, true)) {
+                continue;
+            }
+
+            $sinHoja[] = [
+                'vehicle_uuid' => $vehicleUuid,
+                'vehicle' => [
+                    'uuid' => $asignacion->vehicle?->uuid,
+                    'vehicle_license_plate' => $asignacion->vehicle?->vehicle_license_plate,
+                    'internal_number' => $asignacion->vehicle?->internal_number,
+                    'model' => $asignacion->vehicle?->model,
+                ],
+                'third_party_uuid' => $asignacion->third_party_uuid,
+                'thirdParty' => [
+                    'uuid' => $asignacion->thirdParty?->uuid,
+                    'first_name' => $asignacion->thirdParty?->first_name,
+                    'last_name' => $asignacion->thirdParty?->last_name,
+                    'company_name' => $asignacion->thirdParty?->company_name,
+                    'document_number' => $asignacion->thirdParty?->document_number,
+                ],
+            ];
+        }
+
+        return $sinHoja;
     }
 
     /**

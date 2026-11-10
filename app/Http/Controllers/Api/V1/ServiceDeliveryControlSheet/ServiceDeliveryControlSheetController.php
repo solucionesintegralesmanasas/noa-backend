@@ -127,6 +127,35 @@ class ServiceDeliveryControlSheetController extends Controller
     }
 
     #[OA\Get(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/assigned-without-sheets',
+        summary: 'Vehículos con asignación activa en el proyecto que aún no tienen hojas de control',
+        operationId: 'getAssignedVehiclesWithoutSheets',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Lista de vehículos asignados sin hojas.'),
+            new OA\Response(response: 422, description: 'UUID de proyecto inválido.'),
+        ]
+    )]
+    public function assignedWithoutSheets(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'project_uuid' => ['required', 'uuid', 'exists:projects,uuid'],
+            ]);
+
+            $data = $this->serviceDeliveryControlSheetService
+                ->vehiculosAsignadosSinHojas($validated['project_uuid']);
+
+            return $this->successResponse($data, 'Vehículos asignados sin hojas recuperados.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/list',
         summary: 'Obtener catálogo de Hojas de Control de Entrega de Servicios',
         operationId: 'getAllServiceDeliveryControlSheets',

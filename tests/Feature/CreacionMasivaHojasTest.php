@@ -499,6 +499,70 @@ class CreacionMasivaHojasTest extends TestCase
             ->pluck('vehicle_license_plate')->unique()->sort()->values()->all());
     }
 
+    /**
+     * Alta pendiente (SPEC-009): el endpoint `assigned-without-sheets` reporta
+     * los coches con asignación activa que aún no tienen hojas, para que el
+     * modal "Gestionar Asignaciones" pueda crearlas.
+     */
+    public function test_el_endpoint_devuelve_los_coches_asignados_sin_hojas(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1))
+            ->assertCreated();
+
+        $ruta = '/api/v1/control-sheets/service-delivery-control-sheets/assigned-without-sheets?project_uuid='.$this->proyectoA1;
+
+        // Los tres coches ya tienen hoja: el endpoint devuelve vacío.
+        $this->comoAdminA()->getJson($ruta)->assertOk()->assertJsonCount(0, 'data');
+
+        // Se agrega un cuarto coche con asignación activa después del bulk.
+        $conductor = $this->crearTercero($this->empresaA, '91000014', 'T4', $this->sedeA1);
+        $vehiculo4 = $this->crearVehiculo($this->empresaA, $conductor, 'MASA04', $this->sedeA1);
+        $this->insertar('project_driver_vehicles', [
+            'project_uuid' => $this->proyectoA1,
+            'third_party_uuid' => $conductor,
+            'vehicle_uuid' => $vehiculo4,
+            'is_active' => 1,
+        ]);
+
+        // Ahora aparece como pendiente de alta.
+        $this->comoAdminA()->getJson($ruta)->assertOk()->assertJsonPath('data.0.vehicle_uuid', $vehiculo4);
+
+        // Al crear su hoja, deja de aparecer.
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1, [$vehiculo4]))
+            ->assertCreated();
+
+        $this->comoAdminA()->getJson($ruta)->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    /**
+     * Cambio de coche (SPEC-009): si un conductor pasa a otro vehículo del
+     * mismo proyecto (sigue activo), la hoja del coche anterior NO se retira.
+     */
+    public function test_cambiar_de_coche_no_retira_la_hoja_del_coche_anterior(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1))
+            ->assertCreated();
+
+        // Nuevo coche para el conductor 2 (pasa de MASA02 a MASA04).
+        $vehiculo4 = $this->crearVehiculo($this->empresaA, $this->conductores[2], 'MASA04', $this->sedeA1);
+
+        $this->comoAdminA()
+            ->putJson("/api/v1/projects/{$this->proyectoA1}", ['assignments' => [
+                ['third_party_uuid' => $this->conductores[1], 'vehicle_uuid' => $this->vehiculos[1], 'is_active' => true],
+                ['third_party_uuid' => $this->conductores[2], 'vehicle_uuid' => $vehiculo4, 'is_active' => true],
+                ['third_party_uuid' => $this->conductores[3], 'vehicle_uuid' => $this->vehiculos[3], 'is_active' => true],
+            ]])
+            ->assertOk();
+
+        // El coche 2 quedó inactivo pero su conductor sigue activo con el 4:
+        // sus hojas NO se marcan como retiradas.
+        $this->assertSame(0, $this->hojasDe(2)->where('retirada_de_proyecto', 1)->count());
+        $this->assertSame(3, $this->hojasDe(2)->where('retirada_de_proyecto', 0)->count());
+    }
+
     /** Filas (padres e hijos) cuyo control interno pertenece al coche dado. */
     private function hojasDe(int $i)
     {
