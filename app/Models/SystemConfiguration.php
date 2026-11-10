@@ -75,6 +75,14 @@ class SystemConfiguration extends Model implements HasMedia
         'rce_policy_number',
         'platform_fee_type',
         'platform_fee_rates',
+        'contract_company_name',
+        'contract_company_nit',
+        'contract_company_email',
+        'contract_company_phone',
+        'contract_company_address',
+        'contract_company_rep_name',
+        'contract_company_rep_last_name',
+        'contract_company_rep_document',
     ];
 
     protected $casts = [

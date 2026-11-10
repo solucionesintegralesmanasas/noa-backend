@@ -199,7 +199,7 @@ class RadicacionDocumentoService
         $vinculacion = $toHijo ? FleetServiceContract::where('procedure_uuid', $toHijo->uuid)->orderByDesc('issue_date')->first() : null;
         $prestacion = $toHijo ? ServiceProvisionContract::where('procedure_uuid', $toHijo->uuid)->orderByDesc('issue_date')->first() : null;
 
-        $empresa = $this->datosEmpresa($padre->company);
+        $empresa = $this->datosEmpresa($padre->company, $config);
         $propietario = $this->datosPropietario($vehiculo);
         $vinculacion = $this->datosVinculacion($vinculacion);
         $prestacion = $this->datosPrestacion($prestacion);
@@ -281,14 +281,20 @@ class RadicacionDocumentoService
     /**
      * @return array<string, mixed>
      */
-    private function datosEmpresa(?Company $empresa): array
+    private function datosEmpresa(?Company $empresa, ?SystemConfiguration $config): array
     {
         return [
-            'razon_social' => $empresa?->business_name,
+            // Datos para contratos: viven en la configuración del sistema, son
+            // independientes del registro de Empresas.
+            'razon_social' => $config?->contract_company_name,
             'nombre_comercial' => $empresa?->trade_name,
-            'nit' => $empresa?->document_number,
-            'representante' => $this->nombreRepresentante($empresa?->legal_representative_name, $empresa?->legal_representative_last_name),
-            'documento_representante' => $empresa?->legal_representative_document_number,
+            'nit' => $config?->contract_company_nit,
+            'representante' => $this->nombreRepresentante($config?->contract_company_rep_name, $config?->contract_company_rep_last_name),
+            'documento_representante' => $config?->contract_company_rep_document,
+            'direccion' => $config?->contract_company_address,
+            'telefono' => $config?->contract_company_phone,
+            'correo' => $config?->contract_company_email,
+            // Ciudad, firma y logo siguen siendo la identidad real de la empresa.
             'ciudad' => $empresa?->municipality?->name,
             'firma' => $this->imagenDeMedia($empresa?->signature, 480),
             'logo' => $this->imagenDeMedia($empresa?->logo, 420),

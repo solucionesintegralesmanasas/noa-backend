@@ -50,6 +50,18 @@
                 <th>Lugar</th>
                 <td>{{ $expediente['ciudad'] ?? $empresa['ciudad'] ?? '' }}</td>
             </tr>
+            <tr>
+                <th>Dirección del contratante</th>
+                <td>{{ $empresa['direccion'] ?? '' }}</td>
+            </tr>
+            <tr>
+                <th>Teléfono del contratante</th>
+                <td>{{ $empresa['telefono'] ?? '' }}</td>
+            </tr>
+            <tr>
+                <th>Correo del contratante</th>
+                <td>{{ $empresa['correo'] ?? '' }}</td>
+            </tr>
         </table>
     </div>
 

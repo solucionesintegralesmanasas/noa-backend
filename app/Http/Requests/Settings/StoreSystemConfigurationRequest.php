@@ -69,6 +69,14 @@ class StoreSystemConfigurationRequest extends FormRequest
             'rce_policy_number' => 'nullable|string|max:100',
             'platform_fee_type' => 'sometimes|in:PASSENGER_RANGE,VEHICLE_CLASS',
             'platform_fee_rates' => 'nullable|array',
+            'contract_company_name' => 'nullable|string|max:200',
+            'contract_company_nit' => 'nullable|string|max:20',
+            'contract_company_email' => 'nullable|email|max:100',
+            'contract_company_phone' => 'nullable|string|max:20',
+            'contract_company_address' => 'nullable|string|max:200',
+            'contract_company_rep_name' => 'nullable|string|max:255',
+            'contract_company_rep_last_name' => 'nullable|string|max:255',
+            'contract_company_rep_document' => 'nullable|string|max:20',
         ];
     }
 

@@ -753,14 +753,19 @@ class RadicacionService extends BaseService
         // Datos registrados de la empresa: ambos formularios de contrato los
         // muestran en solo lectura y de ellos salen los TXT/PDF.
         $company = \App\Models\Company::with('municipality')->where('uuid', $exp->company_uuid)->first();
+        // Datos para contratos: independientes del registro de Empresas, viven en
+        // la configuración del sistema.
+        $config = $exp->company_uuid
+            ? \App\Models\SystemConfiguration::where('company_uuid', $exp->company_uuid)->first()
+            : null;
         $empresa = [
-            'razon_social' => $company?->business_name,
-            'nit' => $company?->document_number,
-            'direccion' => $company?->address,
-            'telefono' => $company?->phone,
-            'correo' => $company?->email,
+            'razon_social' => $config?->contract_company_name,
+            'nit' => $config?->contract_company_nit,
+            'direccion' => $config?->contract_company_address,
+            'telefono' => $config?->contract_company_phone,
+            'correo' => $config?->contract_company_email,
             'ciudad' => $company?->municipality?->name,
-            'representante_legal' => trim((string) $company?->legal_representative_name.' '.(string) $company?->legal_representative_last_name),
+            'representante_legal' => trim((string) $config?->contract_company_rep_name.' '.(string) $config?->contract_company_rep_last_name),
         ];
         // Número que se asignará al próximo contrato (compartido por ambos).
         $siguienteContrato = $exp->company_uuid

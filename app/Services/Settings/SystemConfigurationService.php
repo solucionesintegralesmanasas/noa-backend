@@ -105,6 +105,14 @@ class SystemConfigurationService extends BaseService
                 'rce_policy_number' => $data['rce_policy_number'] ?? null,
                 'platform_fee_type' => $data['platform_fee_type'] ?? 'VEHICLE_CLASS',
                 'platform_fee_rates' => $data['platform_fee_rates'] ?? null,
+                'contract_company_name' => $data['contract_company_name'] ?? null,
+                'contract_company_nit' => $data['contract_company_nit'] ?? null,
+                'contract_company_email' => $data['contract_company_email'] ?? null,
+                'contract_company_phone' => $data['contract_company_phone'] ?? null,
+                'contract_company_address' => $data['contract_company_address'] ?? null,
+                'contract_company_rep_name' => $data['contract_company_rep_name'] ?? null,
+                'contract_company_rep_last_name' => $data['contract_company_rep_last_name'] ?? null,
+                'contract_company_rep_document' => $data['contract_company_rep_document'] ?? null,
             ]);
         });
     }
@@ -153,6 +161,14 @@ class SystemConfigurationService extends BaseService
                 'rce_policy_number' => $data['rce_policy_number'] ?? $record->rce_policy_number,
                 'platform_fee_type' => $data['platform_fee_type'] ?? $record->platform_fee_type,
                 'platform_fee_rates' => $data['platform_fee_rates'] ?? $record->platform_fee_rates,
+                'contract_company_name' => $data['contract_company_name'] ?? $record->contract_company_name,
+                'contract_company_nit' => $data['contract_company_nit'] ?? $record->contract_company_nit,
+                'contract_company_email' => $data['contract_company_email'] ?? $record->contract_company_email,
+                'contract_company_phone' => $data['contract_company_phone'] ?? $record->contract_company_phone,
+                'contract_company_address' => $data['contract_company_address'] ?? $record->contract_company_address,
+                'contract_company_rep_name' => $data['contract_company_rep_name'] ?? $record->contract_company_rep_name,
+                'contract_company_rep_last_name' => $data['contract_company_rep_last_name'] ?? $record->contract_company_rep_last_name,
+                'contract_company_rep_document' => $data['contract_company_rep_document'] ?? $record->contract_company_rep_document,
             ]);
 
             return $record->fresh();
