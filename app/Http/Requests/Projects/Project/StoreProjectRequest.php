@@ -98,6 +98,7 @@ class StoreProjectRequest extends FormRequest
      * Regla de integridad:
      *  - cada asignación siempre vincula un conductor con SU vehículo (1:1);
      *  - un conductor o un vehículo no pueden repetirse dentro del proyecto.
+     * Solo cuentan las asignaciones activas: las retiradas son histórico.
      */
     public function withValidator(Validator $validator): void
     {
@@ -112,6 +113,10 @@ class StoreProjectRequest extends FormRequest
             $vehiclesSeen = [];
 
             foreach ($assignments as $index => $assignment) {
+                if (! filter_var($assignment['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN)) {
+                    continue;
+                }
+
                 $driver = (string) ($assignment['third_party_uuid'] ?? '');
                 $vehicle = (string) ($assignment['vehicle_uuid'] ?? '');
 

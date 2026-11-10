@@ -102,6 +102,7 @@ class UpdateProjectRequest extends FormRequest
      *  - cada asignación siempre vincula un conductor con SU vehículo (1:1);
      *  - un conductor o un vehículo no pueden repetirse dentro del proyecto.
      * Se evalúa sobre el estado final del proyecto (lo enviado + lo ya asignado).
+     * Solo cuentan las asignaciones activas: las retiradas son histórico.
      */
     public function withValidator(Validator $validator): void
     {
@@ -115,6 +116,10 @@ class UpdateProjectRequest extends FormRequest
                 $vehiclesSeen = [];
 
                 foreach ($assignments as $index => $assignment) {
+                    if (! filter_var($assignment['is_active'] ?? true, FILTER_VALIDATE_BOOLEAN)) {
+                        continue;
+                    }
+
                     $driver = (string) ($assignment['third_party_uuid'] ?? '');
                     $vehicle = (string) ($assignment['vehicle_uuid'] ?? '');
 
