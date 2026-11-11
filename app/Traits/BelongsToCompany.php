@@ -81,8 +81,8 @@ trait BelongsToCompany
             $companyUuid = self::resolveCurrentCompanyUuid();
 
             if ($companyUuid) {
-                $builder->where($builder->getModel()->getTable().'.company_uuid', $companyUuid);
-            } elseif (Auth::check() && method_exists(Auth::user(), 'hasRole') && Auth::user()->hasRole('SUPERADMIN')) {
+                $builder->where($builder->getModel()->getTable() . '.company_uuid', $companyUuid);
+            } elseif (Auth::check() && app(\App\Services\ActorScope\AlcanceDelActor::class)->esSuperadmin()) {
                 // SUPERADMIN opera en cualquier empresa cuando no se ha fijado un contexto específico
                 self::registrarConsultaSinEmpresa($builder->getModel());
             } else {
@@ -105,7 +105,7 @@ trait BelongsToCompany
                 if ($companyUuid) {
                     $model->company_uuid = $companyUuid;
                 } else {
-                    throw new AccessDeniedHttpException('No se puede crear '.class_basename($model).' sin contexto de empresa.');
+                    throw new AccessDeniedHttpException('No se puede crear ' . class_basename($model) . ' sin contexto de empresa.');
                 }
             }
         });
@@ -137,7 +137,7 @@ trait BelongsToCompany
     private static function registrarConsultaSinEmpresa(Model $modelo): void
     {
         $origen = app()->runningInConsole() ? 'consola' : Request::path();
-        $clave = $modelo::class.'|'.$origen;
+        $clave = $modelo::class . '|' . $origen;
 
         if (isset(self::$sinEmpresaRegistradas[$clave])) {
             return;
@@ -222,7 +222,7 @@ trait BelongsToCompany
         }
 
         if (in_array('branch_uuid', $model->getFillable(), true)) {
-            $builder->where($table.'.branch_uuid', $branchUuid);
+            $builder->where($table . '.branch_uuid', $branchUuid);
 
             return;
         }

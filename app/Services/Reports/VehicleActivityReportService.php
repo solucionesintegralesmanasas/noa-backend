@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Reports;
 
+use App\Models\Vehicle;
+use App\Services\ActorScope\AlcanceDelActor;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -16,15 +18,20 @@ use Illuminate\Support\Facades\DB;
  * solicitudes de tanqueo y hojas de control) en una fila por evento.
  * No hereda BaseService: es solo construcción de consultas sobre
  * DB::table, sin CRUD ni modelo único (decisión de diseño del reporte).
+ * Integra AlcanceDelActor para aislar por empresa, sucursal, afiliado y conductor.
  */
 final class VehicleActivityReportService
 {
+    public function __construct(
+        private readonly AlcanceDelActor $alcance
+    ) {}
+
     /**
      * Página del reporte, ordenado por fecha descendente.
      */
     public function paginateReport(array $filtros, int $perPage = 10, int $page = 1): LengthAwarePaginator
     {
-        $perPage = max(1, min(50, $perPage));
+        $perPage = max(1, min(100, $perPage));
 
         return $this->consultaConsolidada($filtros)
             ->paginate($perPage, ['*'], 'page', max(1, $page));
@@ -43,6 +50,13 @@ final class VehicleActivityReportService
      */
     private function consultaConsolidada(array $filtros): Builder
     {
+        $companyUuid = $filtros['company_uuid'] ?? $this->alcance->companyUuid();
+
+        // Fail-Closed: sin empresa, respuesta vacía garantizada.
+        if (! $companyUuid && ! $this->alcance->esSuperadmin()) {
+            return DB::query()->fromRaw('(select 1 where 1 = 0) as actividad');
+        }
+
         $union = $this->brazoInspeccion($filtros);
         $union->unionAll($this->brazoMantenimiento($filtros));
         $union->unionAll($this->brazoCombustible($filtros));
@@ -53,6 +67,17 @@ final class VehicleActivityReportService
         $query = DB::query()->fromSub($union, 'actividad')
             ->leftJoin('projects', 'projects.uuid', '=', 'actividad.project_uuid')
             ->select('actividad.*', 'projects.project_name');
+
+        // Aislamiento del actor (SPEC-013): si el usuario está restringido
+        // (sucursal, afiliado, conductor), acotar los vehículos resultantes.
+        if ($this->alcance->esSucursalRestringida() || $this->alcance->esAfiliado() || $this->alcance->esConductor()) {
+            $vehiculosPermitidosSub = $this->alcance->aplicarAVehiculos(
+                Vehicle::query()->select('vehicles.uuid'),
+                $companyUuid
+            )->toBase();
+
+            $query->whereIn('actividad.vehicle_uuid', $vehiculosPermitidosSub);
+        }
 
         if (! empty($filtros['vehicle_uuid'])) {
             $query->where('actividad.vehicle_uuid', $filtros['vehicle_uuid']);
@@ -137,7 +162,7 @@ final class VehicleActivityReportService
             ->join('vehicles as v', 'v.uuid', '=', 'fr.vehicle_uuid')
             ->leftJoin('third_parties as tp', 'tp.uuid', '=', 'fr.driver_uuid')
             ->where('fr.company_uuid', $f['company_uuid'])
-            ->whereRaw('DATE(fr.requested_at) between ? and ?', [$f['fecha_desde'], $f['fecha_hasta']])
+            ->whereBetween('fr.requested_at', [$f['fecha_desde'].' 00:00:00', $f['fecha_hasta'].' 23:59:59'])
             ->selectRaw(
                 "DATE(fr.requested_at) as event_date, fr.uuid as event_uuid, fr.vehicle_uuid,
                  v.vehicle_license_plate, {$this->proyectoDe('fr.vehicle_uuid')} as project_uuid,

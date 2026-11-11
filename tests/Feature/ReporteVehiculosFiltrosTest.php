@@ -486,4 +486,39 @@ class ReporteVehiculosFiltrosTest extends TestCase
         $vehicle->refresh();
         $this->assertFalse((bool) $vehicle->is_active);
     }
+
+    public function test_calendario_incluye_eventos_limitrofes_colindantes_sin_truncamiento(): void
+    {
+        // Vehículo 1: vence en los últimos días del mes anterior (28 Octubre 2026)
+        $vPrev = $this->insertar('vehicles', ['company_uuid' => $this->empresaUuid, 'vehicle_license_plate' => 'OCT280', 'is_active' => true]);
+        $this->insertar('vehicle_documents', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vPrev,
+            'document_type' => 'SOAT',
+            'expiry_date' => '2026-10-28',
+            'status' => 'VIGENTE',
+        ]);
+
+        // Vehículo 2: vence en los primeros días del mes siguiente (5 Diciembre 2026)
+        $vNext = $this->insertar('vehicles', ['company_uuid' => $this->empresaUuid, 'vehicle_license_plate' => 'DIC050', 'is_active' => true]);
+        $this->insertar('vehicle_documents', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_uuid' => $vNext,
+            'document_type' => 'SOAT',
+            'expiry_date' => '2026-12-05',
+            'status' => 'VIGENTE',
+        ]);
+
+        // Consultar calendario de Noviembre 2026
+        $res = app(VehicleReportService::class)->calendarEvents([
+            'company_uuid' => $this->empresaUuid,
+            'month' => 11,
+            'year' => 2026,
+        ]);
+
+        $eventPlates = collect($res['events'])->pluck('vehicle_license_plate')->all();
+        $this->assertContains('OCT280', $eventPlates, 'Debe incluir eventos de los días colindantes previos (Octubre)');
+        $this->assertContains('DIC050', $eventPlates, 'Debe incluir eventos de los días colindantes posteriores (Diciembre)');
+        $this->assertGreaterThanOrEqual(2, $res['kpis']['total_vehicles'], 'El KPI de total_vehicles no debe truncarse por la ventana');
+    }
 }

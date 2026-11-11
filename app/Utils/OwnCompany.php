@@ -20,13 +20,6 @@ use Illuminate\Support\Str;
 class OwnCompany
 {
     /**
-     * Nombres propios ya normalizados, en caché por petición y empresa.
-     *
-     * @var array<string, array<int, string>>
-     */
-    private static array $cache = [];
-
-    /**
      * Normaliza un nombre para compararlo de forma tolerante: mayúsculas, sin acentos ni
      * signos, espacios colapsados y siglas unificadas (S.A.S, S A S y SAS dan "SAS").
      */
@@ -45,23 +38,18 @@ class OwnCompany
         // Letras sueltas consecutivas ("S A S", "S. A. S.") forman una sigla: "SAS".
         return (string) preg_replace_callback(
             '/(?<![A-Z0-9])[A-Z](?: [A-Z](?![A-Z0-9]))+/',
-            fn (array $m) => str_replace(' ', '', $m[0]),
+            fn(array $m) => str_replace(' ', '', $m[0]),
             $normalizado
         );
     }
 
     /**
-     * Retorna los nombres propios normalizados de una empresa.
+     * Retorna los nombres propios normalizados de una empresa (sin retención de estado estático - SPEC-011).
      *
      * @return array<int, string>
      */
     public static function nombresPropios(?string $companyUuid): array
     {
-        $key = (string) $companyUuid;
-        if (array_key_exists($key, self::$cache)) {
-            return self::$cache[$key];
-        }
-
         $nombres = [];
 
         if ($companyUuid) {
@@ -91,22 +79,24 @@ class OwnCompany
             }
         }
 
-        self::$cache[$key] = $normalizados;
-
         return $normalizados;
     }
 
     /**
      * Indica si el nombre de empresa afiliada corresponde a la empresa propia.
+     *
+     * @param array<int, string>|null $nombresPropios Nombres ya resueltos para evitar consultas N+1 en colecciones.
      */
-    public static function esNombrePropio(?string $affiliatedCompany, ?string $companyUuid): bool
+    public static function esNombrePropio(?string $affiliatedCompany, ?string $companyUuid, ?array $nombresPropios = null): bool
     {
         $normalizado = self::normalizarNombre($affiliatedCompany);
         if ($normalizado === '') {
             return false;
         }
 
-        return in_array($normalizado, self::nombresPropios($companyUuid), true);
+        $nombres = $nombresPropios ?? self::nombresPropios($companyUuid);
+
+        return in_array($normalizado, $nombres, true);
     }
 
     /**
@@ -114,8 +104,10 @@ class OwnCompany
      * Se evalúa la tarjeta activa más reciente; si no hay ninguna activa se
      * usa la más reciente como respaldo. Sin tarjeta no se puede determinar
      * y se considera que no es propio.
+     *
+     * @param array<int, string>|null $nombresPropios Nombres ya resueltos para evitar consultas N+1 en colecciones.
      */
-    public static function esVehiculoPropio(?Vehicle $vehicle, ?string $companyUuid = null): bool
+    public static function esVehiculoPropio(?Vehicle $vehicle, ?string $companyUuid = null, ?array $nombresPropios = null): bool
     {
         if (! $vehicle) {
             return false;
@@ -128,22 +120,22 @@ class OwnCompany
             : OperationCard::query()->where('vehicle_uuid', $vehicle->uuid)->get();
 
         $ordenadas = $tarjetas
-            ->filter(fn (OperationCard $tarjeta) => $tarjeta->runt_status !== 'CANCELADA')
-            ->sortByDesc(fn (OperationCard $tarjeta) => (string) $tarjeta->expiration_date)->values();
-        $vigente = $ordenadas->first(fn (OperationCard $tarjeta) => (bool) $tarjeta->status) ?? $ordenadas->first();
+            ->filter(fn(OperationCard $tarjeta) => $tarjeta->runt_status !== 'CANCELADA')
+            ->sortByDesc(fn(OperationCard $tarjeta) => (string) $tarjeta->expiration_date)->values();
+        $vigente = $ordenadas->first(fn(OperationCard $tarjeta) => (bool) $tarjeta->status) ?? $ordenadas->first();
 
         if (! $vigente) {
             return false;
         }
 
-        return self::esNombrePropio($vigente->affiliated_company, $companyUuid);
+        return self::esNombrePropio($vigente->affiliated_company, $companyUuid, $nombresPropios);
     }
 
     /**
-     * Limpia la caché por petición (útil en pruebas).
+     * Limpia la caché por petición (No-op tras SPEC-011 para compatibilidad).
      */
     public static function limpiarCache(): void
     {
-        self::$cache = [];
+        // No-op: el estado estático en memoria fue retirado en SPEC-011
     }
 }

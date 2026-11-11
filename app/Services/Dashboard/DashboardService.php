@@ -41,7 +41,8 @@ class DashboardService
         private OwnerDriverService $ownerDriverService,
         private FuecService $fuecService,
         private VehicleService $vehicleService,
-        private NotificationsService $notificationsService
+        private NotificationsService $notificationsService,
+        private \App\Services\ActorScope\AlcanceDelActor $alcance
     ) {}
 
     /**
@@ -53,19 +54,24 @@ class DashboardService
         $currentStartDate = Carbon::now()->subDays($days);
         $previousStartDate = Carbon::now()->subDays($days * 2);
 
-        // 1. Vehículos activos y UUIDs en una sola consulta
-        $activeVehicles = $this->vehicleService->buildQuery($companyUuid)
-            ->where('is_active', true)
-            ->select('uuid', 'created_at')
-            ->get();
+        // 1. Vehículos en servicio (actual vs previo) y subconsulta en SQL
+        $vehiclesQuery = $this->vehicleService->buildQuery($companyUuid);
+        if ($this->alcance->esSucursalRestringida() && $this->alcance->branchUuid()) {
+            $vehiclesQuery->where('vehicles.branch_uuid', $this->alcance->branchUuid());
+        }
 
-        $currentVehicles = $activeVehicles->count();
-        $previousVehicles = $activeVehicles->where('created_at', '<', $currentStartDate)->count();
-        $vehicleUuids = $activeVehicles->pluck('uuid');
+        $vehicleCounts = (clone $vehiclesQuery)->where('is_active', true)->toBase()->selectRaw(
+            'COUNT(*) as current_count, SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END) as previous_count',
+            [$currentStartDate->toDateTimeString()]
+        )->first();
 
-        // 2. Kilómetros recorridos en una sola consulta SQL agregada para ambos períodos
+        $currentVehicles = (int) ($vehicleCounts->current_count ?? 0);
+        $previousVehicles = (int) ($vehicleCounts->previous_count ?? 0);
+
+        // 2. Kilómetros recorridos pasando la subconsulta de vehículos del alcance
+        $vehiclesSubQuery = (clone $vehiclesQuery)->select('vehicles.uuid')->toBase();
         [$currentKm, $previousKm] = $this->getKilometersTraveledSummary(
-            $vehicleUuids,
+            $vehiclesSubQuery,
             $previousStartDate,
             $currentStartDate
         );
@@ -111,23 +117,9 @@ class DashboardService
         $startDate = Carbon::now()->subDays($days)->startOfDay();
         $endDate = Carbon::now()->endOfDay();
 
-        // 1. Resolver el UUID del conductor (ThirdParty) y empresa
-        $companyUuid = $user->company_uuid;
-        $thirdPartyUuid = $user->third_party_uuid;
-        $companyFirst = null;
-        try {
-            $companyFirst = $user->companies()->first();
-        } catch (\Throwable) {
-            $companyFirst = null;
-        }
-
-        if (! $companyUuid && $companyFirst) {
-            $companyUuid = $companyFirst->uuid;
-        }
-
-        if (! $thirdPartyUuid && $companyFirst) {
-            $thirdPartyUuid = $companyFirst->pivot->third_party_uuid ?? null;
-        }
+        // 1. Resolver el UUID del conductor (ThirdParty) y empresa respetando AlcanceDelActor
+        $companyUuid = $this->alcance->companyUuid() ?? $user->company_uuid;
+        $thirdPartyUuid = $this->alcance->thirdPartyUuid() ?? $user->third_party_uuid;
 
         // Fallback: resolver conductor por correo dentro de la empresa (como DriverLocationController).
         if (! $thirdPartyUuid && $companyUuid && ! empty($user->email)) {
@@ -234,15 +226,16 @@ class DashboardService
                 ->select('service_internal_controls.vehicle_uuid', DB::raw('SUM(GREATEST(0, CAST(ending_kilometer AS SIGNED) - CAST(starting_kilometer AS SIGNED))) as total_km'))
                 ->pluck('total_km', 'vehicle_uuid');
 
-            // Batch 6: Última inspección de cada vehículo (subconsulta MAX(id) en SQL en lugar de volcar todo a PHP)
+            // Batch 6: Última inspección de cada vehículo por fecha real de inspección
             $lastInspections = DB::table('vehicle_inspections as vi')
                 ->joinSub(
                     DB::table('vehicle_inspections')
                         ->whereIn('vehicle_uuid', $vehicleUuidsList)
                         ->groupBy('vehicle_uuid')
-                        ->select('vehicle_uuid', DB::raw('MAX(id) as max_id')),
+                        ->select('vehicle_uuid', DB::raw('MAX(inspection_date) as max_date')),
                     'latest',
-                    fn($join) => $join->on('vi.id', '=', 'latest.max_id')
+                    fn($join) => $join->on('vi.vehicle_uuid', '=', 'latest.vehicle_uuid')
+                        ->on('vi.inspection_date', '=', 'latest.max_date')
                 )
                 ->select('vi.vehicle_uuid', 'vi.inspection_date', 'vi.mileage')
                 ->get()
@@ -595,7 +588,8 @@ class DashboardService
     public function getAlerts(): array
     {
         $companyUuid = $this->getCompanyUuid();
-        $all = $this->notificationsService->getAllNotifications($companyUuid);
+        $thirdPartyUuid = $this->alcance->thirdPartyUuid();
+        $all = $this->notificationsService->getAllNotifications($companyUuid, $thirdPartyUuid, false);
 
         $alerts = [];
         $idCounter = 1;
@@ -804,31 +798,38 @@ class DashboardService
     /**
      * Calcula los kilómetros recorridos en el período actual y anterior en una sola consulta SQL agregada.
      *
-     * @param \Illuminate\Support\Collection<int, string> $vehicleUuids
+     * @param \Illuminate\Database\Eloquent\Builder|\Illuminate\Support\Collection<int, string> $vehiclesSource
      * @return array{0: int, 1: int} [currentKm, previousKm]
      */
     private function getKilometersTraveledSummary(
-        \Illuminate\Support\Collection $vehicleUuids,
+        $vehiclesSource,
         Carbon $previousStartDate,
         Carbon $currentStartDate
     ): array {
-        if ($vehicleUuids->isEmpty()) {
+        if ($vehiclesSource instanceof \Illuminate\Support\Collection && $vehiclesSource->isEmpty()) {
             return [0, 0];
+        }
+
+        if ($vehiclesSource instanceof \Spatie\QueryBuilder\QueryBuilder) {
+            $vehiclesSource = $vehiclesSource->getEloquentBuilder()->toBase();
+        } elseif ($vehiclesSource instanceof \Illuminate\Database\Eloquent\Builder) {
+            $vehiclesSource = $vehiclesSource->toBase();
         }
 
         $currStart = $currentStartDate->toDateTimeString();
         $prevStart = $previousStartDate->toDateTimeString();
 
         $aggregates = DB::table('vehicle_inspections')
-            ->whereIn('vehicle_uuid', $vehicleUuids)
+            ->whereIn('vehicle_uuid', $vehiclesSource)
             ->groupBy('vehicle_uuid')
-            ->select(
-                'vehicle_uuid',
-                DB::raw("MAX(CASE WHEN created_at >= '{$currStart}' THEN mileage END) as curr_max"),
-                DB::raw("MIN(CASE WHEN created_at >= '{$currStart}' THEN mileage END) as curr_min"),
-                DB::raw("MAX(CASE WHEN created_at >= '{$prevStart}' AND created_at < '{$currStart}' THEN mileage END) as prev_max"),
-                DB::raw("MIN(CASE WHEN created_at >= '{$prevStart}' AND created_at < '{$currStart}' THEN mileage END) as prev_min"),
-                DB::raw("MAX(CASE WHEN created_at < '{$prevStart}' THEN mileage END) as older_max")
+            ->select('vehicle_uuid')
+            ->selectRaw(
+                "MAX(CASE WHEN vehicle_inspections.created_at >= ? THEN mileage END) as curr_max,
+                 MIN(CASE WHEN vehicle_inspections.created_at >= ? THEN mileage END) as curr_min,
+                 MAX(CASE WHEN vehicle_inspections.created_at >= ? AND vehicle_inspections.created_at < ? THEN mileage END) as prev_max,
+                 MIN(CASE WHEN vehicle_inspections.created_at >= ? AND vehicle_inspections.created_at < ? THEN mileage END) as prev_min,
+                 MAX(CASE WHEN vehicle_inspections.created_at < ? THEN mileage END) as older_max",
+                [$currStart, $currStart, $prevStart, $currStart, $prevStart, $currStart, $prevStart]
             )
             ->get();
 
@@ -838,7 +839,15 @@ class DashboardService
         foreach ($aggregates as $row) {
             // Período actual
             if ($row->curr_max !== null) {
-                $currBaseline = $row->prev_max ?? $row->older_max ?? $row->curr_min;
+                $prev = $row->prev_max !== null ? (int) $row->prev_max : null;
+                $older = $row->older_max !== null ? (int) $row->older_max : null;
+                $baselineCandidate = null;
+                if ($prev !== null && $older !== null) {
+                    $baselineCandidate = max($prev, $older);
+                } else {
+                    $baselineCandidate = $prev ?? $older;
+                }
+                $currBaseline = $baselineCandidate ?? $row->curr_min;
                 $diff = (int) $row->curr_max - (int) $currBaseline;
                 if ($diff > 0) {
                     $currentKm += $diff;
@@ -868,10 +877,12 @@ class DashboardService
     {
         $currStart = $currentStartDate->toDateTimeString();
         $prevStart = $previousStartDate->toDateTimeString();
+        $table = $query->getModel()->getTable();
 
-        $counts = $query->getQuery()->selectRaw(
-            "SUM(CASE WHEN created_at >= '{$currStart}' THEN 1 ELSE 0 END) as current_count,
-             SUM(CASE WHEN created_at >= '{$prevStart}' AND created_at < '{$currStart}' THEN 1 ELSE 0 END) as previous_count"
+        $counts = $query->toBase()->selectRaw(
+            "SUM(CASE WHEN {$table}.created_at >= ? THEN 1 ELSE 0 END) as current_count,
+             SUM(CASE WHEN {$table}.created_at >= ? AND {$table}.created_at < ? THEN 1 ELSE 0 END) as previous_count",
+            [$currStart, $prevStart, $currStart]
         )->first();
 
         return [
@@ -881,8 +892,8 @@ class DashboardService
     }
 
     /**
-     * Retorna el UUID de la empresa actual, aislando la data (Multi-tenant).
-     * Si es SUPERADMIN retorna null para ver toda la flota global.
+     * Retorna el UUID de la empresa actual, aislando la data (Multi-tenant) con AlcanceDelActor.
+     * Si es SUPERADMIN y no envía X-Company-UUID retorna null para ver toda la flota global.
      */
     private function getCompanyUuid(): ?string
     {
@@ -891,18 +902,10 @@ class DashboardService
             return $contextCompanyUuid;
         }
 
-        $user = Auth::user();
-        if (! $user) {
+        if ($this->alcance->esSuperadmin()) {
             return null;
         }
 
-        // Si es superadmin tiene acceso a los datos de todas las empresas.
-        if (method_exists($user, 'hasRole') && $user->hasRole('SUPERADMIN')) {
-            return null;
-        }
-
-        // `users` no tiene `company_uuid`: la empresa es la que fijó `SetCompanyContext`
-        // o, sin contexto, la primera del usuario.
-        return $user->companies()->first()?->uuid;
+        return $this->alcance->companyUuid();
     }
 }

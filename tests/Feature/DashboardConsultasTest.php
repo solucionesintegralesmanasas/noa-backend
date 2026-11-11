@@ -255,11 +255,7 @@ class DashboardConsultasTest extends TestCase
                 ],
             ]);
 
-        $mutacionesSummary = array_filter(
-            DB::getQueryLog(),
-            fn (array $query): bool => preg_match('/^(insert|update|delete|replace|alter|create|drop|truncate)\b/i', trim($query['query'])) === 1
-        );
-        $this->assertCount(0, $mutacionesSummary, 'GET /dashboard/summary no debe realizar escrituras');
+        $this->assertCount(0, $this->mutacionesSql(), 'GET /dashboard/summary no debe realizar escrituras');
 
         // 2. Alertas del dashboard (no debe persistir cambios en BD durante la lectura)
         DB::flushQueryLog();
@@ -275,11 +271,7 @@ class DashboardConsultasTest extends TestCase
         $this->assertIsArray($alertas);
         $this->assertNotEmpty($alertas, 'Debe retornar alertas incluyendo el documento vencido');
 
-        $mutacionesAlerts = array_filter(
-            DB::getQueryLog(),
-            fn (array $query): bool => preg_match('/^(insert|update|delete|replace|alter|create|drop|truncate)\b/i', trim($query['query'])) === 1
-        );
-        $this->assertCount(0, $mutacionesAlerts, 'GET /dashboard/alerts no debe realizar escrituras');
+        $this->assertCount(0, $this->mutacionesSql(), 'GET /dashboard/alerts no debe realizar escrituras');
 
         // 3. Resumen del conductor (autenticado como CONDUCTOR)
         $conductorData = $this->empresaConConductor(2);
@@ -300,10 +292,17 @@ class DashboardConsultasTest extends TestCase
                 ],
             ]);
 
-        $mutacionesConductor = array_filter(
+        $this->assertCount(0, $this->mutacionesSql(), 'GET /dashboard/conductor-summary no debe realizar escrituras');
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function mutacionesSql(): array
+    {
+        return array_filter(
             DB::getQueryLog(),
-            fn (array $query): bool => preg_match('/^(insert|update|delete|replace|alter|create|drop|truncate)\b/i', trim($query['query'])) === 1
+            fn(array $query): bool => preg_match('/^(insert|update|delete|replace|alter|create|drop|truncate)\b/i', trim($query['query'])) === 1
         );
-        $this->assertCount(0, $mutacionesConductor, 'GET /dashboard/conductor-summary no debe realizar escrituras');
     }
 }

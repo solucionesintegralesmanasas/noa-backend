@@ -161,7 +161,7 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         $motivo = $this->motivoDisponibilidad();
 
         return $motivo !== null
-            ? 'VEHÍCULO EN DISPONIBILIDAD — '.$motivo
+            ? 'VEHÍCULO EN DISPONIBILIDAD — ' . $motivo
             : 'VEHÍCULO EN DISPONIBILIDAD';
     }
 
@@ -248,40 +248,22 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
 
     public function getVehicleLicensePlateAttribute(): ?string
     {
-        if ($this->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
-            if ($this->relationLoaded('internalControl') && $this->internalControl) {
-                $ic = $this->internalControl;
-                $vehicle = $ic->relationLoaded('vehicle') ? $ic->vehicle : null;
-                if ($vehicle) {
-                    return $vehicle->vehicle_license_plate;
-                }
-            }
-
-            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
-                return $this->parent->vehicle_license_plate;
-            }
-
-            return null;
-        }
-
         if (in_array($this->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
-            if ($this->relationLoaded('subcontractedControl') && $this->subcontractedControl) {
+            if ($this->relationLoaded('subcontractedControl') && $this->subcontractedControl?->vehicle_license_plate) {
                 return $this->subcontractedControl->vehicle_license_plate;
             }
+        }
 
-            if ($this->relationLoaded('internalControl') && $this->internalControl) {
-                $ic = $this->internalControl;
-                $vehicle = $ic->relationLoaded('vehicle') ? $ic->vehicle : null;
-                if ($vehicle) {
-                    return $vehicle->vehicle_license_plate;
-                }
+        if ($this->relationLoaded('internalControl') && $this->internalControl) {
+            $ic = $this->internalControl;
+            $vehicle = $ic->relationLoaded('vehicle') ? $ic->vehicle : null;
+            if ($vehicle?->vehicle_license_plate) {
+                return $vehicle->vehicle_license_plate;
             }
+        }
 
-            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
-                return $this->parent->vehicle_license_plate;
-            }
-
-            return null;
+        if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
+            return $this->parent->vehicle_license_plate;
         }
 
         return null;
@@ -289,48 +271,28 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
 
     public function getDriverNameAttribute(): ?string
     {
-        if ($this->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
-            if ($this->relationLoaded('internalControl') && $this->internalControl) {
-                $ic = $this->internalControl;
-                $driver = $ic->relationLoaded('thirdParty') ? $ic->thirdParty : null;
-                if ($driver) {
-                    return trim($driver->first_name.' '.$driver->last_name);
-                }
+        if (in_array($this->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
+            if ($this->relationLoaded('subcontractedControl') && ! empty($this->subcontractedControl?->driver_name_and_surname)) {
+                return trim($this->subcontractedControl->driver_name_and_surname);
             }
-
-            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
-                $parentDriver = $this->parent->driver_name;
-                if ($parentDriver) {
-                    return $parentDriver;
-                }
-            }
-
-            return ! empty($this->official_name_and_surname) ? trim($this->official_name_and_surname) : null;
         }
 
-        if (in_array($this->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
-            if ($this->relationLoaded('subcontractedControl') && $this->subcontractedControl) {
-                if (! empty($this->subcontractedControl->driver_name_and_surname)) {
-                    return trim($this->subcontractedControl->driver_name_and_surname);
+        if ($this->relationLoaded('internalControl') && $this->internalControl) {
+            $ic = $this->internalControl;
+            $driver = $ic->relationLoaded('thirdParty') ? $ic->thirdParty : null;
+            if ($driver) {
+                $nombre = trim(($driver->first_name ?? '') . ' ' . ($driver->last_name ?? ''));
+                if ($nombre !== '') {
+                    return $nombre;
                 }
             }
+        }
 
-            if ($this->relationLoaded('internalControl') && $this->internalControl) {
-                $ic = $this->internalControl;
-                $driver = $ic->relationLoaded('thirdParty') ? $ic->thirdParty : null;
-                if ($driver) {
-                    return trim($driver->first_name.' '.$driver->last_name);
-                }
+        if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
+            $parentDriver = $this->parent->driver_name;
+            if ($parentDriver) {
+                return $parentDriver;
             }
-
-            if ($this->parent_uuid && $this->relationLoaded('parent') && $this->parent) {
-                $parentDriver = $this->parent->driver_name;
-                if ($parentDriver) {
-                    return $parentDriver;
-                }
-            }
-
-            return ! empty($this->official_name_and_surname) ? trim($this->official_name_and_surname) : null;
         }
 
         return ! empty($this->official_name_and_surname) ? trim($this->official_name_and_surname) : null;

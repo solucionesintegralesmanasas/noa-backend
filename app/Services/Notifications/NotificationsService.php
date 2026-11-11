@@ -986,6 +986,33 @@ class NotificationsService extends BaseService
                 $companyUuid = $vehicle->company_uuid;
                 $this->vehiculosPrecargados = collect([$vehicle->uuid => $vehicle]);
 
+                // Actualizar título, mensaje y extra_data en alertas del vehículo si la placa cambió
+                $alertasConPlacaVieja = Notification::query()
+                    ->where('company_uuid', $companyUuid)
+                    ->where(function (Builder $q) use ($vehicle) {
+                        $q->where('extra_data->vehicle_uuid', $vehicle->uuid)
+                            ->orWhere('entity_uuid', $vehicle->uuid);
+                    })
+                    ->where('extra_data->vehicle_license_plate', '!=', $vehicle->vehicle_license_plate)
+                    ->get();
+
+                foreach ($alertasConPlacaVieja as $notif) {
+                    $extra = $notif->extra_data ?? [];
+                    $placaAnterior = $extra['vehicle_license_plate'] ?? '';
+                    $extra['vehicle_license_plate'] = $vehicle->vehicle_license_plate;
+                    $nuevoTitulo = $notif->title;
+                    $nuevoMensaje = $notif->message;
+                    if ($placaAnterior) {
+                        $nuevoTitulo = str_replace($placaAnterior, $vehicle->vehicle_license_plate, $nuevoTitulo);
+                        $nuevoMensaje = str_replace($placaAnterior, $vehicle->vehicle_license_plate, $nuevoMensaje);
+                    }
+                    $notif->update([
+                        'title' => $nuevoTitulo,
+                        'message' => $nuevoMensaje,
+                        'extra_data' => $extra,
+                    ]);
+                }
+
                 $today = Carbon::today();
                 $alertDate = $today->copy()->addDays(self::EXPIRY_ALERT_DAYS);
 

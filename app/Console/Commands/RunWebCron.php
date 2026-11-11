@@ -30,11 +30,6 @@ class RunWebCron extends Command
      */
     protected $description = 'Ejecuta las tareas automáticas del WebCron (notificaciones y sincronizaciones)';
 
-    /**
-     * Tiempo de vida del candado en minutos.
-     */
-    private const LOCK_MINUTES = 60;
-
     public function handle(
         EmailLogService $emailLogService,
         NotificationsService $notificationsService,
@@ -71,7 +66,7 @@ class RunWebCron extends Command
             @touch($lockFile);
             $this->info('WebCron completado con éxito.');
         } catch (\Throwable $e) {
-            Log::error('WebCron falló: '.$e->getMessage());
+            Log::error('WebCron falló: ' . $e->getMessage());
             // Si falla, liberamos el candado para permitir reintentar en la siguiente petición
             @unlink($lockFile);
 

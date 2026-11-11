@@ -464,4 +464,39 @@ class AlcanceDelActorTest extends TestCase
         $this->assertNotContains($this->vehiculoConductor, $uuids);
         $this->assertNotContains($this->vehiculoEmpresaB, $uuids);
     }
+
+    public function test_normaliza_alias_canonico_de_roles(): void
+    {
+        $userConAlias = $this->crearUsuario('administrador', $this->empresaA, null);
+
+        $alcance = new AlcanceDelActor();
+        $alcance->resolverContexto($userConAlias, $this->empresaA);
+
+        $this->assertTrue($alcance->esAdminEmpresa(), 'El alias "administrador" debe normalizarse a ADMIN_EMPRESA');
+        $this->assertFalse($alcance->esSuperadmin());
+    }
+
+    public function test_aislamiento_fuec_para_afiliado_y_conductor(): void
+    {
+        request()->attributes->set('current_company_uuid', $this->empresaA);
+        $alcance = app(AlcanceDelActor::class);
+
+        // Afiliado: debe aislar por vehículo propio
+        $alcance->resolverContexto($this->userAfiliado, $this->empresaA);
+        $fuecModel = new \App\Models\Fuec();
+        $queryAfiliado = \App\Models\Fuec::query();
+        $alcance->aplicarFiltroAfiliado($queryAfiliado, $fuecModel, $this->empresaA);
+        $sqlAfiliado = $queryAfiliado->toSql();
+
+        $this->assertStringContainsString('vehicles', $sqlAfiliado);
+
+        // Conductor: debe filtrar por conductor o vehículos asignados
+        $alcance->limpiarCache();
+        $alcance->resolverContexto($this->userConductor, $this->empresaA);
+        $queryConductor = \App\Models\Fuec::query();
+        $alcance->aplicarFiltroAfiliado($queryConductor, $fuecModel, $this->empresaA);
+        $sqlConductor = $queryConductor->toSql();
+
+        $this->assertStringContainsString('main_conductor_uuid', $sqlConductor);
+    }
 }
