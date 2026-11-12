@@ -35,6 +35,13 @@ return [
         ],
     ],
 
+    // Bot de Telegram para alertas de documentos vencidos. `chat_id` es solo un
+    // respaldo: el valor real se configura por empresa en Configuración del sistema.
+    'telegram-bot-api' => [
+        'token' => env('TELEGRAM_BOT_TOKEN'),
+        'chat_id' => env('TELEGRAM_CHAT_ID'),
+    ],
+
     'google' => [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
@@ -59,14 +66,11 @@ return [
     ],
 
     'route_map' => [
+        // Proveedor del mapa estático: osm (por defecto), mapbox o none (renderizado GD en memoria sin red).
         'provider' => env('MAP_STATIC_PROVIDER', 'osm'),
         'osm_url' => env('MAP_STATIC_OSM_URL', 'https://staticmap.openstreetmap.de/staticmap.php'),
         'mapbox_token' => env('MAPBOX_TOKEN'),
         'timeout' => (int) env('MAP_STATIC_TIMEOUT', 6),
-        // Caché en disco de las imágenes descargadas (ARQ-006): la URL determina la imagen, así que un
-        // punto GPS nuevo cambia la clave y nunca se sirve un mapa obsoleto.
-        'cache_enabled' => (bool) env('MAP_STATIC_CACHE', true),
-        'cache_days' => (int) env('MAP_STATIC_CACHE_DAYS', 30),
     ],
 
 

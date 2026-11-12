@@ -32,7 +32,7 @@ class ServiceControlSheetExport implements FromCollection, WithHeadings
         $f = $this->filtros;
         $query = ServiceDeliveryControlSheet::query()
             ->where('is_active', false)
-            ->with(['project', 'routes', 'internalControl.vehicle'])
+            ->conRelacionesCompletas()
             ->orderBy('service_date', 'asc');
 
         if (! empty($f['company_uuid'])) {
@@ -64,6 +64,9 @@ class ServiceControlSheetExport implements FromCollection, WithHeadings
         }
         if (! empty($f['third_party_uuid'])) {
             $query->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $f['third_party_uuid']));
+        }
+        if (! empty($f['project_uuid'])) {
+            $query->where('project_uuid', $f['project_uuid']);
         }
 
         $filas = [];

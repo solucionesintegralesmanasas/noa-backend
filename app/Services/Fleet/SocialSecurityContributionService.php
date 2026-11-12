@@ -258,27 +258,19 @@ class SocialSecurityContributionService extends BaseService
                 ->update(['status' => 'PAGADO Y EN CURSO']);
             $updated += $currentPaid;
 
-            // 2. Detectar mora por tercero
-            $thirdPartyUuids = SocialSecurityContribution::query()
-                ->select('third_party_uuid')
-                ->distinct()
-                ->pluck('third_party_uuid');
-
-            foreach ($thirdPartyUuids as $tpuuid) {
-                $hasCurrentPaid = SocialSecurityContribution::where('third_party_uuid', $tpuuid)
-                    ->where('billing_period', $currentMonth)
-                    ->whereNotNull('payment_date')
-                    ->exists();
-
-                if (!$hasCurrentPaid) {
-                    $affected = SocialSecurityContribution::where('third_party_uuid', $tpuuid)
-                        ->where('billing_period', '<', $currentMonth)
-                        ->whereNull('payment_date')
-                        ->where('status', '!=', 'EN MORA')
-                        ->update(['status' => 'EN MORA']);
-                    $updated += $affected;
-                }
-            }
+            // 2. Detectar mora por tercero (SPEC-014: actualización masiva en una sola sentencia SQL sin N+1)
+            $moraAffected = SocialSecurityContribution::where('billing_period', '<', $currentMonth)
+                ->whereNull('payment_date')
+                ->where('status', '!=', 'EN MORA')
+                ->whereNotExists(function ($subQuery) use ($currentMonth) {
+                    $subQuery->selectRaw(1)
+                        ->from('social_security_contributions as ssc_sub')
+                        ->whereColumn('ssc_sub.third_party_uuid', 'social_security_contributions.third_party_uuid')
+                        ->where('ssc_sub.billing_period', $currentMonth)
+                        ->whereNotNull('ssc_sub.payment_date');
+                })
+                ->update(['status' => 'EN MORA']);
+            $updated += $moraAffected;
 
             DB::commit();
 

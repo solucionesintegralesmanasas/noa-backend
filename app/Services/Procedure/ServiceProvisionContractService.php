@@ -39,12 +39,17 @@ class ServiceProvisionContractService extends BaseService
 
     public function create(array $data): Model
     {
+        $companyUuid = (string) ($data['company_uuid'] ?? app(\App\Services\ActorScope\AlcanceDelActor::class)->companyUuid());
+
         return $this->transaction(fn () => ServiceProvisionContract::create([
-            'company_uuid' => $data['company_uuid'] ?? null,
+            'company_uuid' => $companyUuid,
             'procedure_uuid' => $data['procedure_uuid'] ?? null,
             'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
             'third_party_uuid' => $data['third_party_uuid'] ?? null,
-            'contract_number' => $data['contract_number'],
+            // Consecutivo compartido con el contrato de administración de flota.
+            'contract_number' => app(ContractNumberService::class)->reservar($companyUuid),
+            'type_of_action' => $data['type_of_action'] ?? 'C',
+            'contract_type' => $data['contract_type'] ?? '2',
             'issue_date' => $data['issue_date'],
             'start_date' => $data['start_date'],
             'end_date' => $data['end_date'],
@@ -70,6 +75,8 @@ class ServiceProvisionContractService extends BaseService
                 'vehicle_uuid' => $data['vehicle_uuid'] ?? $record->vehicle_uuid,
                 'third_party_uuid' => $data['third_party_uuid'] ?? $record->third_party_uuid,
                 'contract_number' => $data['contract_number'] ?? $record->contract_number,
+                'type_of_action' => $data['type_of_action'] ?? $record->type_of_action,
+                'contract_type' => $data['contract_type'] ?? $record->contract_type,
                 'issue_date' => $data['issue_date'] ?? $record->issue_date,
                 'start_date' => $data['start_date'] ?? $record->start_date,
                 'end_date' => $data['end_date'] ?? $record->end_date,
@@ -80,6 +87,10 @@ class ServiceProvisionContractService extends BaseService
                 'status' => $data['status'] ?? $record->status,
                 'document_hash' => $data['document_hash'] ?? $record->document_hash,
             ]);
+
+            // El TXT de prestación debe reflejar el contrato ya editado.
+            app(RadicacionService::class)->regenerarTxtsDeContrato($record->procedure_uuid, 'PRESTACION');
+
             return true;
         });
     }

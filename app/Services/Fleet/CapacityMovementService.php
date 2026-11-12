@@ -177,6 +177,113 @@ class CapacityMovementService
         $movimiento->update(['operation_card_uuid' => $operationCardUuid]);
     }
 
+    /**
+     * Consulta (sin mutar nada) el cupo disponible de la empresa para un tipo de
+     * vehículo. Devuelve `null` cuando la empresa no tiene capacidad activa
+     * configurada, para que el llamador decida si eso es error o auditoría.
+     *
+     * @return array{
+     *     conveyor_capacity_uuid: string,
+     *     vehicle_type: string|null,
+     *     authorized_capacity: int,
+     *     current_capacity: int,
+     *     available: bool
+     * }|null
+     */
+    public function cupoDisponible(string $companyUuid, ?string $vehicleType = null): ?array
+    {
+        $capacidad = $this->resolverCapacidad($companyUuid, $vehicleType);
+        if (! $capacidad) {
+            return null;
+        }
+
+        $actual = (int) $capacidad->current_capacity;
+
+        return [
+            'conveyor_capacity_uuid' => $capacidad->uuid,
+            'vehicle_type' => $capacidad->vehicle_type,
+            'authorized_capacity' => (int) $capacidad->authorized_capacity,
+            'current_capacity' => $actual,
+            'available' => $actual > 0,
+        ];
+    }
+
+    /**
+     * Historial paginado del libro mayor, con el saldo real de cada capacidad para
+     * detectar desvíos frente a la conciliación.
+     *
+     * @param  array{movement_type?: string|null, vehicle_uuid?: string|null, desde?: string|null, hasta?: string|null, company_uuid?: string|null}  $filtros
+     */
+    public function listarMovimientos(array $filtros = [], int $perPage = 15, int $page = 1): \Illuminate\Contracts\Pagination\LengthAwarePaginator
+    {
+        $query = CapacityMovement::with([
+            'vehicle:uuid,vehicle_license_plate,internal_number',
+            'procedure:uuid,procedure_code,procedure_type,link_type',
+            'conveyorCapacity:uuid,vehicle_type,authorized_capacity,current_capacity',
+        ])->orderByDesc('id');
+
+        if (! empty($filtros['company_uuid'])) {
+            $query->where('company_uuid', $filtros['company_uuid']);
+        }
+        if (! empty($filtros['movement_type'])) {
+            $query->where('movement_type', $filtros['movement_type']);
+        }
+        if (! empty($filtros['vehicle_uuid'])) {
+            $query->where('vehicle_uuid', $filtros['vehicle_uuid']);
+        }
+        if (! empty($filtros['desde'])) {
+            $query->whereDate('created_at', '>=', $filtros['desde']);
+        }
+        if (! empty($filtros['hasta'])) {
+            $query->whereDate('created_at', '<=', $filtros['hasta']);
+        }
+
+        return $query->paginate($perPage, ['*'], 'page', $page);
+    }
+
+    /**
+     * Diferencia entre el saldo guardado y el neto del libro mayor, por capacidad
+     * de la empresa. Un valor distinto de cero señala que hay que conciliar.
+     *
+     * Los queries van sin scope de empresa porque la conciliación se acota por el
+     * `company_uuid` explícito (y por el de la resolución de habilitación).
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function conciliacionDeEmpresa(string $companyUuid): array
+    {
+        $capacidades = ConveyorCapacity::withoutGlobalScopes()
+            ->whereHas('enablingResolution', fn ($q) => $q->withoutGlobalScopes()->where('company_uuid', $companyUuid))
+            ->orderBy('id')
+            ->get(['uuid', 'vehicle_type', 'authorized_capacity', 'current_capacity']);
+
+        $netos = CapacityMovement::withoutGlobalScopes()
+            ->where('company_uuid', $companyUuid)
+            ->get(['conveyor_capacity_uuid', 'movement_type', 'quantity'])
+            ->groupBy('conveyor_capacity_uuid')
+            ->map(fn ($movimientos) => $movimientos->sum(
+                fn (CapacityMovement $m) => CapacityMovement::signo($m->movement_type) * (int) $m->quantity
+            ));
+
+        return $capacidades->map(function (ConveyorCapacity $capacidad) use ($netos) {
+            // El libro mayor solo explica el movimiento; el saldo autorizado es el
+            // punto de partida, así que el esperado es autorizado + neto.
+            $neto = (int) ($netos[$capacidad->uuid] ?? 0);
+            $esperado = (int) $capacidad->authorized_capacity + $neto;
+            $actual = (int) $capacidad->current_capacity;
+
+            return [
+                'conveyor_capacity_uuid' => $capacidad->uuid,
+                'vehicle_type' => $capacidad->vehicle_type,
+                'authorized_capacity' => (int) $capacidad->authorized_capacity,
+                'current_capacity' => $actual,
+                'movimientos_netos' => $neto,
+                'esperado' => $esperado,
+                'diferencia' => $actual - $esperado,
+            ];
+        })->values()->all();
+    }
+
     /** Movimiento ya registrado para el mismo paso y tipo (idempotencia). */
     private function movimientoExistente(string $procedureUuid, string $tipo): ?CapacityMovement
     {

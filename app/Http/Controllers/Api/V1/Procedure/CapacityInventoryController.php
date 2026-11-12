@@ -15,6 +15,10 @@ use OpenApi\Attributes as OA;
 /**
  * Controlador API para la gestión integral y exposición de endpoints de InventarioCapacidad.
  *
+ * DEPRECADO (2026-11-05): el inventario de capacidad paralelo ya no tiene rutas.
+ * El sistema real de cupos es `conveyor_capacity.current_capacity` con su libro
+ * mayor `capacity_movements` (ver App\Services\Fleet\CapacityMovementService).
+ *
  * @author   Darwin Montes
  *
  * @version  1.0.0

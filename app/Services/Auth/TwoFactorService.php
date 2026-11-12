@@ -17,6 +17,10 @@ use Laravel\Sanctum\PersonalAccessToken;
  */
 class TwoFactorService
 {
+    public function __construct(
+        private readonly AuthenticationService $auth
+    ) {}
+
     /**
      * Método confirmForUser.
      *
@@ -56,8 +60,12 @@ class TwoFactorService
                 $currentToken->delete();
             }
 
+            // Emitir el par completo (acceso + refresco), igual que el login sin 2FA.
+            $tokens = $this->auth->generateTokenPair($user);
+
             return [
-                'token' => $user->createToken('auth_token', ['*'])->plainTextToken,
+                'token' => $tokens['access_token'],
+                'refresh_token' => $tokens['refresh_token'],
                 'is_recovery' => $isRecovery,
             ];
         }

@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Procedure\FleetServiceContract;
 
+use App\Http\Requests\Procedure\Radicacion\ValidaEmpresaDelContexto;
+use App\Models\Procedure;
 use App\Traits\HandlesApiResponse;
+use Closure;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Support\Carbon;
 
 /**
  * Petición de validación para la creación de un nuevo ContratoGestionFlota.
@@ -22,7 +26,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
  */
 class StoreFleetServiceContractRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaEmpresaDelContexto;
 
     /**
      * Determina si el usuario está autorizado para realizar esta petición.
@@ -32,24 +36,51 @@ class StoreFleetServiceContractRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $this->prepararEmpresaDelContexto();
+    }
+
     /**
      * Obtiene las reglas de validación que se aplicarán a la petición.
      */
     public function rules(): array
     {
         return [
-            'procedure_uuid' => 'required|uuid|exists:procedures,uuid',
-            'company_uuid' => 'nullable|uuid',
+            'procedure_uuid' => [
+                'required',
+                'uuid',
+                'exists:procedures,uuid',
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    $companyUuid = $this->input('company_uuid') ?? $this->attributes->get('current_company_uuid');
+                    if ($companyUuid && ! Procedure::where('company_uuid', $companyUuid)->where('uuid', $value)->exists()) {
+                        $fail('El expediente no pertenece a la empresa activa.');
+                    }
+                },
+            ],
+            'company_uuid' => ['required', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'vehicle_uuid' => 'nullable|uuid',
             'third_party_uuid' => 'nullable|uuid',
             'item' => 'nullable|integer',
             'type_of_action' => 'nullable|in:C,M,E',
             'issue_date' => 'required|date',
             'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
+            'end_date' => [
+                'required',
+                'date',
+                'after_or_equal:start_date',
+                'after_or_equal:today',
+                // Regla RUNT del contrato de vinculación: vigencia máxima de 24 meses.
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    $inicio = Carbon::parse((string) $this->input('start_date'));
+                    if (Carbon::parse((string) $value)->gt($inicio->copy()->addMonthsNoOverflow(24))) {
+                        $fail('El contrato de vinculación no puede superar 24 meses (2 años).');
+                    }
+                },
+            ],
             'duration' => 'required|integer',
             'contract_type' => 'nullable|in:1,2',
-            'contract_number' => 'required|string|max:50',
+            'contract_number' => 'nullable|string|max:50',
             'signature_validation' => 'nullable|string|max:5',
             'valuation_amount' => 'nullable|numeric',
         ];

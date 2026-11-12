@@ -14,9 +14,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Proveedor tecnológico de facturación electrónica (fase posterior).
+ * Proveedor tecnológico de facturación electrónica.
  *
- * En fase 1 y 2 solo se registra el catálogo; ningún documento se transmite.
+ * Driver único: Factus (emisión electrónica DIAN). Las credenciales OAuth2
+ * (client_id, client_secret, email, client_password) y los tokens
+ * (access_token, refresh_token) se cifran en reposo.
  */
 class BillingProvider extends Model
 {
@@ -26,6 +28,8 @@ class BillingProvider extends Model
 
     public const DRIVER_NULO = 'nulo';
 
+    public const DRIVER_FACTUS = 'factus';
+
     public const DRIVER_APIDIAN = 'apidian';
 
     protected $fillable = [
@@ -33,12 +37,14 @@ class BillingProvider extends Model
         'name',
         'driver',
         'server_url',
-        'test_set_id',
         'send_to_dian',
         'settings',
         'client_id',
         'client_secret',
         'client_password',
+        'access_token',
+        'refresh_token',
+        'access_token_expires_at',
         'email',
         'start_date',
         'end_date',
@@ -47,28 +53,36 @@ class BillingProvider extends Model
         'is_active',
     ];
 
-    protected $hidden = ['id', 'client_secret', 'client_password'];
+    protected $hidden = ['id', 'client_secret', 'client_password', 'access_token', 'refresh_token'];
 
     protected $casts = [
         'start_date' => 'date',
         'end_date' => 'date',
         'send_to_dian' => 'boolean',
-        // ApiDian autentica con token; se cifra en reposo. Los valores guardados
-        // antes de este cast estaban en texto plano y deben volver a guardarse.
+        // Secreto de la aplicación OAuth2 (Factus), cifrado en reposo.
         'client_secret' => 'encrypted',
-        // Credenciales del portal (paso 00 de la colección) para renovar el JWT.
+        // Contraseña del portal Factus, cifrada en reposo.
         'client_password' => 'encrypted',
+        // Tokens OAuth2 de Factus, cifrados en reposo.
+        'access_token' => 'encrypted',
+        'refresh_token' => 'encrypted',
+        'access_token_expires_at' => 'datetime',
         'settings' => 'array',
         'is_active' => 'boolean',
     ];
 
-    /** Resuelve un override de mapeo ApiDian desde settings (ej. municipality_id). */
+    /** Resuelve un override de mapeo Factus desde settings (ej. numbering_range_id). */
     public function ajuste(string $clave): ?string
     {
         return $this->settings[$clave] ?? null;
     }
 
-    public function usaApiDian(): bool
+    public function usaFactus(): bool
+    {
+        return $this->driver === self::DRIVER_FACTUS;
+    }
+
+    public function usaApidian(): bool
     {
         return $this->driver === self::DRIVER_APIDIAN;
     }

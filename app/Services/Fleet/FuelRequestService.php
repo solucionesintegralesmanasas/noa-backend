@@ -66,6 +66,17 @@ class FuelRequestService extends BaseService
         ?string $notes = null
     ): FuelRequest {
         return $this->transaction(function () use ($vehicleUuid, $driverUuid, $usuario, $companyUuid, $notes) {
+            // La empresa es la del contexto (o la pasada por flujos internos);
+            // sin ninguna no se crea: antes caía a la empresa del vehículo y
+            // un flujo interno con un uuid arbitrario podía crear la
+            // solicitud en cualquier empresa.
+            $empresa = $companyUuid
+                ?? request()->attributes->get('current_company_uuid');
+
+            if (! $empresa) {
+                throw new \InvalidArgumentException('No hay una empresa activa para crear la solicitud.');
+            }
+
             // Con scopes (empresa y sede del contexto): un vehículo ajeno no
             // existe aquí; antes el lookup pelado permitía crear solicitudes
             // para el vehículo de otra empresa.
@@ -76,17 +87,6 @@ class FuelRequestService extends BaseService
 
             if (! $vehiculo) {
                 throw new \InvalidArgumentException('El vehículo no pertenece a la empresa o sede activa.');
-            }
-
-            // La empresa es la del contexto (o la pasada por flujos internos);
-            // sin ninguna no se crea: antes caía a la empresa del vehículo y
-            // un flujo interno con un uuid arbitrario podía crear la
-            // solicitud en cualquier empresa.
-            $empresa = $companyUuid
-                ?? request()->attributes->get('current_company_uuid');
-
-            if (! $empresa) {
-                throw new \InvalidArgumentException('No hay una empresa activa para crear la solicitud.');
             }
 
             if ($vehiculo->company_uuid !== $empresa) {

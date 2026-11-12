@@ -72,6 +72,9 @@ class CuposCapacidadTest extends TestCase
 
     private function cardNueva(array $extra = []): \App\Models\OperationCard
     {
+        // Flujo interno sin HTTP: se emula el contexto que fija SetCompanyContext.
+        request()->attributes->set('current_company_uuid', $this->empresa);
+
         return app(OperationCardService::class)->createOperationCard(array_merge([
             'company_uuid' => $this->empresa,
             'vehicle_uuid' => $this->vehiculo,

@@ -27,6 +27,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // SPEC-013: Módulo profundo y cohesivo de alcance del actor (AlcanceDelActor / ActorScopeService)
+        $this->app->scoped(\App\Services\ActorScope\AlcanceDelActor::class);
+        $this->app->scoped(\App\Services\ActorScopeService::class, function ($app) {
+            return $app->make(\App\Services\ActorScope\AlcanceDelActor::class);
+        });
+        $this->app->alias(\App\Services\ActorScope\AlcanceDelActor::class, 'actor.scope');
+
         // Driver de facturación electrónica POR EMPRESA: se resuelve según el
         // proveedor de cada empresa en billing_providers (driver='apidian').
         // Sin proveedor activo, o con driver='nulo', se usa el driver nulo

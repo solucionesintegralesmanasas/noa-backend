@@ -9,6 +9,7 @@ use App\Models\Project;
 use App\Models\ProjectDriverVehicle;
 use App\Models\ServiceDeliveryControlSheet;
 use App\Models\ServiceDeliveryControlSheetRoute;
+use App\Models\ServiceInternalControl;
 use App\Models\Signature;
 use App\Models\ThirdParty;
 use App\Models\Vehicle;
@@ -20,6 +21,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -74,7 +76,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     ): LengthAwarePaginator {
         $query = $this->query()
             ->whereNull('parent_uuid')
-            ->with(['project', 'routes', 'children.routes'])
+            ->conRelacionesDetalle()
             ->withCount(['children as children_total'])
             ->withCount(['children as children_open' => function ($q) {
                 $q->where('is_active', true);
@@ -95,13 +97,13 @@ class ServiceDeliveryControlSheetService extends BaseService
             $query->where(function ($q) {
                 $q->where(function ($qq) {
                     $qq->where('is_active', false)
-                        ->whereDoesntHave('children', fn ($c) => $c->where('is_active', true));
-                })->orWhereHas('children', fn ($c) => $c->where('is_active', false));
+                        ->whereDoesntHave('children', fn($c) => $c->where('is_active', true));
+                })->orWhereHas('children', fn($c) => $c->where('is_active', false));
             });
         } elseif ($estadoFiltro === 'en_curso') {
             $query->where(function ($q) {
                 $q->where('is_active', true)
-                    ->orWhereHas('children', fn ($c) => $c->where('is_active', true));
+                    ->orWhereHas('children', fn($c) => $c->where('is_active', true));
             });
         } elseif ($estadoFiltro === 'con_pendientes') {
             $subconsultaCertificado = static function ($sub, string $columnaId): void {
@@ -120,27 +122,27 @@ class ServiceDeliveryControlSheetService extends BaseService
                         ->where(function ($cond) use ($subconsultaCertificado) {
                             $cond->where('is_active', true)
                                 ->orWhere(function ($closed) use ($subconsultaCertificado) {
-                                    $closed->where(fn ($ex) => $ex->whereNull('exception_reason')->orWhere('exception_reason', ''))
+                                    $closed->where(fn($ex) => $ex->whereNull('exception_reason')->orWhere('exception_reason', ''))
                                         ->where(function ($inc) use ($subconsultaCertificado) {
                                             $inc->whereNull('end_time')
                                                 ->orWhereNull('ending_kilometer')
-                                                ->orWhereNotExists(fn ($sub) => $subconsultaCertificado($sub, 'service_delivery_control_sheet.id'));
+                                                ->orWhereNotExists(fn($sub) => $subconsultaCertificado($sub, 'service_delivery_control_sheet.id'));
                                         });
                                 });
                         });
                 })
-                // Caso 2: Planilla multi-día (con hijos) -> al menos un hijo con pendientes
-                ->orWhereHas('children', function ($child) use ($subconsultaCertificado) {
-                    $child->where('is_active', true)
-                        ->orWhere(function ($closed) use ($subconsultaCertificado) {
-                            $closed->where(fn ($ex) => $ex->whereNull('exception_reason')->orWhere('exception_reason', ''))
-                                ->where(function ($inc) use ($subconsultaCertificado) {
-                                    $inc->whereNull('end_time')
-                                        ->orWhereNull('ending_kilometer')
-                                        ->orWhereNotExists(fn ($sub) => $subconsultaCertificado($sub, 'service_delivery_control_sheet.id'));
-                                });
-                        });
-                });
+                    // Caso 2: Planilla multi-día (con hijos) -> al menos un hijo con pendientes
+                    ->orWhereHas('children', function ($child) use ($subconsultaCertificado) {
+                        $child->where('is_active', true)
+                            ->orWhere(function ($closed) use ($subconsultaCertificado) {
+                                $closed->where(fn($ex) => $ex->whereNull('exception_reason')->orWhere('exception_reason', ''))
+                                    ->where(function ($inc) use ($subconsultaCertificado) {
+                                        $inc->whereNull('end_time')
+                                            ->orWhereNull('ending_kilometer')
+                                            ->orWhereNotExists(fn($sub) => $subconsultaCertificado($sub, 'service_delivery_control_sheet.id'));
+                                    });
+                            });
+                    });
             });
         }
 
@@ -162,16 +164,16 @@ class ServiceDeliveryControlSheetService extends BaseService
                     }
                 }
                 // Buscar también por nombre de proyecto
-                $q->orWhereHas('project', fn ($pq) => $pq->where('project_name', 'like', "%{$search}%"));
+                $q->orWhereHas('project', fn($pq) => $pq->where('project_name', 'like', "%{$search}%"));
                 // ...por placa y conductor (vehículo interno o subcontratado).
                 $q->orWhereHas('internalControl', function ($ic) use ($search) {
-                    $ic->whereHas('vehicle', fn ($v) => $v->where('vehicle_license_plate', 'like', "%{$search}%"))
-                        ->orWhereHas('thirdParty', fn ($t) => $t->where('first_name', 'like', "%{$search}%")
+                    $ic->whereHas('vehicle', fn($v) => $v->where('vehicle_license_plate', 'like', "%{$search}%"))
+                        ->orWhereHas('thirdParty', fn($t) => $t->where('first_name', 'like', "%{$search}%")
                             ->orWhere('last_name', 'like', "%{$search}%")
                             ->orWhere('company_name', 'like', "%{$search}%")
                             ->orWhere('trade_name', 'like', "%{$search}%"));
                 });
-                $q->orWhereHas('subcontractedControl', fn ($sc) => $sc->where('vehicle_license_plate', 'like', "%{$search}%")
+                $q->orWhereHas('subcontractedControl', fn($sc) => $sc->where('vehicle_license_plate', 'like', "%{$search}%")
                     ->orWhere('driver_name_and_surname', 'like', "%{$search}%"));
             });
         }
@@ -235,7 +237,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
 
         $projectQuery = Project::query()
-            ->withCount(['driverVehicleAssignments as assignments_count' => fn ($q) => $q->active()])
+            ->withCount(['driverVehicleAssignments as assignments_count' => fn($q) => $q->active()])
             ->orderBy('project_name');
 
         if (! $companyUuid) {
@@ -248,7 +250,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
 
         if ($resolvedThirdParty !== false) {
-            $projectQuery->whereHas('driverVehicleAssignments', fn ($q) => $q->active()->where('third_party_uuid', $resolvedThirdParty));
+            $projectQuery->whereHas('driverVehicleAssignments', fn($q) => $q->active()->where('third_party_uuid', $resolvedThirdParty));
         }
 
         $projects = $projectQuery->get([
@@ -270,8 +272,8 @@ class ServiceDeliveryControlSheetService extends BaseService
         if ($resolvedThirdParty !== false) {
             $filtroConductor = function ($q) use ($resolvedThirdParty) {
                 $q->where(function ($sub) use ($resolvedThirdParty) {
-                    $sub->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $resolvedThirdParty))
-                        ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $resolvedThirdParty));
+                    $sub->whereHas('internalControl', fn($c) => $c->where('third_party_uuid', $resolvedThirdParty))
+                        ->orWhereHas('children.internalControl', fn($c) => $c->where('third_party_uuid', $resolvedThirdParty));
                 });
             };
         }
@@ -309,7 +311,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         $query = $this->query()
             ->whereNull('parent_uuid')
             ->where('retirada_de_proyecto', false)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+            ->conRelacionesDetalle();
 
         $this->aplicarFiltroConductor($query);
 
@@ -337,8 +339,8 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
 
         $query->where(function ($q) use ($thirdPartyUuid) {
-            $q->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
-                ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid));
+            $q->whereHas('internalControl', fn($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                ->orWhereHas('children.internalControl', fn($c) => $c->where('third_party_uuid', $thirdPartyUuid));
         });
     }
 
@@ -350,8 +352,10 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         $user = Auth::user();
 
-        if (! $user || ! method_exists($user, 'hasRole') || ! $user->hasRole('CONDUCTOR')
-            || $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA', 'EMPLEADO', 'AFILIADO'])) {
+        if (
+            ! $user || ! method_exists($user, 'hasRole') || ! $user->hasRole('CONDUCTOR')
+            || $user->hasAnyRole(['SUPERADMIN', 'ADMIN_EMPRESA', 'EMPLEADO', 'AFILIADO'])
+        ) {
             return false;
         }
 
@@ -359,8 +363,8 @@ class ServiceDeliveryControlSheetService extends BaseService
 
         if (! $thirdPartyUuid) {
             $companyUser = ($companyUuid
-                    ? $user->companies()->where('company_user.company_uuid', $companyUuid)->first()
-                    : null)
+                ? $user->companies()->where('company_user.company_uuid', $companyUuid)->first()
+                : null)
                 ?? $user->companies()->first();
             $thirdPartyUuid = $companyUser?->pivot?->third_party_uuid;
         }
@@ -452,7 +456,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     public function getServiceDeliveryControlSheetByUuid(string $uuid): ?Model
     {
         $query = ServiceDeliveryControlSheet::where('uuid', $uuid)
-            ->with(['project', 'routes', 'children.routes', 'children.internalControl', 'children.subcontractedControl']);
+            ->conRelacionesDetalle();
 
         $thirdPartyUuid = $this->conductorThirdPartyUuid();
         if ($thirdPartyUuid !== false) {
@@ -462,9 +466,9 @@ class ServiceDeliveryControlSheetService extends BaseService
 
                     return;
                 }
-                $q->whereHas('internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
-                    ->orWhereHas('children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid))
-                    ->orWhereHas('parent.children.internalControl', fn ($c) => $c->where('third_party_uuid', $thirdPartyUuid));
+                $q->whereHas('internalControl', fn($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                    ->orWhereHas('children.internalControl', fn($c) => $c->where('third_party_uuid', $thirdPartyUuid))
+                    ->orWhereHas('parent.children.internalControl', fn($c) => $c->where('third_party_uuid', $thirdPartyUuid));
             });
         }
 
@@ -514,29 +518,37 @@ class ServiceDeliveryControlSheetService extends BaseService
      */
     private function validarPertenencia(string $companyUuid, array $data): void
     {
-        if (! empty($data['project_uuid'])
-            && ! Project::query()->where('company_uuid', $companyUuid)->where('uuid', $data['project_uuid'])->exists()) {
+        if (
+            ! empty($data['project_uuid'])
+            && ! Project::query()->where('company_uuid', $companyUuid)->where('uuid', $data['project_uuid'])->exists()
+        ) {
             throw ValidationException::withMessages([
                 'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
             ]);
         }
 
-        if (! empty($data['vehicle_uuid'])
-            && ! Vehicle::query()->where('company_uuid', $companyUuid)->where('uuid', $data['vehicle_uuid'])->exists()) {
+        if (
+            ! empty($data['vehicle_uuid'])
+            && ! Vehicle::query()->where('company_uuid', $companyUuid)->where('uuid', $data['vehicle_uuid'])->exists()
+        ) {
             throw ValidationException::withMessages([
                 'vehicle_uuid' => 'El vehículo no pertenece a la empresa o sede activa.',
             ]);
         }
 
-        if (! empty($data['third_party_uuid'])
-            && ! ThirdParty::query()->where('company_uuid', $companyUuid)->where('uuid', $data['third_party_uuid'])->exists()) {
+        if (
+            ! empty($data['third_party_uuid'])
+            && ! ThirdParty::query()->where('company_uuid', $companyUuid)->where('uuid', $data['third_party_uuid'])->exists()
+        ) {
             throw ValidationException::withMessages([
                 'third_party_uuid' => 'El tercero no pertenece a la empresa o sede activa.',
             ]);
         }
 
-        if (! empty($data['fuec_uuid'])
-            && ! Fuec::query()->where('company_uuid', $companyUuid)->where('uuid', $data['fuec_uuid'])->exists()) {
+        if (
+            ! empty($data['fuec_uuid'])
+            && ! Fuec::query()->where('company_uuid', $companyUuid)->where('uuid', $data['fuec_uuid'])->exists()
+        ) {
             throw ValidationException::withMessages([
                 'fuec_uuid' => 'El FUEC no pertenece a la empresa activa.',
             ]);
@@ -548,6 +560,9 @@ class ServiceDeliveryControlSheetService extends BaseService
      */
     private function validateProjectDates(?string $projectUuid, ?string $startDate, ?string $endDate): void
     {
+        if ($startDate && $endDate && Carbon::parse($startDate)->gt(Carbon::parse($endDate))) {
+            throw ValidationException::withMessages(['start_date' => 'La fecha de inicio no puede ser posterior a la fecha de fin.']);
+        }
         if (! $projectUuid) {
             return;
         }
@@ -556,10 +571,11 @@ class ServiceDeliveryControlSheetService extends BaseService
             throw ValidationException::withMessages(['project_uuid' => 'El proyecto seleccionado no existe.']);
         }
         if ($startDate && $project->start_date && Carbon::parse($startDate)->lt(Carbon::parse($project->start_date))) {
-            throw ValidationException::withMessages(['start_date' => 'La fecha de inicio no puede ser anterior al inicio del proyecto ('.$project->start_date->format('d/m/Y').').']);
+            throw ValidationException::withMessages(['start_date' => 'La fecha de inicio no puede ser anterior al inicio del proyecto (' . Carbon::parse($project->start_date)->format('d/m/Y') . ').']);
         }
-        if ($endDate && $project->completion_date && Carbon::parse($endDate)->gt(Carbon::parse($project->completion_date))) {
-            throw ValidationException::withMessages(['end_date' => 'La fecha de fin no puede superar el fin del proyecto ('.$project->completion_date->format('d/m/Y').').']);
+        $fechaFinProyecto = $project->completion_date ?? $project->end_date ?? null;
+        if ($endDate && $fechaFinProyecto && Carbon::parse($endDate)->gt(Carbon::parse($fechaFinProyecto))) {
+            throw ValidationException::withMessages(['end_date' => 'La fecha de fin no puede superar el fin del proyecto (' . Carbon::parse($fechaFinProyecto)->format('d/m/Y') . ').']);
         }
     }
 
@@ -571,7 +587,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         if (is_array($routes) && count($routes) > 0) {
             $names = [];
             foreach ($routes as $r) {
-                $label = trim(($r['origin'] ?? '').' - '.($r['destination'] ?? ''), ' -');
+                $label = trim(($r['origin'] ?? '') . ' - ' . ($r['destination'] ?? ''), ' -');
                 if ($label) {
                     $names[] = $label;
                 }
@@ -669,7 +685,7 @@ class ServiceDeliveryControlSheetService extends BaseService
 
         $candidatas = ServiceDeliveryControlSheet::query()
             ->whereDate('service_date', $fecha)
-            ->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $thirdPartyUuid))
+            ->whereHas('internalControl', fn($q) => $q->where('third_party_uuid', $thirdPartyUuid))
             ->get();
 
         if ($candidatas->isEmpty()) {
@@ -685,13 +701,13 @@ class ServiceDeliveryControlSheetService extends BaseService
                     : null;
                 $candidatas = ServiceDeliveryControlSheet::query()
                     ->whereDate('service_date', $fecha)
-                    ->when($gps->project_uuid, fn ($q) => $q->where('project_uuid', $gps->project_uuid))
+                    ->when($gps->project_uuid, fn($q) => $q->where('project_uuid', $gps->project_uuid))
                     ->where(function ($q) use ($gps, $placaGps) {
                         if ($gps->vehicle_uuid) {
-                            $q->whereHas('internalControl', fn ($qq) => $qq->where('vehicle_uuid', $gps->vehicle_uuid));
+                            $q->whereHas('internalControl', fn($qq) => $qq->where('vehicle_uuid', $gps->vehicle_uuid));
                         }
                         if ($placaGps) {
-                            $q->orWhereHas('subcontractedControl', fn ($qq) => $qq->where('vehicle_license_plate', $placaGps));
+                            $q->orWhereHas('subcontractedControl', fn($qq) => $qq->where('vehicle_license_plate', $placaGps));
                         }
                     })
                     ->get();
@@ -701,8 +717,8 @@ class ServiceDeliveryControlSheetService extends BaseService
         $binario = $this->decodificarImagenMapa($imageBase64);
         // SPEC-002 §7.2: la evidencia de un día cerrado no se toca. Las candidatas
         // cerradas se descartan; si solo había cerradas, se explica por qué.
-        $abiertas = $candidatas->filter(fn ($p) => (bool) $p->is_active)->values();
-        $cerradas = $candidatas->filter(fn ($p) => ! $p->is_active)->values();
+        $abiertas = $candidatas->filter(fn($p) => (bool) $p->is_active)->values();
+        $cerradas = $candidatas->filter(fn($p) => ! $p->is_active)->values();
 
         if ($abiertas->isEmpty()) {
             throw ValidationException::withMessages([
@@ -774,16 +790,16 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
         } catch (\Throwable $e) {
-            Logger::warning('No se pudo optimizar la captura del mapa: '.$e->getMessage());
+            Logger::warning('No se pudo optimizar la captura del mapa: ' . $e->getMessage());
         }
 
-        $temporal = tempnam(sys_get_temp_dir(), 'mapa_').'.png';
+        $temporal = tempnam(sys_get_temp_dir(), 'mapa_') . '.png';
         file_put_contents($temporal, $binario);
 
         try {
             $planilla->clearMediaCollection('ROUTE_MAP');
             $planilla->addMedia($temporal)
-                ->usingFileName('mapa-recorrido-'.str_replace('-', '', $fecha).'.png')
+                ->usingFileName('mapa-recorrido-' . str_replace('-', '', $fecha) . '.png')
                 ->withCustomProperties(['source' => 'frontend', 'captured_at' => now()->toIso8601String()])
                 ->toMediaCollection('ROUTE_MAP');
         } finally {
@@ -805,6 +821,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             return ['planilla' => null, 'route' => null];
         }
 
+        $this->asegurarEditable($record, 'close_route');
         $this->asegurarDiaVigente($record, 'close_route');
 
         $routes = $record->routes()->orderBy('order_index')->get();
@@ -823,7 +840,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         $this->applyRouteClosure($route, $data, $record->company_uuid);
 
         return [
-            'planilla' => $record->fresh(['routes']),
+            'planilla' => $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS),
             'route' => $route->fresh(),
         ];
     }
@@ -845,13 +862,13 @@ class ServiceDeliveryControlSheetService extends BaseService
             ->join('service_delivery_control_sheet as s', 's.uuid', '=', 'service_delivery_control_sheet_routes.service_delivery_control_sheet_uuid')
             ->where('s.company_uuid', $companyUuid)
             ->whereNotNull('service_delivery_control_sheet_routes.funcionario_cc')
-            ->where('service_delivery_control_sheet_routes.funcionario_cc', 'like', '%'.$cc.'%')
+            ->where('service_delivery_control_sheet_routes.funcionario_cc', 'like', '%' . $cc . '%')
             ->selectRaw('service_delivery_control_sheet_routes.funcionario_cc, MAX(service_delivery_control_sheet_routes.funcionario_nombre) as funcionario_nombre, COUNT(*) as usos')
             ->groupBy('service_delivery_control_sheet_routes.funcionario_cc')
             ->orderByDesc('usos')
             ->limit(10)
             ->get()
-            ->map(fn ($row) => [
+            ->map(fn($row) => [
                 'funcionario_cc' => $row->funcionario_cc,
                 'funcionario_nombre' => $row->funcionario_nombre,
                 'usos' => (int) $row->usos,
@@ -995,7 +1012,7 @@ class ServiceDeliveryControlSheetService extends BaseService
     {
         $type = $this->normalizeType($data['type_of_control_sheet'] ?? 'DIRECTO_CON_LA_EMPRESA');
 
-        return $this->transaction(fn () => $this->persistirHoja($data, $type));
+        return $this->transaction(fn() => $this->persistirHoja($data, $type));
     }
 
     /**
@@ -1026,6 +1043,11 @@ class ServiceDeliveryControlSheetService extends BaseService
             ]);
         }
 
+        // Fechas se validan antes de chequear asignaciones operativas
+        $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
+        $endRaw = $data['end_date'] ?? null;
+        $this->validateProjectDates($projectUuid, $startRaw, $endRaw);
+
         $porVehiculo = $this->asignacionesActivasPorVehiculo($projectUuid);
         if (empty($porVehiculo)) {
             throw ValidationException::withMessages([
@@ -1036,47 +1058,253 @@ class ServiceDeliveryControlSheetService extends BaseService
         $solicitados = array_values(array_unique(array_filter((array) ($data['vehicle_uuids'] ?? []))));
         $this->validarCochesSolicitados($solicitados, $porVehiculo);
 
+        // Validación de pertenencia en bloque (vehículos y conductores de la empresa activa)
+        $thirdPartyUuids = [];
+        foreach ($solicitados as $vUuid) {
+            $asignacion = $porVehiculo[$vUuid];
+            if ($asignacion->third_party_uuid) {
+                $thirdPartyUuids[] = $asignacion->third_party_uuid;
+            }
+        }
+        $thirdPartyUuids = array_values(array_unique($thirdPartyUuids));
+
+        $vehiclesQuery = Vehicle::query()->where('company_uuid', $companyUuid);
+        $alcance = app(\App\Services\ActorScope\AlcanceDelActor::class);
+        if ($alcance->esSucursalRestringida() && $alcance->branchUuid()) {
+            $vehiclesQuery->where('vehicles.branch_uuid', $alcance->branchUuid());
+        }
+
+        $validVehiclesCount = $vehiclesQuery
+            ->whereIn('uuid', $solicitados)
+            ->count();
+        if ($validVehiclesCount !== count($solicitados)) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'El vehículo no pertenece a la empresa o sede activa.',
+            ]);
+        }
+
+        $validThirdPartiesCount = ThirdParty::query()
+            ->where('company_uuid', $companyUuid)
+            ->whereIn('uuid', $thirdPartyUuids)
+            ->count();
+        if ($validThirdPartiesCount !== count($thirdPartyUuids)) {
+            throw ValidationException::withMessages([
+                'third_party_uuid' => 'El tercero no pertenece a la empresa o sede activa.',
+            ]);
+        }
+
         // Fechas y ruta diaria se validan UNA vez para todo el bulk, no por hoja.
         $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
         $endRaw = $data['end_date'] ?? null;
         $this->validateProjectDates($projectUuid, $startRaw, $endRaw);
 
-        $hojas = $this->transaction(function () use ($data, $companyUuid, $projectUuid, $solicitados, $porVehiculo) {
-            $creadas = [];
-            foreach ($solicitados as $vehicleUuid) {
-                $asignacion = $porVehiculo[$vehicleUuid];
+        $dailyRoute = $this->buildDailyRoute($data['daily_route'] ?? null, $data['routes'] ?? null);
 
-                // Ignora cualquier par/responsable/FUEC del cuerpo: la
-                // asignación vigente del proyecto manda (SPEC-009 decisión 5).
-                $datosHoja = $data;
-                $datosHoja['company_uuid'] = $companyUuid;
-                $datosHoja['project_uuid'] = $projectUuid;
-                $datosHoja['type_of_control_sheet'] = 'DIRECTO_CON_LA_EMPRESA';
-                $datosHoja['vehicle_uuid'] = $vehicleUuid;
-                $datosHoja['third_party_uuid'] = $asignacion->third_party_uuid;
-                $datosHoja['official_name_and_surname'] = $this->nombreDeConductor($asignacion->thirdParty);
-                $datosHoja['fuec_uuid'] = null;
-                $datosHoja['vehicle_license_plate'] = null;
-                $datosHoja['driver_name_and_surname'] = null;
-                $datosHoja['driver_license_number'] = null;
-                unset($datosHoja['vehicle_uuids']);
+        // Rutas plantilla del proyecto / petición preparadas una sola vez en memoria (SPEC-012)
+        $templateRoutes = [];
+        if (! empty($data['routes']) && is_array($data['routes'])) {
+            foreach (array_values($data['routes']) as $index => $r) {
+                if (empty($r['origin']) && empty($r['destination'])) {
+                    continue;
+                }
+                $orderIndex = isset($r['order_index']) && (int) $r['order_index'] > 0
+                    ? (int) $r['order_index']
+                    : ($index + 1);
 
-                $creadas[] = $this->persistirHoja($datosHoja, 'DIRECTO_CON_LA_EMPRESA', false);
+                $funcionarioNombre = ! empty($r['funcionario_nombre']) ? trim((string) $r['funcionario_nombre']) : null;
+                $funcionarioCc = ! empty($r['funcionario_cc']) ? trim((string) $r['funcionario_cc']) : null;
+
+                $templateRoutes[] = [
+                    'order_index' => $orderIndex,
+                    'origin' => mb_substr(trim((string) ($r['origin'] ?? '')), 0, 150),
+                    'destination' => mb_substr(trim((string) ($r['destination'] ?? '')), 0, 150),
+                    'funcionario_nombre' => $funcionarioNombre !== null ? mb_substr($funcionarioNombre, 0, 150) : null,
+                    'funcionario_cc' => $funcionarioCc !== null ? mb_substr($funcionarioCc, 0, 30) : null,
+                ];
+            }
+        }
+
+        // Fechas hijas si es multi-día
+        $startDate = $startRaw ? Carbon::parse($startRaw) : null;
+        $endDate = $endRaw ? Carbon::parse($endRaw) : null;
+        $diasHijos = [];
+        if ($startDate && $endDate && $endDate->greaterThan($startDate)) {
+            $currentDate = $startDate->copy();
+            while (! $currentDate->greaterThan($endDate)) {
+                $diasHijos[] = $currentDate->toDateString();
+                $currentDate->addDay();
+            }
+        }
+
+        $sheetsToInsert = [];
+        $controlsToInsert = [];
+        $routesToInsert = [];
+        $parentUuids = [];
+        $now = now()->toDateTimeString();
+
+        foreach ($solicitados as $vehicleUuid) {
+            $asignacion = $porVehiculo[$vehicleUuid];
+            $parentUuid = (string) Str::uuid();
+            $parentUuids[] = $parentUuid;
+            $conductorNombre = $this->nombreDeConductor($asignacion->thirdParty);
+
+            // 1. Hoja padre
+            $sheetsToInsert[] = [
+                'uuid' => $parentUuid,
+                'company_uuid' => $companyUuid,
+                'project_uuid' => $projectUuid,
+                'official_name_and_surname' => $conductorNombre,
+                'service_date' => $startRaw,
+                'start_date' => $startRaw,
+                'end_date' => $endRaw,
+                'parent_uuid' => null,
+                'daily_route' => $dailyRoute,
+                'start_time' => $data['start_time'] ?? null,
+                'end_time' => $data['end_time'] ?? null,
+                'total_hours' => $data['total_hours'] ?? null,
+                'starting_kilometer' => $data['starting_kilometer'] ?? null,
+                'ending_kilometer' => $data['ending_kilometer'] ?? null,
+                'number_of_tolls' => $data['number_of_tolls'] ?? null,
+                'total_toll_value' => $data['total_toll_value'] ?? null,
+                'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+                'is_active' => $data['is_active'] ?? true,
+                'retirada_de_proyecto' => false,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            // 2. Control interno del padre (is_active = true)
+            $controlsToInsert[] = [
+                'uuid' => (string) Str::uuid(),
+                'company_uuid' => $companyUuid,
+                'vehicle_uuid' => $vehicleUuid,
+                'third_party_uuid' => $asignacion->third_party_uuid,
+                'fuec_uuid' => null,
+                'service_delivery_control_sheet_uuid' => $parentUuid,
+                'is_active' => $data['is_active'] ?? true,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+
+            // 3. Rutas del padre
+            foreach ($templateRoutes as $tr) {
+                $routesToInsert[] = [
+                    'uuid' => (string) Str::uuid(),
+                    'service_delivery_control_sheet_uuid' => $parentUuid,
+                    'order_index' => $tr['order_index'],
+                    'origin' => $tr['origin'],
+                    'destination' => $tr['destination'],
+                    'funcionario_nombre' => $tr['funcionario_nombre'],
+                    'funcionario_cc' => $tr['funcionario_cc'],
+                    'is_active' => true,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
             }
 
-            return $creadas;
+            // 4. Hijos diarios (multi-día)
+            foreach ($diasHijos as $diaFecha) {
+                $childUuid = (string) Str::uuid();
+                $sheetsToInsert[] = [
+                    'uuid' => $childUuid,
+                    'company_uuid' => $companyUuid,
+                    'project_uuid' => $projectUuid,
+                    'official_name_and_surname' => $conductorNombre,
+                    'service_date' => $diaFecha,
+                    'start_date' => $startRaw,
+                    'end_date' => $endRaw,
+                    'parent_uuid' => $parentUuid,
+                    'daily_route' => $dailyRoute,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'total_hours' => null,
+                    'starting_kilometer' => null,
+                    'ending_kilometer' => null,
+                    'number_of_tolls' => null,
+                    'total_toll_value' => null,
+                    'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+                    'is_active' => true,
+                    'retirada_de_proyecto' => false,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+
+                $controlsToInsert[] = [
+                    'uuid' => (string) Str::uuid(),
+                    'company_uuid' => $companyUuid,
+                    'vehicle_uuid' => $vehicleUuid,
+                    'third_party_uuid' => $asignacion->third_party_uuid,
+                    'fuec_uuid' => null,
+                    'service_delivery_control_sheet_uuid' => $childUuid,
+                    'is_active' => false,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+
+                foreach ($templateRoutes as $tr) {
+                    $routesToInsert[] = [
+                        'uuid' => (string) Str::uuid(),
+                        'service_delivery_control_sheet_uuid' => $childUuid,
+                        'order_index' => $tr['order_index'],
+                        'origin' => $tr['origin'],
+                        'destination' => $tr['destination'],
+                        'funcionario_nombre' => $tr['funcionario_nombre'],
+                        'funcionario_cc' => $tr['funcionario_cc'],
+                        'is_active' => true,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+            }
+        }
+
+        // Transacción única con inserciones en bloque (SPEC-012)
+        $this->transaction(function () use ($sheetsToInsert, $controlsToInsert, $routesToInsert) {
+            foreach (array_chunk($sheetsToInsert, 200) as $chunk) {
+                DB::table('service_delivery_control_sheet')->insert($chunk);
+            }
+            foreach (array_chunk($controlsToInsert, 200) as $chunk) {
+                DB::table('service_internal_controls')->insert($chunk);
+            }
+            if (! empty($routesToInsert)) {
+                foreach (array_chunk($routesToInsert, 200) as $chunk) {
+                    DB::table('service_delivery_control_sheet_routes')->insert($chunk);
+                }
+            }
         });
 
-        // Transacción única: o se crean todas (con sus planillas diarias) o no
-        // persiste ninguna.
-        $dailySheets = ServiceDeliveryControlSheet::query()
-            ->whereIn('parent_uuid', array_column($hojas, 'uuid'))
-            ->count('uuid');
+        if (function_exists('activity')) {
+            try {
+                activity('service_delivery_control_sheets')
+                    ->causedBy(Auth::user())
+                    ->withProperties([
+                        'project_uuid' => $projectUuid,
+                        'total_created' => count($sheetsToInsert),
+                        'parent_count' => count($parentUuids),
+                    ])
+                    ->log('Creación masiva de ' . count($sheetsToInsert) . " planillas de control para el proyecto {$projectUuid}");
+            } catch (\Throwable) {
+                // Silenciar si no está configurado el driver en testing
+            }
+        }
+
+        $hojas = ServiceDeliveryControlSheet::query()
+            ->whereIn('uuid', $parentUuids)
+            ->with([
+                'media',
+                'project:id,uuid,project_name,start_date,completion_date',
+                'routes',
+                'internalControl.vehicle:id,uuid,vehicle_license_plate',
+                'internalControl.thirdParty:id,uuid,first_name,last_name',
+            ])
+            ->get();
+
+        $dailySheets = count($sheetsToInsert) - count($parentUuids);
 
         return [
             'created' => count($hojas),
-            'daily_sheets' => (int) $dailySheets,
-            'sheets' => $hojas,
+            'daily_sheets' => $dailySheets,
+            'sheets' => $hojas->all(),
         ];
     }
 
@@ -1157,12 +1385,12 @@ class ServiceDeliveryControlSheetService extends BaseService
             );
         });
 
-        $uuidsPadres = array_map(static fn (Model $h) => $h->getAttribute('uuid'), $actualizadas);
+        $uuidsPadres = array_map(static fn(Model $h) => $h->getAttribute('uuid'), $actualizadas);
         $dailySheets = empty($uuidsPadres)
             ? 0
             : ServiceDeliveryControlSheet::query()
-                ->whereIn('parent_uuid', $uuidsPadres)
-                ->count('uuid');
+            ->whereIn('parent_uuid', $uuidsPadres)
+            ->count('uuid');
 
         return [
             'updated' => count($actualizadas),
@@ -1194,7 +1422,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             ->orderBy('id');
 
         if (! empty($vehicleUuids)) {
-            $query->whereHas('internalControl', fn ($q) => $q->whereIn('vehicle_uuid', $vehicleUuids));
+            $query->whereHas('internalControl', fn($q) => $q->whereIn('vehicle_uuid', $vehicleUuids));
         }
 
         $hojasProyecto = $query->get();
@@ -1241,7 +1469,7 @@ class ServiceDeliveryControlSheetService extends BaseService
 
                 if (! $tieneDiasAbiertos) {
                     $hojaActualizada->update(['is_active' => false]);
-                    $hojaActualizada = $hojaActualizada->fresh(['project', 'routes', 'internalControl', 'subcontractedControl']);
+                    $hojaActualizada = $hojaActualizada->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
                 }
             }
 
@@ -1264,7 +1492,10 @@ class ServiceDeliveryControlSheetService extends BaseService
         $asignaciones = ProjectDriverVehicle::query()
             ->where('project_uuid', $projectUuid)
             ->active()
-            ->with(['thirdParty', 'vehicle'])
+            ->with([
+                'thirdParty:id,uuid,first_name,last_name,company_name,document_number,branch_uuid',
+                'vehicle:id,uuid,vehicle_license_plate,internal_number,model,third_party_uuid',
+            ])
             ->orderBy('id')
             ->get();
 
@@ -1277,6 +1508,91 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
 
         return $porVehiculo;
+    }
+
+    /**
+     * Vehículos con asignación activa en el proyecto que aún no tienen ninguna
+     * hoja de control (SPEC-009, alta pendiente). Devuelve placa, interno,
+     * modelo y conductor para que el frontend los liste y cree sus hojas.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function vehiculosAsignadosSinHojas(string $projectUuid): array
+    {
+        $companyUuid = $this->resolverEmpresa(null);
+        if (! $companyUuid) {
+            throw ValidationException::withMessages([
+                'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
+            ]);
+        }
+
+        $project = Project::query()
+            ->where('company_uuid', $companyUuid)
+            ->where('uuid', $projectUuid)
+            ->first();
+
+        if (! $project) {
+            throw ValidationException::withMessages([
+                'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
+            ]);
+        }
+
+        $alcance = app(\App\Services\ActorScope\AlcanceDelActor::class);
+        if ($alcance->esSucursalRestringida() && $alcance->branchUuid()) {
+            if ($project->branch_uuid && $project->branch_uuid !== $alcance->branchUuid()) {
+                throw ValidationException::withMessages([
+                    'project_uuid' => 'El proyecto no pertenece a la sede activa.',
+                ]);
+            }
+        }
+
+        $porVehiculo = $this->asignacionesActivasPorVehiculo($projectUuid);
+        if (empty($porVehiculo)) {
+            return [];
+        }
+
+        $vehiclesQuery = Vehicle::query()->where('company_uuid', $companyUuid)->whereIn('uuid', array_keys($porVehiculo));
+        $alcance->aplicarAVehiculos($vehiclesQuery);
+        $vehiculosPermitidos = $vehiclesQuery->pluck('uuid')->all();
+
+        $conHoja = ServiceInternalControl::query()
+            ->whereIn('vehicle_uuid', array_keys($porVehiculo))
+            ->whereHas('serviceDeliveryControlSheet', fn ($q) => $q
+                ->where('project_uuid', $projectUuid)
+                ->where('retirada_de_proyecto', false))
+            ->distinct()
+            ->pluck('vehicle_uuid')
+            ->all();
+
+        $sinHoja = [];
+        foreach ($porVehiculo as $vehicleUuid => $asignacion) {
+            if (in_array($vehicleUuid, $conHoja, true)) {
+                continue;
+            }
+            if (! in_array($vehicleUuid, $vehiculosPermitidos, true)) {
+                continue;
+            }
+
+            $sinHoja[] = [
+                'vehicle_uuid' => $vehicleUuid,
+                'vehicle' => [
+                    'uuid' => $asignacion->vehicle?->uuid,
+                    'vehicle_license_plate' => $asignacion->vehicle?->vehicle_license_plate,
+                    'internal_number' => $asignacion->vehicle?->internal_number,
+                    'model' => $asignacion->vehicle?->model,
+                ],
+                'third_party_uuid' => $asignacion->third_party_uuid,
+                'thirdParty' => [
+                    'uuid' => $asignacion->thirdParty?->uuid,
+                    'first_name' => $asignacion->thirdParty?->first_name,
+                    'last_name' => $asignacion->thirdParty?->last_name,
+                    'company_name' => $asignacion->thirdParty?->company_name,
+                    'document_number' => $asignacion->thirdParty?->document_number,
+                ],
+            ];
+        }
+
+        return $sinHoja;
     }
 
     /**
@@ -1322,7 +1638,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             return $conductor->business_name ?: null;
         }
 
-        return trim(($conductor->first_name ?? '').' '.($conductor->last_name ?? '')) ?: null;
+        return trim(($conductor->first_name ?? '') . ' ' . ($conductor->last_name ?? '')) ?: null;
     }
 
     /**
@@ -1389,7 +1705,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             }
         }
 
-        return $record->fresh(['project', 'routes', 'children']);
+        return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_DETALLE);
     }
 
     /**
@@ -1448,8 +1764,10 @@ class ServiceDeliveryControlSheetService extends BaseService
 
             // El tipo define el control hijo y el flujo de cierre: no se cruza
             // interno ↔ externo después de creada (dejaría controles huérfanos).
-            if (isset($data['type_of_control_sheet'])
-                && $this->normalizeType($data['type_of_control_sheet']) !== $record->type_of_control_sheet) {
+            if (
+                isset($data['type_of_control_sheet'])
+                && $this->normalizeType($data['type_of_control_sheet']) !== $record->type_of_control_sheet
+            ) {
                 throw ValidationException::withMessages([
                     'type_of_control_sheet' => 'El tipo de hoja no se puede cambiar después de crearla.',
                 ]);
@@ -1529,7 +1847,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 $this->sincronizarDiasDeLaHoja($record, $data, $type);
             }
 
-            return $record->fresh(['project', 'routes', 'internalControl', 'subcontractedControl']);
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_DETALLE);
         });
     }
 
@@ -1542,7 +1860,7 @@ class ServiceDeliveryControlSheetService extends BaseService
      */
     private function sincronizarControlDeHoja(ServiceDeliveryControlSheet $sheet, array $data, string $type): void
     {
-        $valor = static fn (string $clave, mixed $actual): mixed => array_key_exists($clave, $data)
+        $valor = static fn(string $clave, mixed $actual): mixed => array_key_exists($clave, $data)
             ? $data[$clave]
             : $actual;
 
@@ -1643,9 +1961,9 @@ class ServiceDeliveryControlSheetService extends BaseService
         }
 
         $hijas = $parent->children()->get()
-            ->filter(static fn (ServiceDeliveryControlSheet $hija) => $hija->service_date !== null)
+            ->filter(static fn(ServiceDeliveryControlSheet $hija) => $hija->service_date !== null)
             ->keyBy(
-                static fn (ServiceDeliveryControlSheet $hija) => Carbon::parse($hija->service_date)->toDateString()
+                static fn(ServiceDeliveryControlSheet $hija) => Carbon::parse($hija->service_date)->toDateString()
             );
 
         // Primero se validan los recortes: si alguno tiene evidencia, no se
@@ -1658,8 +1976,8 @@ class ServiceDeliveryControlSheetService extends BaseService
             if (! $hija->is_active || $this->hijaTieneEvidencia($hija)) {
                 throw ValidationException::withMessages([
                     'end_date' => 'No se puede recortar el rango: la planilla del '
-                        .Carbon::parse($fecha)->format('d/m/Y')
-                        .' ya tiene evidencia registrada.',
+                        . Carbon::parse($fecha)->format('d/m/Y')
+                        . ' ya tiene evidencia registrada.',
                 ]);
             }
         }
@@ -1720,7 +2038,7 @@ class ServiceDeliveryControlSheetService extends BaseService
         $interno = $parent->internalControl()->first();
         $subcontratado = $parent->subcontractedControl()->first();
 
-        return array_filter($data, static fn (mixed $valor): bool => $valor !== null) + [
+        return array_filter($data, static fn(mixed $valor): bool => $valor !== null) + [
             'vehicle_uuid' => $interno?->vehicle_uuid,
             'third_party_uuid' => $interno?->third_party_uuid,
             'fuec_uuid' => $interno?->fuec_uuid ?? $subcontratado?->fuec_uuid,
@@ -1753,13 +2071,43 @@ class ServiceDeliveryControlSheetService extends BaseService
             ->exists();
     }
 
+    public function update(string $uuid, array $attributes): bool
+    {
+        $record = $this->findByUuid($uuid);
+        if ($record) {
+            $this->asegurarEditable($record, 'update');
+        }
+
+        return parent::update($uuid, $attributes);
+    }
+
+    public function delete(string $uuid): bool
+    {
+        $record = $this->findByUuid($uuid);
+        if ($record) {
+            $this->asegurarEditable($record, 'delete');
+        }
+
+        return parent::delete($uuid);
+    }
+
+    public function toggleStatus(string $uuid, string $field = 'status', array $enumMapping = []): bool
+    {
+        $record = $this->findByUuid($uuid);
+        if ($record) {
+            $this->asegurarEditable($record, 'toggle_status');
+        }
+
+        return parent::toggleStatus($uuid, $field, $enumMapping);
+    }
+
     public function deleteServiceDeliveryControlSheet(string $uuid): void
     {
         try {
             $this->asegurarEditable($this->findByUuid($uuid), 'delete');
             $this->delete($uuid);
         } catch (\Exception $e) {
-            Logger::error('ServiceDeliveryControlSheetService@deleteServiceDeliveryControlSheet: '.$e->getMessage());
+            Logger::error('ServiceDeliveryControlSheetService@deleteServiceDeliveryControlSheet: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -1784,7 +2132,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
 
-            return $record->fresh();
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
         });
     }
 
@@ -1862,10 +2210,12 @@ class ServiceDeliveryControlSheetService extends BaseService
             // funcionario almacenado. Evita cerrar el recorrido 1 sin nombre/CC.
             $rutasFinales = $record->routes()->orderBy('order_index')->get();
             foreach ($rutasFinales as $idx => $rutaFinal) {
-                if (empty(trim((string) ($rutaFinal->funcionario_nombre ?? '')))
-                    || empty(trim((string) ($rutaFinal->funcionario_cc ?? '')))) {
+                if (
+                    empty(trim((string) ($rutaFinal->funcionario_nombre ?? '')))
+                    || empty(trim((string) ($rutaFinal->funcionario_cc ?? '')))
+                ) {
                     throw ValidationException::withMessages([
-                        'funcionario_cc' => 'El recorrido '.($idx + 1).' requiere nombre y apellido del funcionario y número de CC por que no se esta almacenando la informacion.',
+                        'funcionario_cc' => 'El recorrido ' . ($idx + 1) . ' requiere nombre y apellido del funcionario y número de CC por que no se esta almacenando la informacion.',
                     ]);
                 }
             }
@@ -1883,7 +2233,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
 
-            return $record->fresh();
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
         });
     }
 
@@ -1940,7 +2290,7 @@ class ServiceDeliveryControlSheetService extends BaseService
                 }
             }
 
-            return $record->fresh(['project', 'routes']);
+            return $record->fresh(ServiceDeliveryControlSheet::RELACIONES_BASICAS);
         });
     }
 }

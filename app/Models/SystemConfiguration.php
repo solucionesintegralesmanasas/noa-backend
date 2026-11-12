@@ -10,6 +10,7 @@ use App\Traits\LogsActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Arr;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -55,6 +56,8 @@ class SystemConfiguration extends Model implements HasMedia
         'activate_notifications',
         'notify_by_email',
         'notification_email',
+        'notify_by_telegram',
+        'notification_telegram_chat_ids',
         'own_company_names',
         'fuec_pdf_show_signatures',
         'fuec_pdf_show_contractor_details',
@@ -75,6 +78,14 @@ class SystemConfiguration extends Model implements HasMedia
         'rce_policy_number',
         'platform_fee_type',
         'platform_fee_rates',
+        'contract_company_name',
+        'contract_company_nit',
+        'contract_company_email',
+        'contract_company_phone',
+        'contract_company_address',
+        'contract_company_rep_name',
+        'contract_company_rep_last_name',
+        'contract_company_rep_document',
     ];
 
     protected $casts = [
@@ -90,6 +101,7 @@ class SystemConfiguration extends Model implements HasMedia
         'rtm_alert_days' => 'integer',
         'activate_notifications' => 'boolean',
         'notify_by_email' => 'boolean',
+        'notify_by_telegram' => 'boolean',
         'own_company_names' => 'array',
         'fuec_pdf_show_signatures' => 'boolean',
         'fuec_pdf_show_contractor_details' => 'boolean',
@@ -111,6 +123,44 @@ class SystemConfiguration extends Model implements HasMedia
         $this->addMediaCollection('MINISTRY_LOGO')->singleFile();
         $this->addMediaCollection('SUPER_LOGO')->singleFile();
         $this->addMediaCollection('LETTERHEAD')->singleFile();
+    }
+
+    /**
+     * Destinatarios de Telegram de la empresa (máximo 5).
+     *
+     * Se configuran separados por coma en la pantalla; si no hay ninguno, se
+     * usa TELEGRAM_CHAT_ID del .env como respaldo.
+     *
+     * @return array<int, string>
+     */
+    public function destinosTelegram(): array
+    {
+        $destinos = self::separarChatIds($this->notification_telegram_chat_ids);
+
+        if ($destinos === []) {
+            $respaldo = trim((string) config('services.telegram-bot-api.chat_id'));
+            if ($respaldo !== '') {
+                $destinos = self::separarChatIds($respaldo);
+            }
+        }
+
+        return $destinos;
+    }
+
+    /**
+     * Normaliza una lista de chat_id separada por comas (máximo 5).
+     *
+     * @return array<int, string>
+     */
+    public static function separarChatIds(?string $valor): array
+    {
+        return collect(explode(',', (string) $valor))
+            ->map(fn (string $chatId) => trim($chatId))
+            ->filter(fn (string $chatId) => $chatId !== '')
+            ->unique()
+            ->take(5)
+            ->values()
+            ->all();
     }
 
     // ============================================================================
@@ -185,6 +235,30 @@ class SystemConfiguration extends Model implements HasMedia
             return (string) $this->{$accesor};
         } catch (\Throwable $e) {
             return '';
+        }
+    }
+
+    public function setOwnCompanyNamesAttribute($value): void
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            $value = is_array($decoded) ? $decoded : [$value];
+        }
+
+        if (is_array($value)) {
+            $normalizados = [];
+            $aplanado = Arr::flatten($value);
+            foreach ($aplanado as $item) {
+                if (is_string($item) && trim($item) !== '') {
+                    $normalizado = \App\Utils\OwnCompany::normalizarNombre($item);
+                    if ($normalizado !== '' && ! in_array($normalizado, $normalizados, true)) {
+                        $normalizados[] = $normalizado;
+                    }
+                }
+            }
+            $this->attributes['own_company_names'] = json_encode(array_values($normalizados));
+        } else {
+            $this->attributes['own_company_names'] = null;
         }
     }
 

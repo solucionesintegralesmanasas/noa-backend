@@ -10,6 +10,8 @@ use App\Models\FleetServiceContract;
 use App\Models\Procedure;
 use App\Models\RuntTxtBatch;
 use App\Models\ServiceProvisionContract;
+use App\Models\SystemConfiguration;
+use App\Models\ThirdParty;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
 use App\Services\BaseService;
@@ -30,6 +32,12 @@ class RadicacionService extends BaseService
 
     /** Segundos consecutivos que se prueban antes de fallar por falta de código libre. */
     public const INTENTOS_CODIGO = 120;
+
+    /**
+     * Vinculaciones que consumen un cupo de capacidad transportadora al aprobarse.
+     * La renovación nunca mueve el contador y las desvinculaciones lo liberan.
+     */
+    public const VINCULACIONES_CON_CUPO = ['NUEVO_VEHICULO', 'CAMBIO_DE_EMPRESA'];
 
     protected function getModelInstance(): Model
     {
@@ -90,8 +98,89 @@ class RadicacionService extends BaseService
         return $query->exists();
     }
 
+    /**
+     * Consulta informativa de cupo para un expediente que se va a radicar.
+     * No muta nada: el descuento real ocurre al cerrar CAPACIDAD_TRANSPORTADORA.
+     *
+     * @return array{
+     *     requiere_cupo: bool,
+     *     enforce: bool,
+     *     vehicle_type: string|null,
+     *     capacidad_configurada: bool,
+     *     cupo_disponible: bool,
+     *     authorized_capacity: int,
+     *     current_capacity: int,
+     *     conveyor_capacity_uuid: string|null
+     * }
+     */
+    public function disponibilidadDeCupo(?string $companyUuid, ?string $vehicleUuid = null, ?string $linkType = null): array
+    {
+        $requiere = in_array($linkType, self::VINCULACIONES_CON_CUPO, true);
+        // Sin scope de empresa a propósito: el vehículo de un CAMBIO_DE_EMPRESA puede
+        // pertenecer a la empresa de origen y aun así hay que resolver su tipo.
+        $vehiculo = $vehicleUuid
+            ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first()
+            : null;
+        $tipo = $this->tipoVehiculoParaCapacidad($vehiculo);
+        $cupo = $companyUuid
+            ? app(CapacityMovementService::class)->cupoDisponible($companyUuid, $tipo)
+            : null;
+
+        return [
+            'requiere_cupo' => $requiere,
+            'enforce' => (bool) config('capacity.enforce', true),
+            'vehicle_type' => $tipo,
+            'capacidad_configurada' => $cupo !== null,
+            'cupo_disponible' => (bool) ($cupo['available'] ?? false),
+            'authorized_capacity' => (int) ($cupo['authorized_capacity'] ?? 0),
+            'current_capacity' => (int) ($cupo['current_capacity'] ?? 0),
+            'conveyor_capacity_uuid' => $cupo['conveyor_capacity_uuid'] ?? null,
+        ];
+    }
+
+    /**
+     * Pre-chequeo estricto al crear un expediente que consumirá cupo. Con el motor
+     * en modo estricto (`capacity.enforce`) rechaza con 422 si la empresa no tiene
+     * capacidad configurada o si no le quedan cupos. En modo auditoría solo informa.
+     *
+     * @throws ValidationException
+     */
+    public function validarCupoAlCrear(array $data): void
+    {
+        if (! in_array($data['link_type'] ?? null, self::VINCULACIONES_CON_CUPO, true)) {
+            return;
+        }
+        if (! (bool) config('capacity.enforce', true)) {
+            return;
+        }
+
+        $companyUuid = $data['company_uuid'] ?? null;
+        if (empty($companyUuid)) {
+            throw ValidationException::withMessages([
+                'company_uuid' => 'No se pudo determinar la empresa del expediente.',
+            ]);
+        }
+
+        $disponibilidad = $this->disponibilidadDeCupo($companyUuid, $data['vehicle_uuid'] ?? null, $data['link_type']);
+
+        if (! $disponibilidad['capacidad_configurada']) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'La empresa no tiene capacidad transportadora configurada para el tipo de vehículo.',
+            ]);
+        }
+        if (! $disponibilidad['cupo_disponible']) {
+            throw ValidationException::withMessages([
+                'vehicle_uuid' => 'La empresa no tiene cupos disponibles de capacidad transportadora.',
+            ]);
+        }
+    }
+
     public function crearExpediente(array $data): array
     {
+        // Cupo primero: un expediente que nace sin cupo no debería llegar a la
+        // línea de tiempo (el descuento real ocurre al cerrar la capacidad).
+        $this->validarCupoAlCrear($data);
+
         return $this->transaction(function () use ($data) {
             // Código de trámite: si no viene, se genera automáticamente (YYYYMMDDHHmmss)
             // garantizando que no se repita dentro de la empresa.
@@ -103,12 +192,14 @@ class RadicacionService extends BaseService
             $base = [
                 'link_type' => $data['link_type'],
                 'company_uuid' => $data['company_uuid'] ?? null,
+                'origin_company_uuid' => $data['origin_company_uuid'] ?? null,
                 'third_party_uuid' => $data['third_party_uuid'] ?? null,
                 'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
                 'procedure_code' => $codigo,
                 'date_of_creation' => $data['date_of_creation'],
                 'city_uuid' => $data['city_uuid'],
                 'subject' => $data['subject'] ?? null,
+                'paz_y_salvo' => $data['paz_y_salvo'] ?? null,
                 'territorial_director_uuid' => $data['territorial_director_uuid'] ?? null,
                 'territorial_director_name' => $data['territorial_director_name'] ?? null,
                 'territorial_name' => $data['territorial_name'] ?? null,
@@ -180,8 +271,40 @@ class RadicacionService extends BaseService
             case 'DESVINCULACION_UNILATERAL':
                 return ['ok' => true, 'mensaje' => 'Adjunte acta, paz y salvo y tarjeta física para radicar ante el Ministerio.'];
             case 'CAPACIDAD_TRANSPORTADORA':
-                if (($padre?->link_type ?? '') === 'CAMBIO_DE_EMPRESA') {
+                $linkType = $padre?->link_type ?? '';
+                if (! in_array($linkType, self::VINCULACIONES_CON_CUPO, true)) {
                     return ['ok' => true];
+                }
+
+                $companyUuid = $hijo->company_uuid ?? $padre?->company_uuid;
+                if (empty($companyUuid)) {
+                    return ['ok' => false, 'mensaje' => 'No se pudo determinar la empresa que recibe el vehículo.'];
+                }
+
+                // Idempotencia: si el movimiento de este paso ya se registró, no se
+                // vuelve a exigir cupo (el motor tampoco lo movería dos veces).
+                // Sin scope de empresa: la idempotencia es global por paso de trámite.
+                $tipoMovimiento = $linkType === 'NUEVO_VEHICULO'
+                    ? CapacityMovement::DESCUENTO_NUEVO
+                    : CapacityMovement::DESCUENTO_INGRESO;
+                $yaRegistrado = CapacityMovement::withoutGlobalScopes()
+                    ->where('procedure_uuid', $hijo->uuid)
+                    ->where('movement_type', $tipoMovimiento)
+                    ->exists();
+                if ($yaRegistrado || ! (bool) config('capacity.enforce', true)) {
+                    return ['ok' => true];
+                }
+
+                $disponibilidad = $this->disponibilidadDeCupo(
+                    $companyUuid,
+                    $hijo->vehicle_uuid ?: $padre?->vehicle_uuid,
+                    $linkType
+                );
+                if (! $disponibilidad['capacidad_configurada']) {
+                    return ['ok' => false, 'mensaje' => 'La empresa no tiene capacidad transportadora configurada para el tipo de vehículo.'];
+                }
+                if (! $disponibilidad['cupo_disponible']) {
+                    return ['ok' => false, 'mensaje' => 'La empresa no tiene cupos disponibles de capacidad transportadora.'];
                 }
 
                 return ['ok' => true];
@@ -238,27 +361,326 @@ class RadicacionService extends BaseService
         }
     }
 
-    public function generarTxt(Procedure $hijoTo, string $origin): RuntTxtBatch
+    /**
+     * Genera el archivo TXT RUNT para radicación de Tarjeta de Operación.
+     *
+     * Formato de línea (22 campos separados por '|'):
+     *   01  consecutive                  Consecutivo por empresa (inicia en 1)
+     *   02  company_name                 Razón social (flota: companies; prestación: contratante)
+     *   03  company_address              Dirección de la empresa del contrato
+     *   04  company_phone                Teléfono de la empresa del contrato
+     *   05  company_email                Correo de la empresa del contrato
+     *   06  action_type                  Tipo de acción: C=Creación, M=Modificación, E=Eliminación
+     *   07  contract_issue_date          Fecha de emisión del contrato (YYYYMMDD)
+     *   08  legal_representative_fullname Nombre del representante legal de la empresa del contrato
+     *   09  contract_start_date          Fecha inicio contrato (YYYYMMDD)
+     *   10  contract_end_date            Fecha fin contrato (YYYYMMDD)
+     *   11  duration_months              Duración del contrato en meses
+     *   12  vehicle_plate                Placa del vehículo
+     *   13  vehicle_class_code           Código clase vehículo (catalog RUNT)
+     *   14  owner_document_type          Tipo de documento del propietario (CC→C)
+     *   15  owner_document_number        NIT/CC del propietario/tercero
+     *   16  owner_name                   Nombre completo del propietario/tercero
+     *   17  company_address              Dirección de la empresa de transportes
+     *   18  company_phone                Teléfono de la empresa de transportes
+     *   19  company_email                Correo de la empresa de transportes
+     *   20  contract_type                Tipo de contrato ('1' vinculación flotas, '2' prestación)
+     *   21  contract_number              Número del contrato guardado
+     *   22  status                       Fijo 'S' (único valor fijo)
+     *
+     * También genera una línea cabecera (3 campos):
+     *   01  consecutive                  Consecutivo por empresa
+     *   02  contract_issue_date          Fecha de emisión del contrato (YYYYMMDD)
+     *   03  company_nit (sin dígito de verificación)
+     *
+     * @return RuntTxtBatch
+     */
+    public function generarTxt(Procedure $hijoTo, string $origin, ?int $consecutive = null): RuntTxtBatch
     {
-        if ($origin === 'ADMIN_FLOTA') {
-            $c = FleetServiceContract::where('procedure_uuid', $hijoTo->uuid)->firstOrFail();
-            $linea = implode('|', ['TO', $origin, $c->contract_number, $c->issue_date, $c->start_date, $c->end_date, $c->contract_type, $c->type_of_action]);
-        } else {
-            $c = ServiceProvisionContract::where('procedure_uuid', $hijoTo->uuid)->firstOrFail();
-            $linea = implode('|', ['TO', $origin, $c->contract_number, $c->issue_date, $c->start_date, $c->end_date, $c->coverage]);
-        }
-        $seq = (RuntTxtBatch::where('procedure_uuid', $hijoTo->uuid)->where('origin', $origin)->max('sequence') ?? 0) + 1;
+        // Cargar todas las relaciones necesarias
+        $toHijo = Procedure::with([
+            'vehicle:id,uuid,vehicle_license_plate,vehicle_class_uuid,third_party_uuid',
+            'vehicle.vehicleClass:uuid,class_code_class,description',
+            'vehicle.owners:uuid,vehicle_uuid,third_party_uuid,owner_name,document_number',
+            'vehicle.thirdParty:id,uuid,company_name,first_name,last_name,document_number,phone,email,address,municipality_uuid',
+            'company:id,uuid,business_name,address,phone,email,document_number,legal_representative_name,legal_representative_last_name,legal_representative_document_issue_date,municipality_uuid',
+        ])->where('uuid', $hijoTo->uuid)->firstOrFail();
 
-        return $this->transaction(fn () => RuntTxtBatch::create([
-            'company_uuid' => $hijoTo->company_uuid,
-            'procedure_uuid' => $hijoTo->uuid,
-            'origin' => $origin,
-            'contract_uuid' => $c->uuid,
-            'sequence' => $seq,
-            'content' => $linea."\r\n",
-            'content_hash' => hash('sha256', $linea),
-            'status' => 'GENERADO',
-        ]));
+        $company = $toHijo->company;
+        $vehicle = $toHijo->vehicle;
+        $vehicleClass = $vehicle?->vehicleClass;
+
+        // Determinar datos del tercero/propiedad (propietario)
+        // Prioridad: FleetServiceContract.third_party_uuid → Vehicle.third_party → Vehicle.owners[0].third_party
+        $ownerThirdPartyUuid = null;
+        $contract = null;
+
+        if ($origin === 'ADMIN_FLOTA') {
+            // Administración de flota: solo fleet_service_contracts.
+            $contract = FleetServiceContract::where('procedure_uuid', $hijoTo->uuid)
+                ->where(function ($q) use ($vehicle) {
+                    if ($vehicle?->uuid) {
+                        $q->whereNull('vehicle_uuid')->orWhere('vehicle_uuid', $vehicle->uuid);
+                    }
+                })
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->first();
+            $ownerThirdPartyUuid = $contract?->third_party_uuid
+                ?? $vehicle?->third_party_uuid;
+        } else {
+            // Prestación de servicios: solo service_provision_contracts.
+            $contract = ServiceProvisionContract::where('procedure_uuid', $hijoTo->uuid)
+                ->where(function ($q) use ($vehicle) {
+                    if ($vehicle?->uuid) {
+                        $q->whereNull('vehicle_uuid')->orWhere('vehicle_uuid', $vehicle->uuid);
+                    }
+                })
+                ->orderByDesc('created_at')
+                ->orderByDesc('id')
+                ->first();
+            $ownerThirdPartyUuid = $contract?->third_party_uuid
+                ?? $vehicle?->third_party_uuid;
+        }
+
+        // Cargar terceros/owners necesarios
+        $ownerThirdParty = null;
+        if ($ownerThirdPartyUuid) {
+            $ownerThirdParty = ThirdParty::with(['municipality', 'documentType'])
+                ->where('uuid', $ownerThirdPartyUuid)->first();
+        }
+
+        // Si no hay tercero asociado, buscar en owners
+        if (!$ownerThirdParty && $vehicle) {
+            $ownerRecord = $vehicle->owners()->first();
+            if ($ownerRecord) {
+                if ($ownerRecord->third_party_uuid) {
+                    $ownerThirdParty = ThirdParty::with('documentType')
+                        ->where('uuid', $ownerRecord->third_party_uuid)->first();
+                }
+                if (!$ownerThirdParty) {
+                    $ownerThirdParty = (object) [
+                        'company_name' => null,
+                        'first_name' => null,
+                        'last_name' => null,
+                        'document_number' => $ownerRecord->document_number ?? null,
+                        'phone' => null,
+                        'email' => null,
+                        'address' => null,
+                        'municipality' => null,
+                    ];
+                    // Construir nombre desde owner_name si existe
+                    $fullName = trim((string) $ownerRecord->owner_name);
+                    if ($fullName !== '') {
+                        $ownerThirdParty = (object) array_merge(
+                            (array) $ownerThirdParty,
+                            ['company_name' => $fullName]
+                        );
+                    }
+                }
+            }
+        }
+
+        // --- Construir datos del owner/tercero ---
+        $ownerName = '';
+        if ($ownerThirdParty) {
+            $ownerName = trim((string) ($ownerThirdParty->getFullNameAttribute()
+                ?? $ownerThirdParty->company_name
+                ?? ''));
+        }
+        $ownerNit = (string) ($ownerThirdParty?->document_number ?? '');
+
+        // Representante legal completo
+        $legalRepName = trim(
+            ((string) ($company?->legal_representative_name ?? ''))
+            .' '.
+            ((string) ($company?->legal_representative_last_name ?? ''))
+        );
+
+        // Línea de datos: cada origen toma sus fechas, tipo y acción de su
+        // propio contrato (ADMIN_FLOTA o PRESTACION).
+        $contractType = '';
+        $actionType = 'C';
+        $contractStartDate = '';
+        $contractEndDate = '';
+        $contractIssueDate = '';
+        $durationMonths = '';
+
+        if ($origin === 'ADMIN_FLOTA' && $contract instanceof FleetServiceContract) {
+            $contractType = (string) ($contract->contract_type ?? '1');
+            $actionType = (string) ($contract->type_of_action ?? 'C');
+            $contractStartDate = $contract->start_date instanceof \Illuminate\Support\Carbon
+                ? $contract->start_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->start_date)->format('Ymd');
+            $contractEndDate = $contract->end_date instanceof \Illuminate\Support\Carbon
+                ? $contract->end_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->end_date)->format('Ymd');
+            $contractIssueDate = $contract->issue_date instanceof \Illuminate\Support\Carbon
+                ? $contract->issue_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->issue_date)->format('Ymd');
+            $durationMonths = $contract->start_date && $contract->end_date
+                ? (string) (int) \Carbon\Carbon::parse($contract->start_date)->diffInMonths(\Carbon\Carbon::parse($contract->end_date))
+                : (string) (int) round(((int) $contract->duration) / 30);
+        } elseif ($contract instanceof ServiceProvisionContract) {
+            // Prestación: tipo y acción se capturan en el formulario del contrato.
+            $contractType = (string) ($contract->contract_type ?? '2');
+            $actionType = (string) ($contract->type_of_action ?? 'C');
+            $contractStartDate = $contract->start_date instanceof \Illuminate\Support\Carbon
+                ? $contract->start_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->start_date)->format('Ymd');
+            $contractEndDate = $contract->end_date instanceof \Illuminate\Support\Carbon
+                ? $contract->end_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->end_date)->format('Ymd');
+            $contractIssueDate = $contract->issue_date instanceof \Illuminate\Support\Carbon
+                ? $contract->issue_date->format('Ymd')
+                : \Carbon\Carbon::parse($contract->issue_date)->format('Ymd');
+            $durationMonths = $contract->start_date && $contract->end_date
+                ? (string) (int) \Carbon\Carbon::parse($contract->start_date)->diffInMonths(\Carbon\Carbon::parse($contract->end_date))
+                : (string) (int) round(((int) $contract->duration) / 30);
+        }
+
+        // --- Datos del vehículo ---
+        $plate = (string) ($vehicle?->vehicle_license_plate ?? '');
+        $vehicleClassCode = (string) ($vehicleClass?->class_code_class
+            ?? $vehicleClass?->description
+            ?? '');
+
+        // --- Datos de la empresa ---
+        $companyName = (string) ($company?->business_name ?? '');
+        $companyAddress = (string) ($company?->address ?? '');
+        // Los teléfonos van sin espacios ni guiones (RUNT exige el número pegado).
+        $companyPhone = preg_replace('/\s+/', '', (string) ($company?->phone ?? ''));
+        $companyEmail = (string) ($company?->email ?? '');
+
+        // Campos 17-19: siempre la empresa de transportes (tabla companies),
+        // aunque en prestación los campos 2-5 sean de la contratante.
+        $transportCompanyAddress = $companyAddress;
+        $transportCompanyPhone = $companyPhone;
+        $transportCompanyEmail = $companyEmail;
+
+        // Prestación: la empresa del contrato es la contratante configurada en
+        // system_configuration (contract_company_*), no la transportadora.
+        if ($origin !== 'ADMIN_FLOTA') {
+            $contratante = SystemConfiguration::where('company_uuid', $toHijo->company_uuid)->first();
+            if ($contratante) {
+                $companyName = (string) ($contratante->contract_company_name ?: $companyName);
+                $companyAddress = (string) ($contratante->contract_company_address ?: $companyAddress);
+                $companyPhone = preg_replace('/\s+/', '', (string) ($contratante->contract_company_phone ?: $companyPhone));
+                $companyEmail = (string) ($contratante->contract_company_email ?: $companyEmail);
+                $legalRepName = trim(
+                    (string) ($contratante->contract_company_rep_name ?? '').' '.
+                    (string) ($contratante->contract_company_rep_last_name ?? '')
+                ) ?: $legalRepName;
+            }
+        }
+
+        // Tipo de documento del propietario (RUNT usa una letra: CC→C).
+        $ownerDocumentType = '';
+        if ($ownerThirdParty instanceof ThirdParty) {
+            $prefix = (string) ($ownerThirdParty->documentType?->prefix ?? '');
+            // shortcut: RUNT usa una letra (CC→C); se toma la inicial del prefijo.
+            $ownerDocumentType = $prefix !== '' ? strtoupper(substr($prefix, 0, 1)) : '';
+        }
+
+        // Un solo TXT por contrato (procedure + origen): si ya existe se
+        // reutiliza y se conserva su consecutivo; nunca se crea uno nuevo.
+        $guardado = RuntTxtBatch::where('procedure_uuid', $hijoTo->uuid)
+            ->where('origin', $origin)
+            ->orderBy('id')
+            ->first();
+
+        // Consecutivo por empresa: inicia en 1 y solo avanza al crear un TXT.
+        $consecutive = $consecutive
+            ?? $guardado?->consecutive
+            ?? ((int) RuntTxtBatch::where('company_uuid', $toHijo->company_uuid)->max('consecutive') + 1);
+
+        // Número de contrato guardado (campo 21).
+        $contractNumber = (string) ($contract?->contract_number ?? '');
+
+        // Construir línea de datos (22 campos)
+        $dataLine = implode('|', [
+            $consecutive,                      // 01: consecutivo por empresa
+            $companyName,                      // 02: razón social empresa
+            $companyAddress,                   // 03: dirección empresa
+            $companyPhone,                     // 04: teléfono empresa
+            $companyEmail,                     // 05: correo empresa
+            $actionType,                       // 06: tipo de acción (C/M/E)
+            $contractIssueDate,                // 07: fecha emisión del contrato
+            $legalRepName,                     // 08: nombre representante legal
+            $contractStartDate,                // 09: fecha inicio contrato
+            $contractEndDate,                  // 10: fecha fin contrato
+            $durationMonths,                   // 11: duración en meses
+            $plate,                            // 12: placa vehículo
+            $vehicleClassCode,                 // 13: código clase vehículo
+            $ownerDocumentType,                // 14: tipo documento propietario
+            $ownerNit,                         // 15: NIT/CC propietario
+            $ownerName,                        // 16: nombre propietario
+            $transportCompanyAddress,          // 17: dirección empresa de transportes
+            $transportCompanyPhone,            // 18: teléfono empresa de transportes
+            $transportCompanyEmail,            // 19: correo empresa de transportes
+            $contractType,                     // 20: tipo contrato (1=vinculación flotas, 2=prestación)
+            $contractNumber,                   // 21: número de contrato
+            'S',                               // 22: estado (único valor fijo)
+        ]);
+
+        // Línea cabecera: consecutivo, fecha del contrato y NIT de la empresa.
+        $companyNit = (string) $company?->document_number;
+        $headerLine = implode('|', [$consecutive, $contractIssueDate, $companyNit]);
+        $fullContent = $headerLine."\r\n".$dataLine."\r\n";
+
+        return $this->transaction(function () use ($toHijo, $hijoTo, $origin, $contract, $consecutive, $fullContent, $guardado) {
+            if ($guardado) {
+                $guardado->update([
+                    'contract_uuid' => $contract?->uuid ?? null,
+                    'content' => $fullContent,
+                    'content_hash' => hash('sha256', $fullContent),
+                ]);
+
+                return $guardado;
+            }
+
+            // Secuencia para este procedure + origin
+            $seq = (RuntTxtBatch::where('procedure_uuid', $hijoTo->uuid)
+                ->where('origin', $origin)
+                ->max('sequence') ?? 0) + 1;
+
+            return RuntTxtBatch::create([
+                'company_uuid' => $toHijo->company_uuid,
+                'procedure_uuid' => $hijoTo->uuid,
+                'origin' => $origin,
+                'contract_uuid' => $contract?->uuid ?? null,
+                'sequence' => $seq,
+                'consecutive' => $consecutive,
+                'content' => $fullContent,
+                'content_hash' => hash('sha256', $fullContent),
+                'status' => 'GENERADO',
+            ]);
+        });
+    }
+
+    /**
+     * Vuelve a calcular el TXT ya guardado con los datos actuales del contrato.
+     * Se llama al editar un contrato para que el archivo plano no quede con
+     * fechas, tipo de acción, número o tasación anteriores. Cada origen usa
+     * su propia tabla: ADMIN_FLOTA → fleet_service_contracts,
+     * PRESTACION → service_provision_contracts.
+     */
+    public function regenerarTxtsDeContrato(string $procedureUuid, string $origin): void
+    {
+        $hijo = Procedure::where('uuid', $procedureUuid)->first();
+        if (! $hijo) {
+            return;
+        }
+
+        $existe = RuntTxtBatch::where('procedure_uuid', $procedureUuid)
+            ->where('origin', $origin)
+            ->exists();
+        if (! $existe) {
+            return;
+        }
+
+        // Reutiliza el TXT del contrato y conserva su consecutivo.
+        $this->generarTxt($hijo, $origin);
     }
 
     public function listarExpedientes(int $perPage = 15, int $page = 1, string $search = '', ?string $companyUuid = null): \Illuminate\Contracts\Pagination\LengthAwarePaginator
@@ -376,7 +798,94 @@ class RadicacionService extends BaseService
 
         $documentos = app(RadicacionDocumentoService::class)->documentosPorPaso($exp, $hijos);
 
-        return ['expediente' => $exp, 'ruta' => $ruta, 'linea_tiempo' => $linea, 'pasos' => $hijos, 'propietario' => $propietario, 'contratos' => $contratos, 'documentos' => $documentos];
+        // Datos registrados de la empresa: ambos formularios de contrato los
+        // muestran en solo lectura y de ellos salen los TXT/PDF.
+        $company = \App\Models\Company::with('municipality')->where('uuid', $exp->company_uuid)->first();
+        // Datos para contratos: independientes del registro de Empresas, viven en
+        // la configuración del sistema.
+        $config = $exp->company_uuid
+            ? \App\Models\SystemConfiguration::where('company_uuid', $exp->company_uuid)->first()
+            : null;
+        $empresa = [
+            'razon_social' => $config?->contract_company_name,
+            'nit' => $config?->contract_company_nit,
+            'direccion' => $config?->contract_company_address,
+            'telefono' => $config?->contract_company_phone,
+            'correo' => $config?->contract_company_email,
+            'ciudad' => $company?->municipality?->name,
+            'representante_legal' => trim((string) $config?->contract_company_rep_name.' '.(string) $config?->contract_company_rep_last_name),
+        ];
+        // Número que se asignará al próximo contrato (compartido por ambos).
+        $siguienteContrato = $exp->company_uuid
+            ? app(ContractNumberService::class)->siguiente($exp->company_uuid)
+            : null;
+
+        return ['expediente' => $exp, 'ruta' => $ruta, 'linea_tiempo' => $linea, 'pasos' => $hijos, 'propietario' => $propietario, 'contratos' => $contratos, 'documentos' => $documentos, 'empresa' => $empresa, 'siguiente_contrato' => $siguienteContrato];
+    }
+
+    /**
+     * Campos que se capturan en un paso antes de avanzarlo (renovación,
+     * desvinculación y referencia del pago). El estado del pago es informativo:
+     * no bloquea el cierre del paso.
+     */
+    private const CAMPOS_EDITABLES_PASO = [
+        'simit_clear',
+        'soat_valid',
+        'rtm_valid',
+        'old_card_number',
+        'radicado_number',
+        'payment_status',
+        'resolution_number',
+        'paz_y_salvo',
+        'subject',
+    ];
+
+    /**
+     * Actualiza los datos del paso (o del expediente si se pasa el padre) y
+     * devuelve el detalle completo. Un paso completado ya no admite cambios.
+     *
+     * @throws \Symfony\Component\HttpKernel\Exception\HttpException
+     */
+    public function actualizarPaso(string $uuid, array $data): array
+    {
+        return $this->transaction(function () use ($uuid, $data) {
+            $query = Procedure::where('uuid', $uuid)->lockForUpdate();
+            $this->aislarPorAfiliado($query);
+            $registro = $query->firstOrFail();
+
+            $esHijo = ! empty($registro->parent_procedure_uuid);
+            $padre = $esHijo
+                ? Procedure::where('uuid', $registro->parent_procedure_uuid)->firstOrFail()
+                : $registro;
+
+            if ($esHijo && $registro->status === 'COMPLETADO') {
+                abort(422, 'Este paso ya fue completado y no admite cambios.');
+            }
+            if (! $esHijo && $padre->global_status === 'COMPLETADO') {
+                abort(422, 'El expediente ya fue completado y no admite cambios.');
+            }
+
+            $cambios = array_intersect_key($data, array_flip(self::CAMPOS_EDITABLES_PASO));
+
+            if ($cambios !== []) {
+                $registro->update($cambios);
+
+                // Datos de cabecera: el asunto y el paz y salvo describen al
+                // expediente, no a un paso suelto; se replican en todas sus filas.
+                $compartidos = array_intersect_key($cambios, array_flip(['subject', 'paz_y_salvo']));
+                if ($compartidos !== [] && $esHijo) {
+                    Procedure::where('uuid', $padre->uuid)->update($compartidos);
+                    Procedure::where('parent_procedure_uuid', $padre->uuid)
+                        ->where('uuid', '!=', $registro->uuid)
+                        ->update($compartidos);
+                }
+                if ($compartidos !== [] && ! $esHijo) {
+                    Procedure::where('parent_procedure_uuid', $padre->uuid)->update($compartidos);
+                }
+            }
+
+            return $this->detalleExpediente($padre->uuid);
+        });
     }
 
     public function avanzarPaso(string $hijoUuid): array
@@ -429,14 +938,10 @@ class RadicacionService extends BaseService
      *
      *  - CAPACIDAD_TRANSPORTADORA de un vehículo NUEVO → descuenta 1 cupo.
      *  - CAPACIDAD_TRANSPORTADORA de un CAMBIO_DE_EMPRESA (ingreso) → descuenta 1 cupo
-     *    en la empresa receptora.
+     *    en la empresa receptora y libera 1 cupo en la empresa de origen.
      *  - DESVINCULACION (mutuo/unilateral) → libera 1 cupo y cancela la tarjeta de operación.
      *
      * La renovación no mueve el contador (no pasa por aquí).
-     *
-     * Nota: en el CAMBIO_DE_EMPRESA la liberación del cupo en la empresa de origen no
-     * se puede registrar desde este expediente porque el trámite solo conoce la empresa
-     * receptora; queda como caso aparte pendiente de modelar el origen.
      */
     private function aplicarMovimientosDeCapacidad(Procedure $padre, Procedure $hijo): void
     {
@@ -446,6 +951,8 @@ class RadicacionService extends BaseService
         }
 
         $vehicleUuid = $hijo->vehicle_uuid ?: $padre->vehicle_uuid;
+        // Sin scope de empresa: el vehículo de un CAMBIO_DE_EMPRESA puede seguir
+        // registrado en la empresa de origen (que es donde se libera el cupo).
         $vehicle = $vehicleUuid
             ? Vehicle::withoutGlobalScopes()->where('uuid', $vehicleUuid)->first()
             : null;
@@ -470,6 +977,24 @@ class RadicacionService extends BaseService
                     'movement_type' => $tipo,
                     'notes' => "Descuento de cupo al aprobar la capacidad transportadora ({$padre->link_type}).",
                 ]);
+
+                // Salida por cambio de empresa (Decreto 348/2015): el cupo deja de
+                // pertenecer a la empresa de origen y debe liberarse allí. Idempotente
+                // por (paso, LIBERACION_SALIDA); falla cerrada si el origen no tiene
+                // capacidad configurada.
+                $originUuid = $padre->origin_company_uuid;
+                if ($padre->link_type === 'CAMBIO_DE_EMPRESA'
+                    && ! empty($originUuid)
+                    && $originUuid !== $companyUuid) {
+                    $engine->registrar([
+                        'company_uuid' => $originUuid,
+                        'vehicle_uuid' => $vehicleUuid,
+                        'vehicle_type' => $vehicleType,
+                        'procedure_uuid' => $hijo->uuid,
+                        'movement_type' => CapacityMovement::LIBERACION_SALIDA,
+                        'notes' => 'Liberación de cupo en la empresa de origen por cambio de empresa.',
+                    ]);
+                }
                 break;
 
             case 'DESVINCULACION_MUTUO':

@@ -13,6 +13,7 @@ use App\Models\VehicleDocument;
 use App\Services\BaseService;
 use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -52,13 +53,13 @@ class VehicleService extends BaseService
         // en la paginación (la sede es hasOneThrough y puede tener varias asignaciones).
         $this->sortableFields = [
             'vehicle_license_plate' => 'vehicles.vehicle_license_plate',
-            'vehicle_class.description' => fn (Builder $query, string $direction) => $query->orderBy(
+            'vehicle_class.description' => fn(Builder $query, string $direction) => $query->orderBy(
                 DB::table('vehicle_class')
                     ->select('vehicle_class.description')
                     ->whereColumn('vehicle_class.uuid', 'vehicles.vehicle_class_uuid'),
                 $direction
             ),
-            'brand.description' => fn (Builder $query, string $direction) => $query->orderBy(
+            'brand.description' => fn(Builder $query, string $direction) => $query->orderBy(
                 DB::table('brands')
                     ->select('brands.description')
                     ->whereColumn('brands.uuid', 'vehicles.brand_uuid'),
@@ -66,7 +67,7 @@ class VehicleService extends BaseService
             ),
             'line' => 'vehicles.line',
             'model' => 'vehicles.model',
-            'branch.name' => fn (Builder $query, string $direction) => $query->orderBy(
+            'branch.name' => fn(Builder $query, string $direction) => $query->orderBy(
                 DB::table('branches')
                     ->join('vehicles_branches', 'vehicles_branches.branch_uuid', '=', 'branches.uuid')
                     ->select('branches.name')
@@ -127,36 +128,11 @@ class VehicleService extends BaseService
             'branch:branches.uuid,branches.name',
         ]);
 
-        // SPEC-005: si la persona es AFILIADO el aislamiento prima aunque también sea CONDUCTOR;
-        // la rama del conductor (asignaciones) aplica solo al conductor puro.
-        // Empresa efectiva: parámetro > cabecera de contexto (SetCompanyContext) > primera empresa del usuario.
-        $user = Auth::user();
-        $esAfiliado = $user && method_exists($user, 'hasRole') && $user->hasRole('AFILIADO');
-        $esConductor = $user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
+        // SPEC-013: Delegación en AlcanceDelActor para unificación de reglas y scopes
+        $actorScope = app(\App\Services\ActorScope\AlcanceDelActor::class);
+        $actorScope->aplicarAVehiculos($query, $companyUuid);
 
-        $companyEfectiva = $companyUuid
-            ?? request()->attributes->get('current_company_uuid')
-            ?? ($user ? $user->companies()->first()?->uuid : null);
-        if ($companyEfectiva && $esAfiliado) {
-            // SPEC-005: para el AFILIADO (puro o combinado) el aislamiento estricto de BaseService
-            // (applyCompanyFilter -> aplicarFiltroAfiliado) es el que manda.
-            $this->applyCompanyFilter($query, $companyEfectiva);
-        } elseif ($companyEfectiva) {
-            // Admin y conductor puro: solo el filtro de empresa. El aislamiento estricto de BaseService
-            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar la regla del listado.
-            $query->where('vehicles.company_uuid', $companyEfectiva);
-        }
-
-        if ($esConductor && ! $esAfiliado) {
-            // Regla estricta (decisión 2026-10-20): el conductor ve SOLO los vehículos asignados
-            // a él (proyectos y FUEC); sin asignaciones ve la lista vacía, no la flota de la empresa.
-            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
-                ?? $user->companies()->first()?->pivot?->third_party_uuid
-                ?? $user->third_party_uuid;
-
-            $allowedUuids = $driverThirdPartyUuid ? $this->getVehicleUuidsForConductor($driverThirdPartyUuid) : [];
-            $query->whereIn('uuid', $allowedUuids); // vacío -> `0=1` -> lista vacía
-        } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
+        if ($thirdPartyUuid && ! $actorScope->esAfiliado() && ! $actorScope->esConductor()) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -218,40 +194,11 @@ class VehicleService extends BaseService
     {
         $query = $this->query();
 
-        if (! $companyUuid) {
-            $companyUuid = request()->attributes->get('current_company_uuid');
-        }
+        // SPEC-013: Delegación en AlcanceDelActor para unificación de reglas y scopes
+        $actorScope = app(\App\Services\ActorScope\AlcanceDelActor::class);
+        $actorScope->aplicarAVehiculos($query, $companyUuid);
 
-        $user = Auth::user();
-
-        // SPEC-005: si la persona es AFILIADO el aislamiento prima aunque también sea CONDUCTOR;
-        // la rama del conductor (asignaciones) aplica solo al conductor puro.
-        $esAfiliado = $user && method_exists($user, 'hasRole') && $user->hasRole('AFILIADO');
-        $esConductor = $user && method_exists($user, 'hasRole') && $user->hasRole('CONDUCTOR');
-
-        // Fallback de empresa si no viene especificada pero el usuario pertenece a una,
-        $companyEfectiva = $companyUuid ?? ($user ? $user->companies()->first()?->uuid : null);
-        if ($companyEfectiva && $esAfiliado) {
-            // SPEC-005: para el AFILIADO (puro o combinado) el aislamiento estricto de BaseService
-            // (applyCompanyFilter -> aplicarFiltroAfiliado) es el que manda.
-            $this->applyCompanyFilter($query, $companyEfectiva);
-        } elseif ($companyEfectiva) {
-            // Admin y conductor puro: solo el filtro de empresa. El aislamiento estricto de BaseService
-            // para CONDUCTOR (whereIn de asignaciones, vacío -> `0=1`) no debe pisar el diseño
-            // "sin asignaciones ve la flota de su empresa" de la rama de abajo.
-            $query->where('vehicles.company_uuid', $companyEfectiva);
-        }
-
-        if ($esConductor && ! $esAfiliado) {
-            // Regla estricta (decisión 2026-10-20): el conductor ve SOLO los vehículos asignados
-            // a él (proyectos y FUEC); sin asignaciones ve la lista vacía, no la flota de la empresa.
-            $driverThirdPartyUuid = request()->attributes->get('current_third_party_uuid')
-                ?? $user->companies()->first()?->pivot?->third_party_uuid
-                ?? $user->third_party_uuid;
-
-            $allowedUuids = $driverThirdPartyUuid ? $this->getVehicleUuidsForConductor($driverThirdPartyUuid) : [];
-            $query->whereIn('uuid', $allowedUuids); // vacío -> `0=1` -> lista vacía
-        } elseif (! $esAfiliado && ! $esConductor && $thirdPartyUuid) {
+        if ($thirdPartyUuid && ! $actorScope->esAfiliado() && ! $actorScope->esConductor()) {
             $query->where(function ($q) use ($thirdPartyUuid) {
                 $q->where('third_party_uuid', $thirdPartyUuid)
                     ->orWhereHas('owners', function ($ownerQuery) use ($thirdPartyUuid) {
@@ -444,6 +391,10 @@ class VehicleService extends BaseService
             }
 
             $estabaActivo = (bool) $record->is_active;
+            $tipoServicioAnterior = $record->type_of_service;
+            $fechaMatriculaAnterior = $record->registration_date;
+            $thirdPartyAnterior = $record->third_party_uuid;
+            $placaAnterior = $record->vehicle_license_plate;
 
             $record->update([
                 'third_party_uuid' => array_key_exists('third_party_uuid', $data) ? $data['third_party_uuid'] : $record->third_party_uuid,
@@ -552,7 +503,21 @@ class VehicleService extends BaseService
                 }
             }
 
-            if ($estabaActivo !== (bool) $record->is_active) {
+            // SPEC-014: Sincronización incremental cuando cambia la actividad o datos que afectan alertas (placa, afiliado, tipo de servicio, fecha matrícula)
+            $fechaMatAnteriorNorm = $fechaMatriculaAnterior
+                ? Carbon::parse($fechaMatriculaAnterior)->toDateString()
+                : null;
+            $fechaMatNuevaNorm = array_key_exists('registration_date', $data) && $data['registration_date']
+                ? Carbon::parse($data['registration_date'])->toDateString()
+                : (array_key_exists('registration_date', $data) ? null : $fechaMatAnteriorNorm);
+
+            $cambioRelevante = $estabaActivo !== (bool) $record->is_active
+                || (array_key_exists('type_of_service', $data) && $data['type_of_service'] !== $tipoServicioAnterior)
+                || ($fechaMatNuevaNorm !== $fechaMatAnteriorNorm)
+                || (array_key_exists('third_party_uuid', $data) && $data['third_party_uuid'] !== $thirdPartyAnterior)
+                || (array_key_exists('vehicle_license_plate', $data) && $data['vehicle_license_plate'] !== $placaAnterior);
+
+            if ($cambioRelevante) {
                 $this->sincronizarNotificacionesPorActividad($record);
             }
 
@@ -607,8 +572,8 @@ class VehicleService extends BaseService
 
     /**
      * Mantiene las notificaciones coherentes con la actividad del vehículo:
-     * inactivo → se limpian sus alertas; activo → se re-sincronizan las de la empresa.
-     * Compartido por toggleVehicleStatus() y updateVehicle() (cambio de is_active desde el formulario).
+     * inactivo → se limpian sus alertas; activo → sincronización incremental de este vehículo (SPEC-014).
+     * Compartido por toggleVehicleStatus() y updateVehicle().
      */
     protected function sincronizarNotificacionesPorActividad(Vehicle $record): void
     {
@@ -619,9 +584,9 @@ class VehicleService extends BaseService
         }
 
         try {
-            app(NotificationsService::class)->syncNotifications($record->company_uuid);
+            app(NotificationsService::class)->syncForVehicle($record);
         } catch (\Throwable $e) {
-            Logger::warning('No se pudieron re-sincronizar notificaciones al activar vehículo: '.$e->getMessage());
+            Logger::warning('No se pudieron sincronizar notificaciones al activar/modificar vehículo: ' . $e->getMessage());
         }
     }
 
@@ -920,9 +885,9 @@ class VehicleService extends BaseService
 
         // Resolución del nombre del propietario (persona natural, jurídica o dueño registrado)
         if ($thirdParty && ($thirdParty->first_name || $thirdParty->last_name)) {
-            $ownerName = trim(($thirdParty->first_name ?? '').' '.($thirdParty->last_name ?? ''));
+            $ownerName = trim(($thirdParty->first_name ?? '') . ' ' . ($thirdParty->last_name ?? ''));
         } elseif ($thirdParty && ($thirdParty->company_name || $thirdParty->trade_name)) {
-            $ownerName = trim(($thirdParty->company_name ?? '').' '.($thirdParty->trade_name ?? ''));
+            $ownerName = trim(($thirdParty->company_name ?? '') . ' ' . ($thirdParty->trade_name ?? ''));
         } elseif ($owner && $owner->owner_name) {
             $ownerName = $owner->owner_name;
         } else {
@@ -933,13 +898,13 @@ class VehicleService extends BaseService
         $ownerDoc = '';
         if ($thirdParty && $thirdParty->document_number) {
             $ownerDoc = ($thirdParty->type_of_document && $thirdParty->type_of_document->prefix
-                ? $thirdParty->type_of_document->prefix.' '
-                : '').$thirdParty->document_number;
+                ? $thirdParty->type_of_document->prefix . ' '
+                : '') . $thirdParty->document_number;
         } elseif ($owner && $owner->document_number) {
             $ownerDoc = ($owner->documentType && $owner->documentType->prefix
-                ? $owner->documentType->prefix.' '
-                : '').$owner->document_number
-                .($owner->verification_digit ? '-'.$owner->verification_digit : '');
+                ? $owner->documentType->prefix . ' '
+                : '') . $owner->document_number
+                . ($owner->verification_digit ? '-' . $owner->verification_digit : '');
         }
 
         // Resolución del número de tecnomecánica (RTM) vigente del vehículo.
@@ -971,7 +936,7 @@ class VehicleService extends BaseService
                 'licencia' => $record->transit_license_number ?? '',
                 'clase_servicio' => $record->type_of_service ?? '',
                 'cilindraje' => $record->engine_displacement
-                    ? $record->engine_displacement.' cc'
+                    ? $record->engine_displacement . ' cc'
                     : '',
                 'motor' => $record->engine_number ?? '',
                 'tecno' => $tecno,

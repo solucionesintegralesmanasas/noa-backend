@@ -15,6 +15,6 @@ class RuntTxtBatch extends Model
 
     protected $fillable = [
         'uuid', 'company_uuid', 'procedure_uuid', 'origin', 'contract_uuid',
-        'sequence', 'content', 'content_hash', 'runt_response', 'status',
+        'sequence', 'consecutive', 'content', 'content_hash', 'runt_response', 'status',
     ];
 }

@@ -86,6 +86,22 @@ class AuthenticationService
             report($e);
         }
 
+        // Exigir el doble factor antes de emitir tokens definitivos: el cliente
+        // recibe un token de desafío (corto, solo 2fa:challenge) que debe canjear
+        // en /2fa/verify con el código TOTP o de recuperación.
+        if ($user->hasTwoFactorEnabled()) {
+            return [
+                'status' => 'two_factor_required',
+                'access_token' => $user->createToken(
+                    '2fa_challenge',
+                    ['2fa:challenge'],
+                    now()->addMinutes(10)
+                )->plainTextToken,
+                'message' => 'Se requiere verificación de doble factor.',
+                'user' => $this->buildUserPayload($user),
+            ];
+        }
+
         $tokens = $this->generateTokenPair($user);
 
         return [
@@ -118,7 +134,7 @@ class AuthenticationService
      *
      * @return array<string, string>
      */
-    private function generateTokenPair(User $user): array
+    public function generateTokenPair(User $user): array
     {
         // Si la columna personal_access_tokens.expires_at no existe en
         // producción (migración pendiente), createToken con expiración lanza
@@ -456,7 +472,7 @@ class AuthenticationService
      *
      * @return array<string, mixed>
      */
-    private function buildUserPayload(User $user): array
+    public function buildUserPayload(User $user): array
     {
         // Los datos auxiliares (empresas, roles, conductor) nunca deben
         // romper el login: cualquier fallo se reporta y se usan vacíos.

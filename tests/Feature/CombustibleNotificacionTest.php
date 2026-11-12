@@ -31,6 +31,7 @@ class CombustibleNotificacionTest extends TestCase
         parent::setUp();
 
         $this->empresa = $this->insertar('companies', ['business_name' => 'Combustible SAS', 'is_active' => true]);
+        request()->attributes->set('current_company_uuid', $this->empresa);
         $this->vehiculo = $this->insertar('vehicles', [
             'company_uuid' => $this->empresa,
             'vehicle_license_plate' => 'FUEL01',
@@ -212,6 +213,7 @@ class CombustibleNotificacionTest extends TestCase
             'is_active' => true,
         ]);
 
+        request()->attributes->set('current_company_uuid', $otraEmpresa);
         app(FuelLogService::class)->createFuelLog([
             'company_uuid' => $otraEmpresa,
             'vehicle_uuid' => $otroVehiculo,
@@ -221,6 +223,7 @@ class CombustibleNotificacionTest extends TestCase
             'initial_odometer' => 1000,
             'final_odometer' => 1400,
         ]);
+        request()->attributes->set('current_company_uuid', $this->empresa);
         $this->insertar('vehicle_inspections', [
             'company_uuid' => $otraEmpresa,
             'vehicle_uuid' => $otroVehiculo,

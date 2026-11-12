@@ -161,6 +161,10 @@ class RoleSeeder extends Seeder
             'reports.vehicles.export-excel',
             'reports.vehicles.export-pdf',
 
+            'reports.vehicle_activity.index',
+            'reports.vehicle_activity.export-excel',
+            'reports.vehicle_activity.export-pdf',
+
             'vehicle_documents.index',
             'vehicle_documents.create',
             'vehicle_documents.update',
@@ -284,6 +288,7 @@ class RoleSeeder extends Seeder
             'fuec.update',
             'fuec.delete',
             'fuec.profile',
+            'fuec.renew',
 
             'system_configurations.index',
             'system_configurations.create',
@@ -340,12 +345,6 @@ class RoleSeeder extends Seeder
             'debit_notes.create',
             'debit_notes.update',
             'debit_notes.delete',
-
-            'electronic_documents.index',
-            'electronic_documents.create',
-            'electronic_documents.update',
-            'electronic_documents.delete',
-            'electronic_documents.profile',
 
             'locations.view',
             'locations.track',
@@ -467,6 +466,10 @@ class RoleSeeder extends Seeder
             'reports.vehicles.index',
             'reports.vehicles.export-excel',
             'reports.vehicles.export-pdf',
+
+            'reports.vehicle_activity.index',
+            'reports.vehicle_activity.export-excel',
+            'reports.vehicle_activity.export-pdf',
 
             'vehicle_documents.index',
             'vehicle_documents.create',

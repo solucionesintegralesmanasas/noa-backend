@@ -116,4 +116,66 @@ class OwnerDriverEnListadoLicenciasTest extends TestCase
         $this->assertSame($this->afiliado, $owner['third_party_uuid'] ?? $owner['thirdPartyUuid'] ?? null,
             'El owner_driver debe exponer el uuid del afiliado que precarga el formulario');
     }
+
+    public function test_crear_una_licencia_nueva_hereda_el_afiliado_del_conductor(): void
+    {
+        $vieja = $this->insertar('driver_licenses', [
+            'company_uuid' => $this->empresa,
+            'third_party_uuid' => $this->conductor,
+            'number' => 'LIB-VIEJA',
+            'category' => 'C2',
+            'issue_date' => '2022-01-01',
+            'expiration_date' => '2023-01-01',
+            'status' => 'VENCIDA',
+        ]);
+        $this->insertar('owners_drivers', [
+            'company_uuid' => $this->empresa,
+            'driver_license_uuid' => $vieja,
+            'third_party_uuid' => $this->afiliado,
+        ]);
+
+        Sanctum::actingAs($this->usuario());
+
+        $response = $this->postJson(
+            '/api/v1/fleet-management/driver-licenses',
+            ['driver_license' => [
+                'company_uuid' => $this->empresa,
+                'third_party_uuid' => $this->conductor,
+                'number' => 'LIB-NUEVA',
+                'category' => 'C2',
+                'issue_date' => '2023-01-02',
+                'expiration_date' => '2030-01-01',
+                'status' => 'ACTIVA',
+            ]],
+            ['X-Company-UUID' => $this->empresa]
+        );
+
+        $response->assertStatus(201);
+        $nueva = $response->json('data.uuid');
+        $this->assertSame(
+            $this->afiliado,
+            DB::table('owners_drivers')->where('driver_license_uuid', $nueva)->value('third_party_uuid'),
+            'La licencia nueva debe heredar el afiliado propietario, no apuntar al conductor'
+        );
+    }
+
+    public function test_editar_una_licencia_sin_afiliado_conserva_el_propietario(): void
+    {
+        $licencia = $this->licenciaConOwner();
+
+        Sanctum::actingAs($this->usuario());
+
+        $response = $this->putJson(
+            '/api/v1/fleet-management/driver-licenses/'.$licencia,
+            ['driver_license' => ['number' => 'LIB-EDITADA']],
+            ['X-Company-UUID' => $this->empresa]
+        );
+
+        $response->assertStatus(200);
+        $this->assertSame(
+            $this->afiliado,
+            DB::table('owners_drivers')->where('driver_license_uuid', $licencia)->value('third_party_uuid'),
+            'Editar sin enviar afiliado no debe pisar el propietario con el conductor'
+        );
+    }
 }

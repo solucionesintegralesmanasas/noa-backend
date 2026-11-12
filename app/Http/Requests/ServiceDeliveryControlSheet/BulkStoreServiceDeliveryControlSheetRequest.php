@@ -41,8 +41,8 @@ class BulkStoreServiceDeliveryControlSheetRequest extends FormRequest
         return [
             'company_uuid' => ['required', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'project_uuid' => ['required', 'uuid', $this->reglaProyectoDelContexto()],
-            'vehicle_uuids' => ['required', 'array', 'min:1'],
-            'vehicle_uuids.*' => ['required', 'uuid', 'distinct', $this->reglaVehiculoDelContexto()],
+            'vehicle_uuids' => ['required', 'array', 'min:1', $this->reglaVehiculosArrayDelContexto()],
+            'vehicle_uuids.*' => ['required', 'uuid', 'distinct'],
             // El bulk es solo para control directo: los tipos externos siguen
             // su flujo individual de una sola hoja.
             'type_of_control_sheet' => ['nullable', 'in:DIRECTO_CON_LA_EMPRESA'],

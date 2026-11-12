@@ -230,7 +230,7 @@ class CompanyService extends BaseService
                 'email' => $data['email'],
                 'email_verified_at' => now(),
                 'user_name' => $data['document_number'], // Nombre de usuario por defecto
-                'password' => Hash::make($data['document_number']), // Contraseña por defecto
+                'password' => Hash::make(\Illuminate\Support\Str::password(12)), // Contraseña temporal aleatoria
                 'third_party_uuid' => $thirdParty->uuid,
                 'status' => 1,
             ]);

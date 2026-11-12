@@ -21,7 +21,6 @@ use App\Services\Notifications\NotificationsService;
 use App\Utils\Logger;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -42,7 +41,8 @@ class DashboardService
         private OwnerDriverService $ownerDriverService,
         private FuecService $fuecService,
         private VehicleService $vehicleService,
-        private NotificationsService $notificationsService
+        private NotificationsService $notificationsService,
+        private \App\Services\ActorScope\AlcanceDelActor $alcance
     ) {}
 
     /**
@@ -51,40 +51,53 @@ class DashboardService
     public function getSummary(int $days = 30): array
     {
         $companyUuid = $this->getCompanyUuid();
-        $cacheKey = 'dashboard_summary_'.($companyUuid ?? 'global').'_'.$days;
+        $currentStartDate = Carbon::now()->subDays($days);
+        $previousStartDate = Carbon::now()->subDays($days * 2);
 
-        return Cache::remember($cacheKey, 60, function () use ($companyUuid, $days) {
-            $currentStartDate = Carbon::now()->subDays($days);
-            $previousStartDate = Carbon::now()->subDays($days * 2);
+        // 1. Vehículos en servicio (actual vs previo) y subconsulta en SQL
+        $vehiclesQuery = $this->vehicleService->buildQuery($companyUuid);
+        if ($this->alcance->esSucursalRestringida() && $this->alcance->branchUuid()) {
+            $vehiclesQuery->where('vehicles.branch_uuid', $this->alcance->branchUuid());
+        }
 
-            // Calcular kilómetros recorridos en el período actual y anterior
-            $currentKm = $this->getKilometersTraveled($companyUuid, $currentStartDate, Carbon::now());
-            $previousKm = $this->getKilometersTraveled($companyUuid, $previousStartDate, $currentStartDate);
+        $vehicleCounts = (clone $vehiclesQuery)->where('is_active', true)->toBase()->selectRaw(
+            'COUNT(*) as current_count, SUM(CASE WHEN created_at < ? THEN 1 ELSE 0 END) as previous_count',
+            [$currentStartDate->toDateTimeString()]
+        )->first();
 
-            $currentDrivers = $this->ownerDriverService->buildQuery($companyUuid)
-                ->where('created_at', '>=', $currentStartDate)->count();
-            $previousDrivers = $this->ownerDriverService->buildQuery($companyUuid)
-                ->whereBetween('created_at', [$previousStartDate, $currentStartDate])->count();
+        $currentVehicles = (int) ($vehicleCounts->current_count ?? 0);
+        $previousVehicles = (int) ($vehicleCounts->previous_count ?? 0);
 
-            $currentFuecs = $this->fuecService->buildQuery($companyUuid)
-                ->where('created_at', '>=', $currentStartDate)->count();
-            $previousFuecs = $this->fuecService->buildQuery($companyUuid)
-                ->whereBetween('created_at', [$previousStartDate, $currentStartDate])->count();
+        // 2. Kilómetros recorridos pasando la subconsulta de vehículos del alcance
+        $vehiclesSubQuery = (clone $vehiclesQuery)->select('vehicles.uuid')->toBase();
+        [$currentKm, $previousKm] = $this->getKilometersTraveledSummary(
+            $vehiclesSubQuery,
+            $previousStartDate,
+            $currentStartDate
+        );
 
-            $currentVehicles = $this->vehicleService->buildQuery($companyUuid)
-                ->where('is_active', true)->count();
-            $previousVehicles = $this->vehicleService->buildQuery($companyUuid)
-                ->where('is_active', true)->where('created_at', '<', $currentStartDate)->count();
+        // 3. Conductores vinculados (actual vs previo) en 1 consulta
+        [$currentDrivers, $previousDrivers] = $this->getCountsCurrentAndPrevious(
+            $this->ownerDriverService->buildQuery($companyUuid),
+            $currentStartDate,
+            $previousStartDate
+        );
 
-            return [
-                'stats' => [
-                    $this->formatStat('Total Km Recorrido', $currentKm, $previousKm, 'fas fa-road', '#2c7be5', ' km'),
-                    $this->formatStat('Conductores Activos', $currentDrivers, $previousDrivers, 'fas fa-id-card', '#00d27a'),
-                    $this->formatStat('Nuevos FUEC', $currentFuecs, $previousFuecs, 'fas fa-file-alt', '#f5803e'),
-                    $this->formatStat('Vehículos en Servicio', $currentVehicles, $previousVehicles, 'fas fa-bus', '#e63757'),
-                ],
-            ];
-        });
+        // 4. FUECs generados (actual vs previo) en 1 consulta
+        [$currentFuecs, $previousFuecs] = $this->getCountsCurrentAndPrevious(
+            $this->fuecService->buildQuery($companyUuid),
+            $currentStartDate,
+            $previousStartDate
+        );
+
+        return [
+            'stats' => [
+                $this->formatStat('Total Km Recorrido', $currentKm, $previousKm, 'fas fa-road', '#2c7be5', ' km'),
+                $this->formatStat('Conductores Activos', $currentDrivers, $previousDrivers, 'fas fa-id-card', '#00d27a'),
+                $this->formatStat('Nuevos FUEC', $currentFuecs, $previousFuecs, 'fas fa-file-alt', '#f5803e'),
+                $this->formatStat('Vehículos en Servicio', $currentVehicles, $previousVehicles, 'fas fa-bus', '#e63757'),
+            ],
+        ];
     }
 
     /**
@@ -101,397 +114,393 @@ class DashboardService
             return [];
         }
 
-        $userId = $user->uuid ?? $user->id ?? 'unknown';
-        $cacheKey = 'dashboard_conductor_summary_v3_disponibilidad_'.$userId.'_'.$days;
+        $startDate = Carbon::now()->subDays($days)->startOfDay();
+        $endDate = Carbon::now()->endOfDay();
 
-        return Cache::remember($cacheKey, 60, function () use ($user, $days) {
-            $startDate = Carbon::now()->subDays($days)->startOfDay();
-            $endDate = Carbon::now()->endOfDay();
+        // 1. Resolver el UUID del conductor (ThirdParty) y empresa respetando AlcanceDelActor
+        $companyUuid = $this->alcance->companyUuid() ?? $user->company_uuid;
+        $thirdPartyUuid = $this->alcance->thirdPartyUuid() ?? $user->third_party_uuid;
 
-            // 1. Resolver el UUID del conductor (ThirdParty) y empresa
-            $companyUuid = $user->company_uuid;
-            $thirdPartyUuid = $user->third_party_uuid;
-            $companyFirst = null;
+        // Fallback: resolver conductor por correo dentro de la empresa (como DriverLocationController).
+        if (! $thirdPartyUuid && $companyUuid && ! empty($user->email)) {
             try {
-                $companyFirst = $user->companies()->first();
+                $thirdPartyUuid = ThirdParty::withoutGlobalScopes()
+                    ->where('company_uuid', $companyUuid)
+                    ->where('email', $user->email)
+                    ->where('is_driver', true)
+                    ->value('uuid');
             } catch (\Throwable) {
-                $companyFirst = null;
+                $thirdPartyUuid = null;
             }
+        }
 
-            if (! $companyUuid && $companyFirst) {
-                $companyUuid = $companyFirst->uuid;
-            }
+        // Obtener datos del conductor
+        $conductor = null;
+        $driverLicense = null;
+        if ($thirdPartyUuid) {
+            $conductor = ThirdParty::withoutGlobalScopes()->where('uuid', $thirdPartyUuid)->first();
+            $driverLicense = DriverLicense::withoutGlobalScopes()
+                ->where('third_party_uuid', $thirdPartyUuid)
+                ->orderBy('expiration_date', 'desc')
+                ->first();
+        }
 
-            if (! $thirdPartyUuid && $companyFirst) {
-                $thirdPartyUuid = $companyFirst->pivot->third_party_uuid ?? null;
-            }
+        // 2. Resolver vehículos vinculados estrictamente al conductor (proyectos, FUECs, historial de asignaciones/cambios)
+        $allVehicleUuids = $thirdPartyUuid ? $this->vehicleService->getVehicleUuidsForConductor($thirdPartyUuid) : [];
 
-            // Fallback: resolver conductor por correo dentro de la empresa (como DriverLocationController).
-            if (! $thirdPartyUuid && $companyUuid && ! empty($user->email)) {
-                try {
-                    $thirdPartyUuid = ThirdParty::withoutGlobalScopes()
-                        ->where('company_uuid', $companyUuid)
-                        ->where('email', $user->email)
-                        ->where('is_driver', true)
-                        ->value('uuid');
-                } catch (\Throwable) {
-                    $thirdPartyUuid = null;
+        // Consultar los vehículos
+        $vehicles = ! empty($allVehicleUuids)
+            ? Vehicle::withoutGlobalScopes()
+            ->with(['brand', 'vehicleClass'])
+            ->whereIn('uuid', $allVehicleUuids)
+            ->get()
+            : collect();
+
+        $vehiclesData = [];
+        $totalKmTraveledAllVehicles = 0;
+
+        if ($vehicles->isNotEmpty()) {
+            $vehicleUuidsList = $vehicles->pluck('uuid')->all();
+
+            // Batch 1: Max inspection mileage por vehículo
+            $maxInspectionMileages = VehicleInspection::withoutGlobalScopes()
+                ->whereIn('vehicle_uuid', $vehicleUuidsList)
+                ->groupBy('vehicle_uuid')
+                ->select('vehicle_uuid', DB::raw('MAX(mileage) as max_val'))
+                ->pluck('max_val', 'vehicle_uuid');
+
+            // Batch 2: Max maintenance mileage por vehículo
+            $maxMaintenanceMileages = Maintenance::withoutGlobalScopes()
+                ->whereIn('vehicle_uuid', $vehicleUuidsList)
+                ->groupBy('vehicle_uuid')
+                ->select('vehicle_uuid', DB::raw('MAX(mileage) as max_val'))
+                ->pluck('max_val', 'vehicle_uuid');
+
+            // Batch 3: Max control sheet ending kilometer
+            $maxControlMileages = DB::table('service_delivery_control_sheet')
+                ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
+                ->whereIn('service_internal_controls.vehicle_uuid', $vehicleUuidsList)
+                ->whereNotNull('service_delivery_control_sheet.ending_kilometer')
+                ->groupBy('service_internal_controls.vehicle_uuid')
+                ->select('service_internal_controls.vehicle_uuid', DB::raw('MAX(CAST(service_delivery_control_sheet.ending_kilometer AS UNSIGNED)) as max_val'))
+                ->pluck('max_val', 'vehicle_uuid');
+
+            // Batch 4: Period inspections agregadas por vehículo en SQL (sin hidratar modelos completos a PHP)
+            $periodInspectionsAggregates = DB::table('vehicle_inspections')
+                ->whereIn('vehicle_uuid', $vehicleUuidsList)
+                ->whereBetween('inspection_date', [$startDate, $endDate])
+                ->groupBy('vehicle_uuid')
+                ->select(
+                    'vehicle_uuid',
+                    DB::raw('COUNT(*) as total_inspections'),
+                    DB::raw('MIN(mileage) as first_mileage'),
+                    DB::raw('MAX(mileage) as last_mileage')
+                )
+                ->get()
+                ->keyBy('vehicle_uuid');
+
+            // Batch 4b: Prev mileage para los que tienen exactamente 1 inspección en el período
+            $singleInspectionVehicleUuids = [];
+            foreach ($periodInspectionsAggregates as $vUuid => $agg) {
+                if ((int) $agg->total_inspections === 1) {
+                    $singleInspectionVehicleUuids[] = $vUuid;
                 }
             }
-
-            // Obtener datos del conductor
-            $conductor = null;
-            $driverLicense = null;
-            if ($thirdPartyUuid) {
-                $conductor = ThirdParty::withoutGlobalScopes()->where('uuid', $thirdPartyUuid)->first();
-                $driverLicense = DriverLicense::withoutGlobalScopes()
-                    ->where('third_party_uuid', $thirdPartyUuid)
-                    ->orderBy('expiration_date', 'desc')
-                    ->first();
-            }
-
-            // 2. Resolver vehículos vinculados estrictamente al conductor (proyectos, FUECs, historial de asignaciones/cambios)
-            $allVehicleUuids = $thirdPartyUuid ? $this->vehicleService->getVehicleUuidsForConductor($thirdPartyUuid) : [];
-
-            // Consultar los vehículos
-            $vehicles = ! empty($allVehicleUuids)
-                ? Vehicle::withoutGlobalScopes()
-                    ->with(['brand', 'vehicleClass'])
-                    ->whereIn('uuid', $allVehicleUuids)
-                    ->get()
+            $prevMileages = ! empty($singleInspectionVehicleUuids)
+                ? DB::table('vehicle_inspections')
+                ->whereIn('vehicle_uuid', $singleInspectionVehicleUuids)
+                ->where('inspection_date', '<', $startDate)
+                ->groupBy('vehicle_uuid')
+                ->select('vehicle_uuid', DB::raw('MAX(mileage) as max_val'))
+                ->pluck('max_val', 'vehicle_uuid')
                 : collect();
 
-            $vehiclesData = [];
-            $totalKmTraveledAllVehicles = 0;
+            // Batch 5: Control sheets km en el período
+            $controlSheetsKmGrouped = DB::table('service_delivery_control_sheet')
+                ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
+                ->whereIn('service_internal_controls.vehicle_uuid', $vehicleUuidsList)
+                ->whereBetween('service_delivery_control_sheet.service_date', [$startDate, $endDate])
+                ->whereNotNull('service_delivery_control_sheet.starting_kilometer')
+                ->whereNotNull('service_delivery_control_sheet.ending_kilometer')
+                ->groupBy('service_internal_controls.vehicle_uuid')
+                ->select('service_internal_controls.vehicle_uuid', DB::raw('SUM(GREATEST(0, CAST(ending_kilometer AS SIGNED) - CAST(starting_kilometer AS SIGNED))) as total_km'))
+                ->pluck('total_km', 'vehicle_uuid');
 
-            if ($vehicles->isNotEmpty()) {
-                $vehicleUuidsList = $vehicles->pluck('uuid')->all();
-
-                // Batch 1: Max inspection mileage por vehículo
-                $maxInspectionMileages = VehicleInspection::withoutGlobalScopes()
-                    ->whereIn('vehicle_uuid', $vehicleUuidsList)
-                    ->groupBy('vehicle_uuid')
-                    ->select('vehicle_uuid', DB::raw('MAX(mileage) as max_val'))
-                    ->pluck('max_val', 'vehicle_uuid');
-
-                // Batch 2: Max maintenance mileage por vehículo
-                $maxMaintenanceMileages = Maintenance::withoutGlobalScopes()
-                    ->whereIn('vehicle_uuid', $vehicleUuidsList)
-                    ->groupBy('vehicle_uuid')
-                    ->select('vehicle_uuid', DB::raw('MAX(mileage) as max_val'))
-                    ->pluck('max_val', 'vehicle_uuid');
-
-                // Batch 3: Max control sheet ending kilometer
-                $maxControlMileages = DB::table('service_delivery_control_sheet')
-                    ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
-                    ->whereIn('service_internal_controls.vehicle_uuid', $vehicleUuidsList)
-                    ->whereNotNull('service_delivery_control_sheet.ending_kilometer')
-                    ->groupBy('service_internal_controls.vehicle_uuid')
-                    ->select('service_internal_controls.vehicle_uuid', DB::raw('MAX(CAST(service_delivery_control_sheet.ending_kilometer AS UNSIGNED)) as max_val'))
-                    ->pluck('max_val', 'vehicle_uuid');
-
-                // Batch 4: Period inspections agrupadas por vehículo
-                $periodInspectionsGrouped = VehicleInspection::withoutGlobalScopes()
-                    ->whereIn('vehicle_uuid', $vehicleUuidsList)
-                    ->whereBetween('inspection_date', [$startDate, $endDate])
-                    ->orderBy('inspection_date', 'asc')
-                    ->get()
-                    ->groupBy('vehicle_uuid');
-
-                // Batch 4b: Prev mileage para los que tienen exactamente 1 inspección en el período
-                $singleInspectionVehicleUuids = [];
-                foreach ($periodInspectionsGrouped as $vUuid => $insps) {
-                    if ($insps->count() === 1) {
-                        $singleInspectionVehicleUuids[] = $vUuid;
-                    }
-                }
-                $prevMileages = ! empty($singleInspectionVehicleUuids)
-                    ? VehicleInspection::withoutGlobalScopes()
-                        ->whereIn('vehicle_uuid', $singleInspectionVehicleUuids)
-                        ->where('inspection_date', '<', $startDate)
+            // Batch 6: Última inspección de cada vehículo por fecha real de inspección
+            $lastInspections = DB::table('vehicle_inspections as vi')
+                ->joinSub(
+                    DB::table('vehicle_inspections')
+                        ->whereIn('vehicle_uuid', $vehicleUuidsList)
                         ->groupBy('vehicle_uuid')
-                        ->select('vehicle_uuid', DB::raw('MAX(mileage) as max_val'))
-                        ->pluck('max_val', 'vehicle_uuid')
-                    : collect();
+                        ->select('vehicle_uuid', DB::raw('MAX(inspection_date) as max_date')),
+                    'latest',
+                    fn($join) => $join->on('vi.vehicle_uuid', '=', 'latest.vehicle_uuid')
+                        ->on('vi.inspection_date', '=', 'latest.max_date')
+                )
+                ->select('vi.vehicle_uuid', 'vi.inspection_date', 'vi.mileage')
+                ->get()
+                ->keyBy('vehicle_uuid');
 
-                // Batch 5: Control sheets km en el período
-                $controlSheetsKmGrouped = DB::table('service_delivery_control_sheet')
-                    ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
-                    ->whereIn('service_internal_controls.vehicle_uuid', $vehicleUuidsList)
-                    ->whereBetween('service_delivery_control_sheet.service_date', [$startDate, $endDate])
-                    ->whereNotNull('service_delivery_control_sheet.starting_kilometer')
-                    ->whereNotNull('service_delivery_control_sheet.ending_kilometer')
-                    ->groupBy('service_internal_controls.vehicle_uuid')
-                    ->select('service_internal_controls.vehicle_uuid', DB::raw('SUM(GREATEST(0, CAST(ending_kilometer AS SIGNED) - CAST(starting_kilometer AS SIGNED))) as total_km'))
-                    ->pluck('total_km', 'vehicle_uuid');
+            // Batch 7: Inspecciones conteo por vehículo para este conductor
+            $inspectionsCountGrouped = DB::table('vehicle_inspections')
+                ->whereIn('vehicle_uuid', $vehicleUuidsList)
+                ->when($thirdPartyUuid, fn($q) => $q->where('driver_uuid', $thirdPartyUuid))
+                ->groupBy('vehicle_uuid')
+                ->select('vehicle_uuid', DB::raw('COUNT(*) as total_count'))
+                ->pluck('total_count', 'vehicle_uuid');
 
-                // Batch 6: Última inspección de cada vehículo
-                $lastInspections = VehicleInspection::withoutGlobalScopes()
-                    ->whereIn('vehicle_uuid', $vehicleUuidsList)
-                    ->orderBy('inspection_date', 'desc')
-                    ->get()
-                    ->unique('vehicle_uuid')
-                    ->keyBy('vehicle_uuid');
+            foreach ($vehicles as $v) {
+                $maxInspectionMileage = (int) ($maxInspectionMileages[$v->uuid] ?? 0);
+                $maxMaintenanceMileage = (int) ($maxMaintenanceMileages[$v->uuid] ?? 0);
+                $maxControlMileage = (int) ($maxControlMileages[$v->uuid] ?? 0);
 
-                // Batch 7: Inspecciones conteo por vehículo para este conductor
-                $inspectionsCountGrouped = VehicleInspection::withoutGlobalScopes()
-                    ->whereIn('vehicle_uuid', $vehicleUuidsList)
-                    ->when($thirdPartyUuid, fn ($q) => $q->where('driver_uuid', $thirdPartyUuid))
-                    ->groupBy('vehicle_uuid')
-                    ->select('vehicle_uuid', DB::raw('COUNT(*) as total_count'))
-                    ->pluck('total_count', 'vehicle_uuid');
+                $currentMileage = max($maxInspectionMileage, $maxMaintenanceMileage, $maxControlMileage);
 
-                foreach ($vehicles as $v) {
-                    $maxInspectionMileage = (int) ($maxInspectionMileages[$v->uuid] ?? 0);
-                    $maxMaintenanceMileage = (int) ($maxMaintenanceMileages[$v->uuid] ?? 0);
-                    $maxControlMileage = (int) ($maxControlMileages[$v->uuid] ?? 0);
-
-                    $currentMileage = max($maxInspectionMileage, $maxMaintenanceMileage, $maxControlMileage);
-
-                    $periodInspections = $periodInspectionsGrouped[$v->uuid] ?? collect();
-                    $periodKm = 0;
-                    if ($periodInspections->count() >= 2) {
-                        $periodKm = (int) ($periodInspections->last()->mileage - $periodInspections->first()->mileage);
-                    } elseif ($periodInspections->count() === 1) {
+                $agg = $periodInspectionsAggregates[$v->uuid] ?? null;
+                $periodKm = 0;
+                if ($agg) {
+                    if ((int) $agg->total_inspections >= 2) {
+                        $periodKm = (int) ($agg->last_mileage - $agg->first_mileage);
+                    } elseif ((int) $agg->total_inspections === 1) {
                         $prevKm = $prevMileages[$v->uuid] ?? null;
                         if ($prevKm) {
-                            $periodKm = (int) ($periodInspections->first()->mileage - (int) $prevKm);
+                            $periodKm = (int) ($agg->first_mileage - (int) $prevKm);
                         }
                     }
-
-                    $controlSheetsKm = (int) ($controlSheetsKmGrouped[$v->uuid] ?? 0);
-                    $kmTraveled = max($periodKm, $controlSheetsKm);
-                    $totalKmTraveledAllVehicles += $kmTraveled;
-
-                    $lastInspection = $lastInspections[$v->uuid] ?? null;
-                    $inspectionsCount = (int) ($inspectionsCountGrouped[$v->uuid] ?? 0);
-
-                    $vehiclesData[] = [
-                        'uuid' => $v->uuid,
-                        'plate' => $v->vehicle_license_plate,
-                        'brand' => $v->brand?->description ?? 'N/A',
-                        'line' => $v->line ?? '',
-                        'model' => $v->model ?? '',
-                        'vehicle_class' => $v->vehicleClass?->description ?? 'VEHÍCULO',
-                        'internal_number' => $v->internal_number,
-                        'color' => $v->color,
-                        'fuel_type' => $v->fuel_type,
-                        'type_of_service' => $v->type_of_service,
-                        'current_mileage' => $currentMileage,
-                        'km_traveled_period' => $kmTraveled,
-                        'inspections_count' => $inspectionsCount,
-                        'last_inspection_date' => $lastInspection?->inspection_date?->format('Y-m-d') ?? null,
-                        'last_inspection_mileage' => $lastInspection?->mileage ?? null,
-                        'is_active' => (bool) $v->is_active,
-                    ];
                 }
+
+                $controlSheetsKm = (int) ($controlSheetsKmGrouped[$v->uuid] ?? 0);
+                $kmTraveled = max($periodKm, $controlSheetsKm);
+                $totalKmTraveledAllVehicles += $kmTraveled;
+
+                $lastInspection = $lastInspections[$v->uuid] ?? null;
+                $inspectionsCount = (int) ($inspectionsCountGrouped[$v->uuid] ?? 0);
+
+                $vehiclesData[] = [
+                    'uuid' => $v->uuid,
+                    'plate' => $v->vehicle_license_plate,
+                    'brand' => $v->brand?->description ?? 'N/A',
+                    'line' => $v->line ?? '',
+                    'model' => $v->model ?? '',
+                    'vehicle_class' => $v->vehicleClass?->description ?? 'VEHÍCULO',
+                    'internal_number' => $v->internal_number,
+                    'color' => $v->color,
+                    'fuel_type' => $v->fuel_type,
+                    'type_of_service' => $v->type_of_service,
+                    'current_mileage' => $currentMileage,
+                    'km_traveled_period' => $kmTraveled,
+                    'inspections_count' => $inspectionsCount,
+                    'last_inspection_date' => $lastInspection?->inspection_date ? Carbon::parse($lastInspection->inspection_date)->format('Y-m-d') : null,
+                    'last_inspection_mileage' => $lastInspection?->mileage !== null ? (int) $lastInspection->mileage : null,
+                    'is_active' => (bool) $v->is_active,
+                ];
             }
+        }
 
-            // Conteo de accesos
-            $inspectionsTotal = VehicleInspection::withoutGlobalScopes()
-                ->when($thirdPartyUuid, fn ($q) => $q->where('driver_uuid', $thirdPartyUuid))
-                ->count();
+        // Conteo de accesos
+        $inspectionsTotal = VehicleInspection::withoutGlobalScopes()
+            ->when($thirdPartyUuid, fn($q) => $q->where('driver_uuid', $thirdPartyUuid))
+            ->count();
 
-            $fuecsTotal = Fuec::withoutGlobalScopes()
-                ->when($thirdPartyUuid, fn ($q) => $q->where(function ($sq) use ($thirdPartyUuid) {
-                    $sq->where('main_conductor_uuid', $thirdPartyUuid)
-                        ->orWhere('secondary_conductor_uuid', $thirdPartyUuid)
-                        ->orWhere('tertiary_conductor_uuid', $thirdPartyUuid);
-                }))
-                ->count();
+        $fuecsTotal = Fuec::withoutGlobalScopes()
+            ->when($thirdPartyUuid, fn($q) => $q->where(function ($sq) use ($thirdPartyUuid) {
+                $sq->where('main_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('secondary_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('tertiary_conductor_uuid', $thirdPartyUuid);
+            }))
+            ->count();
 
-            $controlSheetsTotal = empty($allVehicleUuids)
-                ? 0
-                : ControlSheet::withoutGlobalScopes()
-                    ->whereIn('vehicle_uuid', $allVehicleUuids)
-                    ->count();
+        $controlSheetsTotal = empty($allVehicleUuids)
+            ? 0
+            : ControlSheet::withoutGlobalScopes()
+            ->whereIn('vehicle_uuid', $allVehicleUuids)
+            ->count();
 
-            $serviceDeliverySheetsTotal = DB::table('service_delivery_control_sheet')
-                ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
-                ->when($thirdPartyUuid, fn ($q) => $q->where('service_internal_controls.third_party_uuid', $thirdPartyUuid))
-                ->count();
+        $serviceDeliverySheetsTotal = DB::table('service_delivery_control_sheet')
+            ->join('service_internal_controls', 'service_delivery_control_sheet.uuid', '=', 'service_internal_controls.service_delivery_control_sheet_uuid')
+            ->when($thirdPartyUuid, fn($q) => $q->where('service_internal_controls.third_party_uuid', $thirdPartyUuid))
+            ->count();
 
-            // Últimas inspecciones realizadas por el conductor
-            $recentInspections = VehicleInspection::withoutGlobalScopes()
-                ->with('vehicle')
-                ->when($thirdPartyUuid, fn ($q) => $q->where('driver_uuid', $thirdPartyUuid))
-                ->orderBy('inspection_date', 'desc')
-                ->limit(5)
-                ->get()
-                ->map(fn ($i) => [
-                    'uuid' => $i->uuid,
-                    'plate' => $i->vehicle?->vehicle_license_plate ?? 'N/A',
-                    'date' => $i->inspection_date?->format('Y-m-d'),
-                    'mileage' => $i->mileage,
-                    'inspector' => $i->inspector_name,
-                ]);
+        // Últimas inspecciones realizadas por el conductor
+        $recentInspections = VehicleInspection::withoutGlobalScopes()
+            ->with('vehicle')
+            ->when($thirdPartyUuid, fn($q) => $q->where('driver_uuid', $thirdPartyUuid))
+            ->orderBy('inspection_date', 'desc')
+            ->limit(5)
+            ->get()
+            ->map(fn($i) => [
+                'uuid' => $i->uuid,
+                'plate' => $i->vehicle?->vehicle_license_plate ?? 'N/A',
+                'date' => $i->inspection_date?->format('Y-m-d'),
+                'mileage' => $i->mileage,
+                'inspector' => $i->inspector_name,
+            ]);
 
-            // Últimos FUECs donde participa
-            $recentFuecs = Fuec::withoutGlobalScopes()
-                ->with(['vehicle', 'contractor'])
-                ->when($thirdPartyUuid, fn ($q) => $q->where(function ($sq) use ($thirdPartyUuid) {
-                    $sq->where('main_conductor_uuid', $thirdPartyUuid)
-                        ->orWhere('secondary_conductor_uuid', $thirdPartyUuid)
-                        ->orWhere('tertiary_conductor_uuid', $thirdPartyUuid);
-                }))
-                ->orderBy('created_at', 'desc')
-                ->limit(5)
-                ->get()
-                ->map(fn ($f) => [
-                    'uuid' => $f->uuid,
-                    'number' => $f->number_fuec ?? 'SIN-REF',
-                    'plate' => $f->vehicle?->vehicle_license_plate ?? 'N/A',
-                    'contractor' => $f->contractor?->company_name ?? 'N/A',
-                    'status' => $f->status,
-                ]);
+        // Últimos FUECs donde participa
+        $recentFuecs = Fuec::withoutGlobalScopes()
+            ->with(['vehicle', 'contractor'])
+            ->when($thirdPartyUuid, fn($q) => $q->where(function ($sq) use ($thirdPartyUuid) {
+                $sq->where('main_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('secondary_conductor_uuid', $thirdPartyUuid)
+                    ->orWhere('tertiary_conductor_uuid', $thirdPartyUuid);
+            }))
+            ->orderBy('created_at', 'desc')
+            ->limit(5)
+            ->get()
+            ->map(fn($f) => [
+                'uuid' => $f->uuid,
+                'number' => $f->number_fuec ?? 'SIN-REF',
+                'plate' => $f->vehicle?->vehicle_license_plate ?? 'N/A',
+                'contractor' => $f->contractor?->company_name ?? 'N/A',
+                'status' => $f->status,
+            ]);
 
-            // Servicio activo (planilla en ruta o disponibilidad): iniciada, sin cerrar, del conductor.
-            // Fuente de verdad: planilla iniciada O sesión GPS activa.
-            $activeService = null;
-            $trackingActive = false;
-            $trackingSessionUuid = null;
-            $lastLocation = null;
-            if ($thirdPartyUuid) {
-                try {
-                    $trackingSession = \App\Models\DriverLocationSession::withoutGlobalScopes()
-                        ->where('third_party_uuid', $thirdPartyUuid)
-                        ->where('status', 'active')
-                        ->orderBy('started_at', 'desc')
-                        ->first();
-                    $trackingActive = (bool) $trackingSession;
-                    $trackingSessionUuid = $trackingSession?->uuid;
-                    $lastPoint = \App\Models\DriverLocation::withoutGlobalScopes()
-                        ->where('third_party_uuid', $thirdPartyUuid)
-                        ->orderBy('recorded_at', 'desc')
-                        ->first();
-                    if ($lastPoint) {
-                        $lastLocation = [
-                            'latitude' => (float) $lastPoint->latitude,
-                            'longitude' => (float) $lastPoint->longitude,
-                            'speed' => (float) ($lastPoint->speed ?? 0),
-                            'is_moving' => (bool) $lastPoint->is_moving,
-                            'recorded_at' => $lastPoint->recorded_at?->toDateTimeString(),
-                            'vehicle_uuid' => $lastPoint->vehicle_uuid,
-                        ];
-                    }
-                } catch (\Throwable) {
-                    $trackingActive = false;
-                }
-
-                $enRuta = ServiceDeliveryControlSheet::withoutGlobalScopes()
-                    ->with(['project', 'routes', 'internalControl.vehicle', 'parent'])
-                    ->where('is_active', true)
-                    ->whereNotNull('start_time')
-                    ->whereNull('end_time')
-                    ->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $thirdPartyUuid))
-                    ->orderBy('service_date', 'desc')
+        // Servicio activo (planilla en ruta o disponibilidad): iniciada, sin cerrar, del conductor.
+        // Fuente de verdad: planilla iniciada O sesión GPS activa.
+        $activeService = null;
+        $trackingActive = false;
+        $trackingSessionUuid = null;
+        $lastLocation = null;
+        if ($thirdPartyUuid) {
+            try {
+                $trackingSession = \App\Models\DriverLocationSession::withoutGlobalScopes()
+                    ->where('third_party_uuid', $thirdPartyUuid)
+                    ->where('status', 'active')
+                    ->orderBy('started_at', 'desc')
                     ->first();
-
-                if ($enRuta) {
-                    $rutas = $enRuta->routes && $enRuta->routes->isNotEmpty()
-                        ? $enRuta->routes->map(fn ($r) => trim(($r->origin ?? '').' - '.($r->destination ?? ''), ' -'))->filter()->values()->all()
-                        : [];
-                    $serviceMode = count($rutas) > 0 ? 'CON_RECORRIDOS' : 'DISPONIBILIDAD';
-                    $activeService = [
-                        'uuid' => $enRuta->uuid,
-                        'parent_uuid' => $enRuta->parent_uuid,
-                        'service_uuid' => $enRuta->parent_uuid ?? $enRuta->uuid,
-                        'project_name' => $enRuta->project?->project_name,
-                        'service_date' => $enRuta->service_date?->toDateString(),
-                        'vehicle_plate' => $enRuta->vehicle_license_plate,
-                        'vehicle_uuid' => $enRuta->internalControl?->vehicle_uuid,
-                        'driver_name' => $enRuta->driver_name ?: $enRuta->internalControl?->thirdParty?->company_name,
-                        'start_time' => $enRuta->start_time ? Carbon::parse($enRuta->start_time)->format('H:i') : null,
-                        'starting_kilometer' => $enRuta->starting_kilometer,
-                        'routes_count' => count($rutas),
-                        'routes_text' => $rutas ? implode(' · ', $rutas) : ($enRuta->daily_route ?: 'En disponibilidad — sin recorridos asignados'),
-                        'service_mode' => $serviceMode,
-                        'tracking_active' => $trackingActive,
-                        'tracking_session_uuid' => $trackingSessionUuid,
-                        'last_location' => $lastLocation,
-                        'en_servicio' => true,
-                    ];
-                } elseif ($trackingActive) {
-                    // Sin planilla pero con GPS activo: también se considera en servicio (disponibilidad por GPS).
-                    $activeService = [
-                        'uuid' => null,
-                        'parent_uuid' => null,
-                        'service_uuid' => null,
-                        'project_name' => 'En servicio — disponibilidad GPS',
-                        'service_date' => Carbon::now()->toDateString(),
-                        'vehicle_plate' => null,
-                        'vehicle_uuid' => $lastLocation['vehicle_uuid'] ?? $trackingSession?->vehicle_uuid,
-                        'driver_name' => $conductor ? trim($conductor->first_name.' '.$conductor->last_name) : $user->name,
-                        'start_time' => $trackingSession?->started_at ? Carbon::parse($trackingSession->started_at)->format('H:i') : null,
-                        'starting_kilometer' => null,
-                        'routes_count' => 0,
-                        'routes_text' => 'En disponibilidad — sin recorridos asignados',
-                        'service_mode' => 'DISPONIBILIDAD_GPS',
-                        'tracking_active' => true,
-                        'tracking_session_uuid' => $trackingSessionUuid,
-                        'last_location' => $lastLocation,
-                        'en_servicio' => true,
+                $trackingActive = (bool) $trackingSession;
+                $trackingSessionUuid = $trackingSession?->uuid;
+                $lastPoint = \App\Models\DriverLocation::withoutGlobalScopes()
+                    ->where('third_party_uuid', $thirdPartyUuid)
+                    ->orderBy('recorded_at', 'desc')
+                    ->first();
+                if ($lastPoint) {
+                    $lastLocation = [
+                        'latitude' => (float) $lastPoint->latitude,
+                        'longitude' => (float) $lastPoint->longitude,
+                        'speed' => (float) ($lastPoint->speed ?? 0),
+                        'is_moving' => (bool) $lastPoint->is_moving,
+                        'recorded_at' => $lastPoint->recorded_at?->toDateTimeString(),
+                        'vehicle_uuid' => $lastPoint->vehicle_uuid,
                     ];
                 }
+            } catch (\Throwable) {
+                $trackingActive = false;
             }
 
-            return [
-                'active_service' => $activeService,
-                'conductor' => [
-                    'name' => $conductor ? trim($conductor->first_name.' '.$conductor->last_name) : $user->name,
-                    'document' => $conductor?->document_number ?? null,
-                    'phone' => $conductor?->phone ?? null,
-                    'email' => $conductor?->email ?? $user->email,
-                    'license' => $driverLicense ? [
-                        'license_number' => $driverLicense->number,
-                        'category' => $driverLicense->category,
-                        'due_date' => $driverLicense->expiration_date instanceof Carbon ? $driverLicense->expiration_date->format('Y-m-d') : (string) $driverLicense->expiration_date,
-                        'status' => $driverLicense->status,
-                    ] : null,
+            $enRuta = ServiceDeliveryControlSheet::withoutGlobalScopes()
+                ->with(['project', 'routes', 'internalControl.vehicle', 'parent'])
+                ->where('is_active', true)
+                ->whereNotNull('start_time')
+                ->whereNull('end_time')
+                ->whereHas('internalControl', fn($q) => $q->where('third_party_uuid', $thirdPartyUuid))
+                ->orderBy('service_date', 'desc')
+                ->first();
+
+            if ($enRuta) {
+                $rutas = $enRuta->routes && $enRuta->routes->isNotEmpty()
+                    ? $enRuta->routes->map(fn($r) => trim(($r->origin ?? '') . ' - ' . ($r->destination ?? ''), ' -'))->filter()->values()->all()
+                    : [];
+                $serviceMode = count($rutas) > 0 ? 'CON_RECORRIDOS' : 'DISPONIBILIDAD';
+                $activeService = [
+                    'uuid' => $enRuta->uuid,
+                    'parent_uuid' => $enRuta->parent_uuid,
+                    'service_uuid' => $enRuta->parent_uuid ?? $enRuta->uuid,
+                    'project_name' => $enRuta->project?->project_name,
+                    'service_date' => $enRuta->service_date?->toDateString(),
+                    'vehicle_plate' => $enRuta->vehicle_license_plate,
+                    'vehicle_uuid' => $enRuta->internalControl?->vehicle_uuid,
+                    'driver_name' => $enRuta->driver_name ?: $enRuta->internalControl?->thirdParty?->company_name,
+                    'start_time' => $enRuta->start_time ? Carbon::parse($enRuta->start_time)->format('H:i') : null,
+                    'starting_kilometer' => $enRuta->starting_kilometer,
+                    'routes_count' => count($rutas),
+                    'routes_text' => $rutas ? implode(' · ', $rutas) : ($enRuta->daily_route ?: 'En disponibilidad — sin recorridos asignados'),
+                    'service_mode' => $serviceMode,
+                    'tracking_active' => $trackingActive,
+                    'tracking_session_uuid' => $trackingSessionUuid,
+                    'last_location' => $lastLocation,
+                    'en_servicio' => true,
+                ];
+            } elseif ($trackingActive) {
+                // Sin planilla pero con GPS activo: también se considera en servicio (disponibilidad por GPS).
+                $activeService = [
+                    'uuid' => null,
+                    'parent_uuid' => null,
+                    'service_uuid' => null,
+                    'project_name' => 'En servicio — disponibilidad GPS',
+                    'service_date' => Carbon::now()->toDateString(),
+                    'vehicle_plate' => null,
+                    'vehicle_uuid' => $lastLocation['vehicle_uuid'] ?? $trackingSession?->vehicle_uuid,
+                    'driver_name' => $conductor ? trim($conductor->first_name . ' ' . $conductor->last_name) : $user->name,
+                    'start_time' => $trackingSession?->started_at ? Carbon::parse($trackingSession->started_at)->format('H:i') : null,
+                    'starting_kilometer' => null,
+                    'routes_count' => 0,
+                    'routes_text' => 'En disponibilidad — sin recorridos asignados',
+                    'service_mode' => 'DISPONIBILIDAD_GPS',
+                    'tracking_active' => true,
+                    'tracking_session_uuid' => $trackingSessionUuid,
+                    'last_location' => $lastLocation,
+                    'en_servicio' => true,
+                ];
+            }
+        }
+
+        return [
+            'active_service' => $activeService,
+            'conductor' => [
+                'name' => $conductor ? trim($conductor->first_name . ' ' . $conductor->last_name) : $user->name,
+                'document' => $conductor?->document_number ?? null,
+                'phone' => $conductor?->phone ?? null,
+                'email' => $conductor?->email ?? $user->email,
+                'license' => $driverLicense ? [
+                    'license_number' => $driverLicense->number,
+                    'category' => $driverLicense->category,
+                    'due_date' => $driverLicense->expiration_date instanceof Carbon ? $driverLicense->expiration_date->format('Y-m-d') : (string) $driverLicense->expiration_date,
+                    'status' => $driverLicense->status,
+                ] : null,
+            ],
+            'kpis' => [
+                'total_km' => $totalKmTraveledAllVehicles,
+                'vehicles_count' => count($vehiclesData),
+                'inspections_count' => $inspectionsTotal,
+                'fuecs_count' => $fuecsTotal,
+                'control_sheets_count' => $controlSheetsTotal,
+                'service_delivery_count' => $serviceDeliverySheetsTotal,
+            ],
+            'quick_access' => [
+                'inspections' => [
+                    'title' => 'Inspecciones Vehiculares',
+                    'subtitle' => 'Pre-operacional diario',
+                    'count' => $inspectionsTotal,
+                    'route' => '/inspeccion-vehiculos',
+                    'create_route' => '/inspeccion-vehiculos/crear',
                 ],
-                'kpis' => [
-                    'total_km' => $totalKmTraveledAllVehicles,
-                    'vehicles_count' => count($vehiclesData),
-                    'inspections_count' => $inspectionsTotal,
-                    'fuecs_count' => $fuecsTotal,
-                    'control_sheets_count' => $controlSheetsTotal,
-                    'service_delivery_count' => $serviceDeliverySheetsTotal,
+                'control_sheets' => [
+                    'title' => 'Listado de Planillas de Control',
+                    'subtitle' => 'Planillas de control y soporte',
+                    'count' => $controlSheetsTotal,
+                    'route' => '/planillas-de-control-de-servicios',
+                    'create_route' => '/planillas-de-control-de-servicios/crear',
                 ],
-                'quick_access' => [
-                    'inspections' => [
-                        'title' => 'Inspecciones Vehiculares',
-                        'subtitle' => 'Pre-operacional diario',
-                        'count' => $inspectionsTotal,
-                        'route' => '/inspeccion-vehiculos',
-                        'create_route' => '/inspeccion-vehiculos/crear',
-                    ],
-                    'control_sheets' => [
-                        'title' => 'Listado de Planillas de Control',
-                        'subtitle' => 'Planillas de control y soporte',
-                        'count' => $controlSheetsTotal,
-                        'route' => '/planillas-de-control-de-servicios',
-                        'create_route' => '/planillas-de-control-de-servicios/crear',
-                    ],
-                    'fuec' => [
-                        'title' => 'Listado de FUEC',
-                        'subtitle' => 'Extractos únicos de contrato',
-                        'count' => $fuecsTotal,
-                        'route' => '/extracto-de-contrato',
-                        'create_route' => null,
-                    ],
-                    'service_delivery' => [
-                        'title' => 'Hojas de Control de Servicio',
-                        'subtitle' => 'Planilla PCP y recorrido diario',
-                        'count' => $serviceDeliverySheetsTotal,
-                        'route' => '/planilla-de-control-de-prestacion-servicios',
-                        'create_route' => '/planilla-de-control-de-prestacion-servicios/control-de-servicios',
-                    ],
+                'fuec' => [
+                    'title' => 'Listado de FUEC',
+                    'subtitle' => 'Extractos únicos de contrato',
+                    'count' => $fuecsTotal,
+                    'route' => '/extracto-de-contrato',
+                    'create_route' => null,
                 ],
-                'vehicles' => $vehiclesData,
-                'recent_inspections' => $recentInspections,
-                'recent_fuecs' => $recentFuecs,
-            ];
-        });
+                'service_delivery' => [
+                    'title' => 'Hojas de Control de Servicio',
+                    'subtitle' => 'Planilla PCP y recorrido diario',
+                    'count' => $serviceDeliverySheetsTotal,
+                    'route' => '/planilla-de-control-de-prestacion-servicios',
+                    'create_route' => '/planilla-de-control-de-prestacion-servicios/control-de-servicios',
+                ],
+            ],
+            'vehicles' => $vehiclesData,
+            'recent_inspections' => $recentInspections,
+            'recent_fuecs' => $recentFuecs,
+        ];
     }
 
     /**
@@ -512,7 +521,7 @@ class DashboardService
                         'id' => $fuec->uuid,
                         'code' => $fuec->number_fuec ?? 'SIN-REF',
                         'client' => $fuec->contractor?->company_name ?? 'N/A',
-                        'clientDoc' => 'NIT: '.($fuec->contractor?->document_number ?? 'N/A'),
+                        'clientDoc' => 'NIT: ' . ($fuec->contractor?->document_number ?? 'N/A'),
                         'plate' => $fuec->vehicle?->vehicle_license_plate ?? 'N/A',
                         'statusText' => $fuec->status === 'ACTIVO' ? 'Vigente' : 'Generado',
                         'statusClass' => $fuec->status === 'ACTIVO' ? 'status-success' : 'status-warning',
@@ -538,7 +547,7 @@ class DashboardService
                     $driver = $item->mechanic_name;
                     if (! $driver && $vehicle?->thirdParty) {
                         $tp = $vehicle->thirdParty;
-                        $driver = trim(($tp->first_name ?? '').' '.($tp->last_name ?? ''));
+                        $driver = trim(($tp->first_name ?? '') . ' ' . ($tp->last_name ?? ''));
                         if (empty($driver)) {
                             $driver = $tp->company_name ?? null;
                         }
@@ -564,7 +573,7 @@ class DashboardService
                 'activities' => $recentMaintenances,
             ];
         } catch (\Throwable $e) {
-            Logger::error('DashboardService@getRecentActivity: '.$e->getMessage(), $e);
+            Logger::error('DashboardService@getRecentActivity: ' . $e->getMessage(), $e);
 
             return [
                 'contracts' => [],
@@ -579,192 +588,189 @@ class DashboardService
     public function getAlerts(): array
     {
         $companyUuid = $this->getCompanyUuid();
-        $cacheKey = 'dashboard_alerts_'.($companyUuid ?? 'global');
+        $thirdPartyUuid = $this->alcance->thirdPartyUuid();
+        $all = $this->notificationsService->getAllNotifications($companyUuid, $thirdPartyUuid, false);
 
-        return Cache::remember($cacheKey, 180, function () use ($companyUuid) {
-            $all = $this->notificationsService->getAllNotifications($companyUuid);
+        $alerts = [];
+        $idCounter = 1;
 
-            $alerts = [];
-            $idCounter = 1;
+        $addAlert = function (string $title, string $tag, string $desc, string $severity) use (&$alerts, &$idCounter) {
+            $alerts[] = [
+                'id' => $idCounter++,
+                'title' => $title,
+                'tag' => $tag,
+                'desc' => $desc,
+                'severity' => $severity,
+            ];
+        };
 
-            $addAlert = function (string $title, string $tag, string $desc, string $severity) use (&$alerts, &$idCounter) {
-                $alerts[] = [
-                    'id' => $idCounter++,
-                    'title' => $title,
-                    'tag' => $tag,
-                    'desc' => $desc,
-                    'severity' => $severity,
-                ];
-            };
-
-            // 1. Documentos de Vehículos
-            if (isset($all['vehicle_documents'])) {
-                $docs = $all['vehicle_documents'];
-                foreach ($docs['expired'] ?? [] as $item) {
-                    $addAlert(
-                        ($item['document_type'] ?? 'Documento').' Vencido',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Documento vencido.',
-                        'high'
-                    );
-                }
-                foreach ($docs['expiring_soon'] ?? [] as $item) {
-                    $addAlert(
-                        ($item['document_type'] ?? 'Documento').' por vencer',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Documento por vencer.',
-                        'medium'
-                    );
-                }
-                foreach ($docs['missing'] ?? [] as $item) {
-                    $addAlert(
-                        'Documento Faltante: '.($item['document_type'] ?? 'N/A'),
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Falta registrar documento.',
-                        'high'
-                    );
-                }
+        // 1. Documentos de Vehículos
+        if (isset($all['vehicle_documents'])) {
+            $docs = $all['vehicle_documents'];
+            foreach ($docs['expired'] ?? [] as $item) {
+                $addAlert(
+                    ($item['document_type'] ?? 'Documento') . ' Vencido',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Documento vencido.',
+                    'high'
+                );
             }
-
-            // 2. Tarjetas de Operación
-            if (isset($all['operation_cards'])) {
-                $cards = $all['operation_cards'];
-                foreach ($cards['expired'] ?? [] as $item) {
-                    $addAlert(
-                        'Tarjeta de Operación Vencida',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Tarjeta de operación vencida.',
-                        'high'
-                    );
-                }
-                foreach ($cards['expiring_soon'] ?? [] as $item) {
-                    $addAlert(
-                        'Tarjeta de Operación por vencer',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Tarjeta de operación por vencer.',
-                        'medium'
-                    );
-                }
-                foreach ($cards['missing'] ?? [] as $item) {
-                    $addAlert(
-                        'Tarjeta de Operación Faltante',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Falta registrar tarjeta de operación.',
-                        'high'
-                    );
-                }
+            foreach ($docs['expiring_soon'] ?? [] as $item) {
+                $addAlert(
+                    ($item['document_type'] ?? 'Documento') . ' por vencer',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Documento por vencer.',
+                    'medium'
+                );
             }
-
-            // 3. Licencias de Conducción
-            if (isset($all['driver_licenses'])) {
-                $licenses = $all['driver_licenses'];
-                foreach ($licenses['expired'] ?? [] as $item) {
-                    $addAlert(
-                        'Licencia de Conducción Vencida',
-                        $item['driver_name'] ?? 'Conductor',
-                        $item['message'] ?? 'Licencia de conducción vencida.',
-                        'high'
-                    );
-                }
-                foreach ($licenses['expiring_soon'] ?? [] as $item) {
-                    $addAlert(
-                        'Licencia de Conducción por vencer',
-                        $item['driver_name'] ?? 'Conductor',
-                        $item['message'] ?? 'Licencia de conducción por vencer.',
-                        'medium'
-                    );
-                }
+            foreach ($docs['missing'] ?? [] as $item) {
+                $addAlert(
+                    'Documento Faltante: ' . ($item['document_type'] ?? 'N/A'),
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Falta registrar documento.',
+                    'high'
+                );
             }
+        }
 
-            // 4. Primera RTM
-            if (isset($all['first_rtm'])) {
-                $rtm = $all['first_rtm'];
-                foreach ($rtm['expired'] ?? [] as $item) {
-                    $addAlert(
-                        'Primera RTM Vencida',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Primera RTM vencida.',
-                        'high'
-                    );
-                }
-                foreach ($rtm['expiring_soon'] ?? [] as $item) {
-                    $addAlert(
-                        'Primera RTM por realizar',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Primera RTM por realizar.',
-                        'medium'
-                    );
-                }
+        // 2. Tarjetas de Operación
+        if (isset($all['operation_cards'])) {
+            $cards = $all['operation_cards'];
+            foreach ($cards['expired'] ?? [] as $item) {
+                $addAlert(
+                    'Tarjeta de Operación Vencida',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Tarjeta de operación vencida.',
+                    'high'
+                );
             }
-
-            // 5. Convenios
-            if (isset($all['agreements'])) {
-                $agreements = $all['agreements'];
-                foreach ($agreements['expired'] ?? [] as $item) {
-                    $addAlert(
-                        'Convenio Vencido',
-                        $item['license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Convenio vencido.',
-                        'high'
-                    );
-                }
-                foreach ($agreements['expiring_soon'] ?? [] as $item) {
-                    $addAlert(
-                        'Convenio por vencer',
-                        $item['license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Convenio por vencer.',
-                        'medium'
-                    );
-                }
+            foreach ($cards['expiring_soon'] ?? [] as $item) {
+                $addAlert(
+                    'Tarjeta de Operación por vencer',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Tarjeta de operación por vencer.',
+                    'medium'
+                );
             }
-
-            // 6. Cobros de Afiliación
-            if (isset($all['affiliate_charges'])) {
-                $charges = $all['affiliate_charges'];
-                foreach ($charges['expired'] ?? [] as $item) {
-                    $addAlert(
-                        'Cobro de Administración Vencido',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Cobro vencido.',
-                        'high'
-                    );
-                }
-                foreach ($charges['expiring_soon'] ?? [] as $item) {
-                    $addAlert(
-                        'Cobro de Administración Próximo',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Cobro próximo.',
-                        'medium'
-                    );
-                }
+            foreach ($cards['missing'] ?? [] as $item) {
+                $addAlert(
+                    'Tarjeta de Operación Faltante',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Falta registrar tarjeta de operación.',
+                    'high'
+                );
             }
+        }
 
-            // 7. Mantenimiento Preventivo
-            if (isset($all['preventative_maintenance'])) {
-                foreach ($all['preventative_maintenance'] as $item) {
-                    $addAlert(
-                        $item['title'] ?? 'Mantenimiento Preventivo',
-                        $item['vehicle_license_plate'] ?? 'N/A',
-                        $item['message'] ?? 'Mantenimiento preventivo.',
-                        ($item['status'] ?? '') === 'VENCIDO' ? 'high' : 'medium'
-                    );
-                }
+        // 3. Licencias de Conducción
+        if (isset($all['driver_licenses'])) {
+            $licenses = $all['driver_licenses'];
+            foreach ($licenses['expired'] ?? [] as $item) {
+                $addAlert(
+                    'Licencia de Conducción Vencida',
+                    $item['driver_name'] ?? 'Conductor',
+                    $item['message'] ?? 'Licencia de conducción vencida.',
+                    'high'
+                );
             }
-
-            // 8. Seguridad Social
-            if (isset($all['social_security']['mora'])) {
-                foreach ($all['social_security']['mora'] as $item) {
-                    $addAlert(
-                        $item['title'] ?? 'Seguridad Social en Mora',
-                        $item['third_party_name'] ?? 'Tercero',
-                        $item['message'] ?? 'Seguridad social en mora.',
-                        'high'
-                    );
-                }
+            foreach ($licenses['expiring_soon'] ?? [] as $item) {
+                $addAlert(
+                    'Licencia de Conducción por vencer',
+                    $item['driver_name'] ?? 'Conductor',
+                    $item['message'] ?? 'Licencia de conducción por vencer.',
+                    'medium'
+                );
             }
+        }
 
-            return $alerts;
-        });
+        // 4. Primera RTM
+        if (isset($all['first_rtm'])) {
+            $rtm = $all['first_rtm'];
+            foreach ($rtm['expired'] ?? [] as $item) {
+                $addAlert(
+                    'Primera RTM Vencida',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Primera RTM vencida.',
+                    'high'
+                );
+            }
+            foreach ($rtm['expiring_soon'] ?? [] as $item) {
+                $addAlert(
+                    'Primera RTM por realizar',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Primera RTM por realizar.',
+                    'medium'
+                );
+            }
+        }
+
+        // 5. Convenios
+        if (isset($all['agreements'])) {
+            $agreements = $all['agreements'];
+            foreach ($agreements['expired'] ?? [] as $item) {
+                $addAlert(
+                    'Convenio Vencido',
+                    $item['license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Convenio vencido.',
+                    'high'
+                );
+            }
+            foreach ($agreements['expiring_soon'] ?? [] as $item) {
+                $addAlert(
+                    'Convenio por vencer',
+                    $item['license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Convenio por vencer.',
+                    'medium'
+                );
+            }
+        }
+
+        // 6. Cobros de Afiliación
+        if (isset($all['affiliate_charges'])) {
+            $charges = $all['affiliate_charges'];
+            foreach ($charges['expired'] ?? [] as $item) {
+                $addAlert(
+                    'Cobro de Administración Vencido',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Cobro vencido.',
+                    'high'
+                );
+            }
+            foreach ($charges['expiring_soon'] ?? [] as $item) {
+                $addAlert(
+                    'Cobro de Administración Próximo',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Cobro próximo.',
+                    'medium'
+                );
+            }
+        }
+
+        // 7. Mantenimiento Preventivo
+        if (isset($all['preventative_maintenance'])) {
+            foreach ($all['preventative_maintenance'] as $item) {
+                $addAlert(
+                    $item['title'] ?? 'Mantenimiento Preventivo',
+                    $item['vehicle_license_plate'] ?? 'N/A',
+                    $item['message'] ?? 'Mantenimiento preventivo.',
+                    ($item['status'] ?? '') === 'VENCIDO' ? 'high' : 'medium'
+                );
+            }
+        }
+
+        // 8. Seguridad Social
+        if (isset($all['social_security']['mora'])) {
+            foreach ($all['social_security']['mora'] as $item) {
+                $addAlert(
+                    $item['title'] ?? 'Seguridad Social en Mora',
+                    $item['third_party_name'] ?? 'Tercero',
+                    $item['message'] ?? 'Seguridad social en mora.',
+                    'high'
+                );
+            }
+        }
+
+        return $alerts;
     }
 
     /**
@@ -790,70 +796,116 @@ class DashboardService
     }
 
     /**
-     * Calcula los kilómetros recorridos por la flota en un rango de fechas.
+     * Calcula los kilómetros recorridos en el período actual y anterior en una sola consulta SQL agregada.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder|\Illuminate\Support\Collection<int, string> $vehiclesSource
+     * @return array{0: int, 1: int} [currentKm, previousKm]
      */
-    private function getKilometersTraveled(?string $companyUuid, Carbon $startDate, Carbon $endDate): int
-    {
-        $vehicleUuids = $this->vehicleService->buildQuery($companyUuid)->pluck('uuid');
-
-        if ($vehicleUuids->isEmpty()) {
-            return 0;
+    private function getKilometersTraveledSummary(
+        $vehiclesSource,
+        Carbon $previousStartDate,
+        Carbon $currentStartDate
+    ): array {
+        if ($vehiclesSource instanceof \Illuminate\Support\Collection && $vehiclesSource->isEmpty()) {
+            return [0, 0];
         }
 
-        $inspections = DB::table('vehicle_inspections')
-            ->whereIn('vehicle_uuid', $vehicleUuids)
-            ->whereBetween('created_at', [$startDate, $endDate])
-            ->orderBy('created_at', 'asc')
-            ->get()
-            ->groupBy('vehicle_uuid');
+        if ($vehiclesSource instanceof \Spatie\QueryBuilder\QueryBuilder) {
+            $vehiclesSource = $vehiclesSource->getEloquentBuilder()->toBase();
+        } elseif ($vehiclesSource instanceof \Illuminate\Database\Eloquent\Builder) {
+            $vehiclesSource = $vehiclesSource->toBase();
+        }
 
-        $baselineMileages = DB::table('vehicle_inspections')
-            ->whereIn('vehicle_uuid', $vehicleUuids)
-            ->where('created_at', '<', $startDate)
+        $currStart = $currentStartDate->toDateTimeString();
+        $prevStart = $previousStartDate->toDateTimeString();
+
+        $aggregates = DB::table('vehicle_inspections')
+            ->whereIn('vehicle_uuid', $vehiclesSource)
             ->groupBy('vehicle_uuid')
-            ->select('vehicle_uuid', DB::raw('MAX(mileage) as max_mileage'))
-            ->pluck('max_mileage', 'vehicle_uuid');
+            ->select('vehicle_uuid')
+            ->selectRaw(
+                "MAX(CASE WHEN vehicle_inspections.created_at >= ? THEN mileage END) as curr_max,
+                 MIN(CASE WHEN vehicle_inspections.created_at >= ? THEN mileage END) as curr_min,
+                 MAX(CASE WHEN vehicle_inspections.created_at >= ? AND vehicle_inspections.created_at < ? THEN mileage END) as prev_max,
+                 MIN(CASE WHEN vehicle_inspections.created_at >= ? AND vehicle_inspections.created_at < ? THEN mileage END) as prev_min,
+                 MAX(CASE WHEN vehicle_inspections.created_at < ? THEN mileage END) as older_max",
+                [$currStart, $currStart, $prevStart, $currStart, $prevStart, $currStart, $prevStart]
+            )
+            ->get();
 
-        $totalKm = 0;
+        $currentKm = 0;
+        $previousKm = 0;
 
-        foreach ($inspections as $vehicleUuid => $vehicleInspections) {
-            $maxMileage = $vehicleInspections->max('mileage') ?? 0;
-
-            $baselineMileage = $baselineMileages[$vehicleUuid] ?? null;
-
-            if (is_null($baselineMileage)) {
-                $baselineMileage = $vehicleInspections->min('mileage') ?? 0;
+        foreach ($aggregates as $row) {
+            // Período actual
+            if ($row->curr_max !== null) {
+                $prev = $row->prev_max !== null ? (int) $row->prev_max : null;
+                $older = $row->older_max !== null ? (int) $row->older_max : null;
+                $baselineCandidate = null;
+                if ($prev !== null && $older !== null) {
+                    $baselineCandidate = max($prev, $older);
+                } else {
+                    $baselineCandidate = $prev ?? $older;
+                }
+                $currBaseline = $baselineCandidate ?? $row->curr_min;
+                $diff = (int) $row->curr_max - (int) $currBaseline;
+                if ($diff > 0) {
+                    $currentKm += $diff;
+                }
             }
 
-            $diff = $maxMileage - $baselineMileage;
-            if ($diff > 0) {
-                $totalKm += $diff;
+            // Período anterior
+            if ($row->prev_max !== null) {
+                $prevBaseline = $row->older_max ?? $row->prev_min;
+                $diff = (int) $row->prev_max - (int) $prevBaseline;
+                if ($diff > 0) {
+                    $previousKm += $diff;
+                }
             }
         }
 
-        return $totalKm;
+        return [$currentKm, $previousKm];
     }
 
     /**
-     * Retorna el UUID de la empresa actual, aislando la data (Multi-tenant).
-     * Si es SUPERADMIN retorna null para ver toda la flota global.
+     * Cuenta registros del período actual y anterior en una sola consulta agregada.
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return array{0: int, 1: int} [current, previous]
+     */
+    private function getCountsCurrentAndPrevious($query, Carbon $currentStartDate, Carbon $previousStartDate): array
+    {
+        $currStart = $currentStartDate->toDateTimeString();
+        $prevStart = $previousStartDate->toDateTimeString();
+        $table = $query->getModel()->getTable();
+
+        $counts = $query->toBase()->selectRaw(
+            "SUM(CASE WHEN {$table}.created_at >= ? THEN 1 ELSE 0 END) as current_count,
+             SUM(CASE WHEN {$table}.created_at >= ? AND {$table}.created_at < ? THEN 1 ELSE 0 END) as previous_count",
+            [$currStart, $prevStart, $currStart]
+        )->first();
+
+        return [
+            (int) ($counts->current_count ?? 0),
+            (int) ($counts->previous_count ?? 0),
+        ];
+    }
+
+    /**
+     * Retorna el UUID de la empresa actual, aislando la data (Multi-tenant) con AlcanceDelActor.
+     * Si es SUPERADMIN y no envía X-Company-UUID retorna null para ver toda la flota global.
      */
     private function getCompanyUuid(): ?string
     {
-        $user = Auth::user();
-        if (! $user) {
+        $contextCompanyUuid = request()->attributes->get('current_company_uuid');
+        if ($contextCompanyUuid) {
+            return $contextCompanyUuid;
+        }
+
+        if ($this->alcance->esSuperadmin()) {
             return null;
         }
 
-        // Si es superadmin tiene acceso a los datos de todas las empresas.
-        if (method_exists($user, 'hasRole') && $user->hasRole('SUPERADMIN')) {
-            return null;
-        }
-
-        // `users` no tiene `company_uuid`: la empresa es la que fijó `SetCompanyContext`
-        // o, sin contexto, la primera del usuario. Debe ser explícita porque además
-        // forma la clave de caché; con `null` todas las empresas compartían la misma.
-        return request()->attributes->get('current_company_uuid')
-            ?? $user->companies()->first()?->uuid;
+        return $this->alcance->companyUuid();
     }
 }

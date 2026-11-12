@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Settings;
 
+use App\Rules\TelegramChatIds;
 use App\Traits\HandlesApiResponse;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -49,6 +50,8 @@ class UpdateSystemConfigurationRequest extends FormRequest
             'activate_notifications' => 'sometimes|boolean',
             'notify_by_email' => 'sometimes|boolean',
             'notification_email' => 'nullable|email|max:191',
+            'notify_by_telegram' => 'sometimes|boolean',
+            'notification_telegram_chat_ids' => ['nullable', 'string', 'max:500', new TelegramChatIds()],
             'own_company_names' => 'nullable|array',
             'own_company_names.*' => 'nullable|string|max:255',
             'fuec_pdf_show_signatures' => 'nullable|boolean',
@@ -71,6 +74,14 @@ class UpdateSystemConfigurationRequest extends FormRequest
             'rce_policy_number' => 'nullable|string|max:100',
             'platform_fee_type' => 'sometimes|in:PASSENGER_RANGE,VEHICLE_CLASS',
             'platform_fee_rates' => 'nullable|array',
+            'contract_company_name' => 'nullable|string|max:200',
+            'contract_company_nit' => 'nullable|string|max:20',
+            'contract_company_email' => 'nullable|email|max:100',
+            'contract_company_phone' => 'nullable|string|max:20',
+            'contract_company_address' => 'nullable|string|max:200',
+            'contract_company_rep_name' => 'nullable|string|max:255',
+            'contract_company_rep_last_name' => 'nullable|string|max:255',
+            'contract_company_rep_document' => 'nullable|string|max:20',
         ];
     }
 

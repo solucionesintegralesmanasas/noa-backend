@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\Administrations\BankDetailController;
 use App\Http\Controllers\Api\V1\Administrations\BranchController;
+use App\Http\Controllers\Api\V1\Administrations\CapacityMovementController;
 use App\Http\Controllers\Api\V1\Administrations\CompanyController;
 // Controllers de Catálogos
 use App\Http\Controllers\Api\V1\Administrations\ContactController;
@@ -23,13 +24,11 @@ use App\Http\Controllers\Api\V1\Auth\RoleController;
 use App\Http\Controllers\Api\V1\Auth\RoleHasPermissionController;
 use App\Http\Controllers\Api\V1\Auth\TwoFactorController;
 use App\Http\Controllers\Api\V1\Auth\UserController;
-use App\Http\Controllers\Api\V1\Billing\BillingProviderConfigController;
 use App\Http\Controllers\Api\V1\Billing\BillingProviderController;
 use App\Http\Controllers\Api\V1\Billing\BillingResolutionController;
 use App\Http\Controllers\Api\V1\Billing\CommercialInvoiceController;
 use App\Http\Controllers\Api\V1\Billing\CreditNoteController;
 use App\Http\Controllers\Api\V1\Billing\DebitNoteController;
-use App\Http\Controllers\Api\V1\Billing\ElectronicDocumentController;
 use App\Http\Controllers\Api\V1\Catalogs\BillingResolutionTypeController;
 use App\Http\Controllers\Api\V1\Catalogs\BrandController;
 use App\Http\Controllers\Api\V1\Catalogs\CityController;
@@ -74,7 +73,7 @@ use App\Http\Controllers\Api\V1\Fleet\GeofenceController;
 use App\Http\Controllers\Api\V1\Fleet\LocationHistoryController;
 use App\Http\Controllers\Api\V1\Integration\GoogleDriveController;
 use App\Http\Controllers\Api\V1\Notifications\NotificationsController;
-use App\Http\Controllers\Api\V1\Procedure\CapacityInventoryController;
+use App\Http\Controllers\Api\V1\Notifications\TelegramController;
 use App\Http\Controllers\Api\V1\Procedure\FleetServiceContractController;
 use App\Http\Controllers\Api\V1\Procedure\ProcedureController;
 use App\Http\Controllers\Api\V1\Procedure\RadicacionController;
@@ -87,6 +86,7 @@ use App\Http\Controllers\Api\V1\ThirdParties\ThirdPartyController;
 use App\Http\Controllers\Api\V1\Projects\ProjectController;
 use App\Http\Controllers\Api\V1\HumanResources\EmploymentContractController;
 use App\Http\Controllers\Api\V1\License\LicenseController;
+use App\Http\Controllers\Api\V1\Public\WebCronController;
 use App\Services\Fleet\SocialSecurityContributionService;
 use App\Services\Notifications\EmailLogService;
 use App\Services\Notifications\NotificationsService;
@@ -128,10 +128,27 @@ Route::prefix('v1')->group(function () {
     // ─── RUTAS PÚBLICAS (Sin Autenticación) ───
     Route::prefix('public')->group(function () {
         Route::get('/fuecs/{code}', [FuecController::class, 'validatePublic'])
+            ->middleware('throttle:30,1')
             ->name('api.v1.public.fuecs.validate');
 
         Route::get('/fuel-requests/{token}', [FuelRequestController::class, 'publicShow'])
             ->name('api.v1.public.fuel-requests.show');
+
+        // ─── RUTAS DE WEB CRON (hosting compartido) ───
+        Route::prefix('cron')->group(function () {
+            Route::get('/status', [WebCronController::class, 'status'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.status');
+            Route::get('/config', [WebCronController::class, 'config'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.config');
+            Route::post('/run', [WebCronController::class, 'run'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.run');
+            Route::post('/stop', [WebCronController::class, 'stop'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.stop');
+        });
 
         // Endpoint para Web Cron (cPanel / Hostings Compartidos)
         Route::get('/cron/trigger-notifications', function (EmailLogService $service) {
@@ -509,6 +526,12 @@ Route::prefix('v1')->group(function () {
                 Route::patch('/{uuid}/toggle-status', [ConveyorCapacityController::class, 'toggleStatus'])->name('api.v1.administration.conveyor-capacity.toggle-status');
             });
 
+            // Movimientos de cupos de capacidad transportadora (libro mayor)
+            Route::prefix('capacity-movements')->group(function () {
+                Route::get('/', [CapacityMovementController::class, 'index'])->middleware('permission:conveyor_capacity.index')->name('api.v1.administration.capacity-movements.index');
+                Route::get('/conciliacion', [CapacityMovementController::class, 'conciliacion'])->middleware('permission:conveyor_capacity.index')->name('api.v1.administration.capacity-movements.conciliacion');
+            });
+
             // Experiencias (sin toggle: no tiene campo de estado)
             Route::prefix('experiences')->group(function () {
                 Route::get('/', [ExperienceController::class, 'index'])->name('api.v1.administration.experiences.index');
@@ -615,7 +638,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/{uuid}/pdf', [EmploymentContractController::class, 'contractPdf'])->name('api.v1.third-parties.employment-contracts.pdf');
         });
 
-        // ─── MÓDULO FACTURACIÓN (cotización fase 1, factura interna fase 2, sin FE) ───
+        // ─── MÓDULO FACTURACIÓN (cotización fase 1, factura interna fase 2, FE por Factus) ───
         Route::prefix('billing')->group(function () {
             Route::prefix('billing-providers')->group(function () {
                 Route::get('/', [BillingProviderController::class, 'index'])->name('api.v1.billing.billing-providers.index');
@@ -623,21 +646,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [BillingProviderController::class, 'show'])->name('api.v1.billing.billing-providers.show');
                 Route::put('/{uuid}', [BillingProviderController::class, 'update'])->name('api.v1.billing.billing-providers.update');
                 Route::delete('/{uuid}', [BillingProviderController::class, 'destroy'])->name('api.v1.billing.billing-providers.destroy');
-
-                // Módulo 01 - Configuraciones Básicas de ApiDian (por proveedor).
-                // Permisos explícitos: la configuración vive en ApiDian y no
-                // puede quedar solo en la auditoría de `authz` (estaba SIN EVALUAR).
-                Route::prefix('{uuid}/configuracion')->group(function () {
-                    Route::get('/', [BillingProviderConfigController::class, 'show'])->name('api.v1.billing.billing-providers.configuracion.show')->middleware('permission:billing_providers.index');
-                    Route::post('/', [BillingProviderConfigController::class, 'guardarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.guardar')->middleware('permission:billing_providers.create');
-                    Route::put('/software', [BillingProviderConfigController::class, 'software'])->name('api.v1.billing.billing-providers.configuracion.software')->middleware('permission:billing_providers.update');
-                    Route::put('/software-nomina', [BillingProviderConfigController::class, 'softwareNomina'])->name('api.v1.billing.billing-providers.configuracion.software-nomina')->middleware('permission:billing_providers.update');
-                    Route::put('/certificado', [BillingProviderConfigController::class, 'certificado'])->name('api.v1.billing.billing-providers.configuracion.certificado')->middleware('permission:billing_providers.update');
-                    Route::post('/resoluciones', [BillingProviderConfigController::class, 'resoluciones'])->name('api.v1.billing.billing-providers.configuracion.resoluciones')->middleware('permission:billing_providers.create');
-                    Route::put('/ambiente', [BillingProviderConfigController::class, 'ambiente'])->name('api.v1.billing.billing-providers.configuracion.ambiente')->middleware('permission:billing_providers.update');
-                    Route::put('/webhook', [BillingProviderConfigController::class, 'webhook'])->name('api.v1.billing.billing-providers.configuracion.webhook')->middleware('permission:billing_providers.update');
-                    Route::delete('/empresa', [BillingProviderConfigController::class, 'eliminarEmpresa'])->name('api.v1.billing.billing-providers.configuracion.empresa-eliminar')->middleware('permission:billing_providers.delete');
-                });
             });
 
             Route::prefix('billing-resolutions')->group(function () {
@@ -659,6 +667,9 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{uuid}/convertir', [CommercialInvoiceController::class, 'convertir'])->name('api.v1.billing.commercial-invoices.convertir');
                 Route::post('/{uuid}/pagos', [CommercialInvoiceController::class, 'pago'])->name('api.v1.billing.commercial-invoices.pago');
                 Route::post('/{uuid}/anular', [CommercialInvoiceController::class, 'anular'])->name('api.v1.billing.commercial-invoices.anular');
+                Route::post('/{uuid}/emitir', [CommercialInvoiceController::class, 'emitir'])
+                    ->middleware('permission:commercial_invoices.update')
+                    ->name('api.v1.billing.commercial-invoices.emitir');
                 Route::get('/{uuid}/pdf', [CommercialInvoiceController::class, 'pdf'])->name('api.v1.billing.commercial-invoices.pdf');
                 Route::delete('/{uuid}', [CommercialInvoiceController::class, 'destroy'])->name('api.v1.billing.commercial-invoices.destroy');
             });
@@ -677,16 +688,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('/{uuid}', [DebitNoteController::class, 'show'])->name('api.v1.billing.debit-notes.show');
                 Route::post('/{uuid}/emitir', [DebitNoteController::class, 'emitir'])->name('api.v1.billing.debit-notes.emitir');
                 Route::post('/{uuid}/anular', [DebitNoteController::class, 'anular'])->name('api.v1.billing.debit-notes.anular');
-            });
-
-            Route::prefix('electronic-documents')->group(function () {
-                Route::get('/', [ElectronicDocumentController::class, 'index'])->name('api.v1.billing.electronic-documents.index')->middleware('permission:electronic_documents.index');
-                Route::post('/', [ElectronicDocumentController::class, 'store'])->name('api.v1.billing.electronic-documents.store')->middleware('permission:electronic_documents.create');
-                Route::get('/{uuid}', [ElectronicDocumentController::class, 'show'])->name('api.v1.billing.electronic-documents.show')->middleware('permission:electronic_documents.profile');
-                Route::put('/{uuid}', [ElectronicDocumentController::class, 'update'])->name('api.v1.billing.electronic-documents.update')->middleware('permission:electronic_documents.update');
-                Route::post('/{uuid}/emitir', [ElectronicDocumentController::class, 'emitir'])->name('api.v1.billing.electronic-documents.emitir')->middleware('permission:electronic_documents.update');
-                Route::get('/{uuid}/estado', [ElectronicDocumentController::class, 'estado'])->name('api.v1.billing.electronic-documents.estado')->middleware('permission:electronic_documents.profile');
-                Route::delete('/{uuid}', [ElectronicDocumentController::class, 'destroy'])->name('api.v1.billing.electronic-documents.destroy')->middleware('permission:electronic_documents.delete');
             });
         });
 
@@ -959,6 +960,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/', [ServiceDeliveryControlSheetController::class, 'index'])->name('api.v1.fleet.service-delivery-control-sheets.index');
                 Route::get('/list', [ServiceDeliveryControlSheetController::class, 'list'])->name('api.v1.fleet.service-delivery-control-sheets.list');
                 Route::get('/project-summary', [ServiceDeliveryControlSheetController::class, 'projectSummary'])->name('api.v1.fleet.service-delivery-control-sheets.project-summary');
+                Route::get('/assigned-without-sheets', [ServiceDeliveryControlSheetController::class, 'assignedWithoutSheets'])->name('api.v1.fleet.service-delivery-control-sheets.assigned-without-sheets');
                 Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
                 Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
                 // SPEC-009: creación y actualización masiva por proyecto,
@@ -1006,15 +1008,10 @@ Route::prefix('v1')->group(function () {
                 Route::patch('/{uuid}/toggle-status', [TerritorialDirectorController::class, 'toggleStatus'])->name('api.v1.procedure.territorial-directors.toggle-status');
             });
 
-            // Inventario de Capacidad
-            Route::prefix('capacity-inventories')->group(function () {
-                Route::get('/', [CapacityInventoryController::class, 'index'])->name('api.v1.procedure.capacity-inventories.index');
-                Route::get('/list', [CapacityInventoryController::class, 'list'])->name('api.v1.procedure.capacity-inventories.list');
-                Route::post('/', [CapacityInventoryController::class, 'store'])->name('api.v1.procedure.capacity-inventories.store');
-                Route::get('/{uuid}', [CapacityInventoryController::class, 'show'])->name('api.v1.procedure.capacity-inventories.show');
-                Route::put('/{uuid}', [CapacityInventoryController::class, 'update'])->name('api.v1.procedure.capacity-inventories.update');
-                Route::delete('/{uuid}', [CapacityInventoryController::class, 'destroy'])->name('api.v1.procedure.capacity-inventories.destroy');
-            });
+            // Inventario de Capacidad: DEPRECADO. El saldo real vive en
+            // `conveyor_capacity.current_capacity` con su libro mayor
+            // `capacity_movements` (ver CapacityMovementService). Se retiraron las
+            // rutas para que nadie escriba un inventario paralelo.
 
             // Contratos de Servicio de Flota
             Route::prefix('fleet-service-contracts')->group(function () {
@@ -1040,8 +1037,10 @@ Route::prefix('v1')->group(function () {
             Route::prefix('radicacion')->group(function () {
                 Route::get('/expedientes', [RadicacionController::class, 'expedientes'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.expedientes');
                 Route::get('/next-code', [RadicacionController::class, 'siguienteCodigo'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.next-code');
+                Route::get('/cupos-disponibles', [RadicacionController::class, 'cuposDisponibles'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.cupos-disponibles');
                 Route::post('/expediente', [RadicacionController::class, 'crearExpediente'])->middleware('permission:radicacion_to.create')->name('api.v1.procedure.radicacion.expediente');
                 Route::get('/{uuid}/detalle', [RadicacionController::class, 'detalle'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.detalle');
+                Route::put('/{uuid}', [RadicacionController::class, 'actualizarPaso'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.actualizar');
                 Route::post('/{uuid}/avanzar', [RadicacionController::class, 'avanzar'])->middleware('permission:radicacion_to.update')->name('api.v1.procedure.radicacion.avanzar');
                 Route::get('/{uuid}/ruta', [RadicacionController::class, 'ruta'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.ruta');
                 Route::get('/{uuid}/validar', [RadicacionController::class, 'validar'])->middleware('permission:radicacion_to.index')->name('api.v1.procedure.radicacion.validar');
@@ -1061,6 +1060,9 @@ Route::prefix('v1')->group(function () {
             Route::patch('/{uuid}/read', [NotificationsController::class, 'markAsRead'])->name('api.v1.notifications.read');
             Route::delete('/{uuid}', [NotificationsController::class, 'destroy'])->name('api.v1.notifications.destroy');
         });
+
+        // ─── PRUEBA DE TELEGRAM (alertas de documentos vencidos) ───
+        Route::post('telegram/test', [TelegramController::class, 'test'])->name('api.v1.notifications.telegram-test');
 
         // ─── MÓDULO FIRMAS ───
         Route::prefix('signatures')->group(function () {
@@ -1142,6 +1144,11 @@ Route::prefix('v1')->group(function () {
                 Route::get('/catalogs/drivers', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'drivers'])->middleware('permission:reports.vehicles.index')->name('api.v1.reports.vehicles.drivers');
                 Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'excel'])->middleware('permission:reports.vehicles.export-excel')->name('api.v1.reports.vehicles.excel');
                 Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleReportController::class, 'pdf'])->middleware('permission:reports.vehicles.export-pdf')->name('api.v1.reports.vehicles.pdf');
+            });
+            Route::prefix('vehicle-activity')->group(function () {
+                Route::get('/', [\App\Http\Controllers\Api\V1\Reports\VehicleActivityReportController::class, 'index'])->middleware('permission:reports.vehicle_activity.index')->name('api.v1.reports.vehicle-activity.index');
+                Route::get('/excel', [\App\Http\Controllers\Api\V1\Reports\VehicleActivityReportController::class, 'excel'])->middleware('permission:reports.vehicle_activity.export-excel')->name('api.v1.reports.vehicle-activity.excel');
+                Route::get('/pdf', [\App\Http\Controllers\Api\V1\Reports\VehicleActivityReportController::class, 'pdf'])->middleware('permission:reports.vehicle_activity.export-pdf')->name('api.v1.reports.vehicle-activity.pdf');
             });
         });
 

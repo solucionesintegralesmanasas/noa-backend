@@ -11,6 +11,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de LicenciaConduccion.
@@ -129,6 +130,20 @@ class DriverLicenseService extends BaseService
     }
 
     /**
+     * Licencia que edita el formulario de terceros (espejo de `elegirLicencia`
+     * del frontend): prefiere la ACTIVA con vencimiento más lejano; sin ACTIVA,
+     * la más reciente. Evita editar una licencia vieja cuando ya existe una
+     * renovación vigente (el orden natural de BD trae la vieja primero).
+     */
+    public function licenciaParaEdicion(string $thirdPartyUuid, ?string $companyUuid = null): ?Model
+    {
+        return $this->getAllDriverLicenses($companyUuid, $thirdPartyUuid)
+            ->sortByDesc(fn (Model $l) => (self::estadoNormalizado($l->status) === 'ACTIVA' ? '1' : '0')
+                .($l->expiration_date ? (string) $l->expiration_date : ''))
+            ->first();
+    }
+
+    /**
      * Estado normalizado para comparar (tolera minúsculas y espacios).
      */
     private static function estadoNormalizado(mixed $estado): string
@@ -177,6 +192,24 @@ class DriverLicenseService extends BaseService
     }
 
     /**
+     * Afiliado propietario del conductor según su licencia más reciente que
+     * tenga un propietario distinto de él mismo. Se usa para heredar el
+     * propietario al renovar desde el modal de licencias (no envía
+     * affiliate_uuid) y no perderlo en la licencia nueva.
+     */
+    private function afiliadoDelConductor(string $thirdPartyUuid, ?string $companyUuid = null): ?string
+    {
+        return DB::table('driver_licenses')
+            ->join('owners_drivers', 'driver_licenses.uuid', '=', 'owners_drivers.driver_license_uuid')
+            ->where('driver_licenses.third_party_uuid', $thirdPartyUuid)
+            ->when($companyUuid, fn ($q) => $q->where('driver_licenses.company_uuid', $companyUuid))
+            ->whereColumn('owners_drivers.third_party_uuid', '!=', 'driver_licenses.third_party_uuid')
+            ->orderByDesc('driver_licenses.expiration_date')
+            ->orderByDesc('driver_licenses.id')
+            ->value('owners_drivers.third_party_uuid');
+    }
+
+    /**
      * Método createDriverLicense.
      */
     public function createDriverLicense(array $data): Model
@@ -203,7 +236,9 @@ class DriverLicenseService extends BaseService
             $this->ownerDriverService->createOwnerDriver([
                 'company_uuid' => $license->company_uuid,
                 'driver_license_uuid' => $license->uuid,
-                'third_party_uuid' => $data['affiliate_uuid'] ?? $license->third_party_uuid, // Affiliate UUID
+                'third_party_uuid' => $data['affiliate_uuid']
+                    ?? $this->afiliadoDelConductor($license->third_party_uuid, $license->company_uuid)
+                    ?? $license->third_party_uuid,
             ]);
 
             if (self::estadoNormalizado($license->status) === 'ACTIVA') {
@@ -245,7 +280,7 @@ class DriverLicenseService extends BaseService
                 'status' => $data['status'] ?? $record->status,
             ]);
 
-            $targetAffiliateUuid = $data['affiliate_uuid'] ?? $record->third_party_uuid;
+            $targetAffiliateUuid = $data['affiliate_uuid'] ?? $record->ownerDriver?->third_party_uuid;
             if ($targetAffiliateUuid) {
                 if ($record->ownerDriver) {
                     $this->ownerDriverService->updateOwnerDriver($record->ownerDriver->uuid, [

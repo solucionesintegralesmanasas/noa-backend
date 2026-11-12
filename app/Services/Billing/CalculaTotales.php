@@ -20,12 +20,14 @@ final class CalculaTotales
      */
     public static function calcularLinea(array $item): array
     {
-        $cantidad = (float) ($item['quantity'] ?? 1);
-        $precio = (float) ($item['unit_price'] ?? 0);
-        $descuento = (float) ($item['discount_amount'] ?? 0);
-        $tarifa = (float) ($item['tax_rate'] ?? 0);
+        $cantidad = max(0.0, (float) ($item['quantity'] ?? 1));
+        $precio = max(0.0, (float) ($item['unit_price'] ?? 0));
+        $descuento = max(0.0, (float) ($item['discount_amount'] ?? 0));
+        $tarifa = max(0.0, (float) ($item['tax_rate'] ?? 0));
 
-        $base = round($cantidad * $precio - $descuento, 2);
+        $bruto = round($cantidad * $precio, 2);
+        $descuentoEfectivo = min($bruto, $descuento);
+        $base = round($bruto - $descuentoEfectivo, 2);
         $impuesto = round($base * $tarifa / 100, 2);
 
         return ['base' => $base, 'impuesto' => $impuesto, 'total' => round($base + $impuesto, 2)];

@@ -47,6 +47,25 @@ trait ValidaPertenenciaPcp
         };
     }
 
+    protected function reglaVehiculosArrayDelContexto(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if (! is_array($value) || empty($value) || ! $this->exigirContexto($fail)) {
+                return;
+            }
+
+            $uuids = array_values(array_unique(array_filter($value, fn ($u) => is_string($u) && $u !== '')));
+            if (empty($uuids)) {
+                return;
+            }
+
+            $count = Vehicle::query()->whereIn('uuid', $uuids)->count();
+            if ($count !== count($uuids)) {
+                $fail('El vehículo no pertenece a la empresa o sede activa.');
+            }
+        };
+    }
+
     protected function reglaTerceroDelContexto(): Closure
     {
         return function (string $attribute, mixed $value, Closure $fail): void {

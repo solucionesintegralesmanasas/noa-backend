@@ -48,9 +48,15 @@ class RadicacionDocumentoService
             ['clave' => 'PAGARE', 'etiqueta' => 'Pagaré y carta de instrucciones', 'origen' => 'ADMIN_FLOTA'],
             ['clave' => 'CONTRATO_PRESTACION', 'etiqueta' => 'Contrato de prestación de servicios', 'origen' => 'PRESTACION'],
         ],
-        'RENOVACION_TARJETA' => [],
-        'DESVINCULACION_MUTUO' => [],
-        'DESVINCULACION_UNILATERAL' => [],
+        'RENOVACION_TARJETA' => [
+            ['clave' => 'SOLICITUD_RENOVACION', 'etiqueta' => 'Solicitud de renovación de la tarjeta de operación'],
+        ],
+        'DESVINCULACION_MUTUO' => [
+            ['clave' => 'ACTA_DESVINCULACION', 'etiqueta' => 'Acta de desvinculación y paz y salvo'],
+        ],
+        'DESVINCULACION_UNILATERAL' => [
+            ['clave' => 'ACTA_DESVINCULACION', 'etiqueta' => 'Acta de desvinculación y paz y salvo'],
+        ],
     ];
 
     /** Clave del documento -> paso de la línea de tiempo al que pertenece. */
@@ -61,6 +67,8 @@ class RadicacionDocumentoService
         'CONTRATO_VINCULACION' => 'TARJETA_DE_OPERACION',
         'PAGARE' => 'TARJETA_DE_OPERACION',
         'CONTRATO_PRESTACION' => 'TARJETA_DE_OPERACION',
+        'SOLICITUD_RENOVACION' => 'RENOVACION_TARJETA',
+        'ACTA_DESVINCULACION' => 'DESVINCULACION_MUTUO',
     ];
 
     /** Clave del documento -> vista Blade que lo compone (nombres en inglés). */
@@ -71,6 +79,8 @@ class RadicacionDocumentoService
         'CONTRATO_VINCULACION' => 'pdf.radicacion.affiliation-contract',
         'PAGARE' => 'pdf.radicacion.promissory-note',
         'CONTRATO_PRESTACION' => 'pdf.radicacion.service-provision-contract',
+        'SOLICITUD_RENOVACION' => 'pdf.radicacion.renewal-request',
+        'ACTA_DESVINCULACION' => 'pdf.radicacion.unlink-record',
     ];
 
     /**
@@ -169,12 +179,16 @@ class RadicacionDocumentoService
      */
     public function datos(string $uuidExpediente, string $paso, string $clave): array
     {
-        $query = Procedure::with(['company.municipality', 'city', 'territorialDirector', 'vehicle.brand', 'vehicle.vehicleClass', 'vehicle.operationCards']);
+        $query = Procedure::with(['company.municipality', 'originCompany', 'city', 'territorialDirector', 'vehicle.brand', 'vehicle.vehicleClass', 'vehicle.operationCards']);
         app(RadicacionService::class)->aislarPorAfiliado($query);
         $padre = $query->where('uuid', $uuidExpediente)->firstOrFail();
 
         $hijos = Procedure::where('parent_procedure_uuid', $padre->uuid)->orderBy('id')->get();
         $hijo = $hijos->firstWhere('procedure_type', $paso);
+        // El acta de desvinculación es la misma para mutuo y unilateral.
+        if (! $hijo && $paso === 'DESVINCULACION_MUTUO') {
+            $hijo = $hijos->firstWhere('procedure_type', 'DESVINCULACION_UNILATERAL');
+        }
 
         $vehiculo = $padre->vehicle;
         $config = $padre->company_uuid
@@ -185,7 +199,7 @@ class RadicacionDocumentoService
         $vinculacion = $toHijo ? FleetServiceContract::where('procedure_uuid', $toHijo->uuid)->orderByDesc('issue_date')->first() : null;
         $prestacion = $toHijo ? ServiceProvisionContract::where('procedure_uuid', $toHijo->uuid)->orderByDesc('issue_date')->first() : null;
 
-        $empresa = $this->datosEmpresa($padre->company);
+        $empresa = $this->datosEmpresa($padre->company, $config);
         $propietario = $this->datosPropietario($vehiculo);
         $vinculacion = $this->datosVinculacion($vinculacion);
         $prestacion = $this->datosPrestacion($prestacion);
@@ -249,20 +263,38 @@ class RadicacionDocumentoService
             'paso' => $hijo?->procedure_type,
             'estado_paso' => $hijo?->status,
             'estado_global' => $padre->global_status,
+            'empresa_origen' => $padre->originCompany?->business_name,
+            // Los datos capturados al actualizar el paso se guardan en la fila del
+            // paso; el padre solo los replica si el PUT vino por él. Se lee el paso
+            // primero y se cae al padre para no imprimirlos vacíos en el PDF.
+            'paz_y_salvo' => $hijo?->paz_y_salvo ?? $padre->paz_y_salvo,
+            'tarjeta_anterior' => $hijo?->old_card_number ?? $padre->old_card_number,
+            'radicado' => $hijo?->radicado_number ?? $padre->radicado_number,
+            'resolucion' => $hijo?->resolution_number ?? $padre->resolution_number,
+            'pago' => $hijo?->payment_status ?? $padre->payment_status,
+            'simit_clear' => $hijo?->simit_clear ?? $padre->simit_clear,
+            'soat_valid' => $hijo?->soat_valid ?? $padre->soat_valid,
+            'rtm_valid' => $hijo?->rtm_valid ?? $padre->rtm_valid,
         ];
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function datosEmpresa(?Company $empresa): array
+    private function datosEmpresa(?Company $empresa, ?SystemConfiguration $config): array
     {
         return [
-            'razon_social' => $empresa?->business_name,
+            // Datos para contratos: viven en la configuración del sistema, son
+            // independientes del registro de Empresas.
+            'razon_social' => $config?->contract_company_name,
             'nombre_comercial' => $empresa?->trade_name,
-            'nit' => $empresa?->document_number,
-            'representante' => $this->nombreRepresentante($empresa?->legal_representative_name, $empresa?->legal_representative_last_name),
-            'documento_representante' => $empresa?->legal_representative_document_number,
+            'nit' => $config?->contract_company_nit,
+            'representante' => $this->nombreRepresentante($config?->contract_company_rep_name, $config?->contract_company_rep_last_name),
+            'documento_representante' => $config?->contract_company_rep_document,
+            'direccion' => $config?->contract_company_address,
+            'telefono' => $config?->contract_company_phone,
+            'correo' => $config?->contract_company_email,
+            // Ciudad, firma y logo siguen siendo la identidad real de la empresa.
             'ciudad' => $empresa?->municipality?->name,
             'firma' => $this->imagenDeMedia($empresa?->signature, 480),
             'logo' => $this->imagenDeMedia($empresa?->logo, 420),

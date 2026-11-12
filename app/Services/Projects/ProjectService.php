@@ -393,20 +393,39 @@ class ProjectService extends BaseService
      * pivote, no por el diff del payload, así que cubre el coche quitado del
      * formulario, el marcado inactivo y la reasignación del conductor.
      */
-    private function sincronizarHojasRetiradas(Project $project): void
+    public function sincronizarHojasRetiradas(Project $project): void
     {
         $asignaciones = ProjectDriverVehicle::query()
             ->where('project_uuid', $project->uuid)
-            ->get(['vehicle_uuid', 'is_active']);
+            ->get(['vehicle_uuid', 'third_party_uuid', 'is_active']);
 
-        $activos = $asignaciones->where('is_active', true)
+        // Un vehículo se considera "retirado del proyecto" para efectos
+        // de hojas SI Y SOLO SI ninguna asignación activa lo referencia,
+        // y además el conductor que lo usaba ya no tiene otra asignación
+        // activa en este proyecto con un vehículo diferente. Esto evita
+        // que una hoja quede marcada como retirada cuando el conductor
+        // simplemente cambió de coche dentro del mismo proyecto.
+        $activos = $asignaciones->where('is_active', true);
+
+        $conductoresActivos = $activos
+            ->pluck('third_party_uuid')
+            ->unique()
+            ->values();
+
+        $activosVehiculos = $activos
             ->pluck('vehicle_uuid')
             ->unique()
             ->values();
-        // diff() exige array: una colección rompe con TypeError en el PUT.
-        $retirados = $asignaciones->pluck('vehicle_uuid')
-            ->unique()
-            ->diff($activos->all())
+
+        // Vehículos retirados = los que están inactivos y NINGUNO de los
+        // conductores que los usaron sigue activo en el proyecto (el conductor
+        // que cambió de coche NO retira la hoja del coche anterior).
+        $retirados = $asignaciones
+            ->where('is_active', false)
+            ->filter(fn (ProjectDriverVehicle $a) => ! $activosVehiculos->contains($a->vehicle_uuid))
+            ->groupBy('vehicle_uuid')
+            ->filter(fn ($filas) => $filas->pluck('third_party_uuid')->intersect($conductoresActivos)->isEmpty())
+            ->keys()
             ->values();
 
         if ($retirados->isNotEmpty()) {
@@ -415,8 +434,8 @@ class ProjectService extends BaseService
                 ->update(['retirada_de_proyecto' => true]);
         }
 
-        if ($activos->isNotEmpty()) {
-            $this->hojasDeVehiculos($project->uuid, $activos)
+        if ($activosVehiculos->isNotEmpty()) {
+            $this->hojasDeVehiculos($project->uuid, $activosVehiculos)
                 ->where('retirada_de_proyecto', true)
                 ->update(['retirada_de_proyecto' => false]);
         }

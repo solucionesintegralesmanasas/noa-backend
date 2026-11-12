@@ -59,4 +59,14 @@ class CommercialInvoiceItem extends Model
     {
         return $this->hasMany(CommercialInvoiceItemWithholding::class, 'invoice_item_uuid', 'uuid');
     }
+
+    public function vehicle(): BelongsTo
+    {
+        return $this->belongsTo(Vehicle::class, 'vehicle_uuid', 'uuid');
+    }
+
+    public function measurementUnit(): BelongsTo
+    {
+        return $this->belongsTo(MeasurementUnit::class, 'measurement_unit_uuid', 'uuid');
+    }
 }

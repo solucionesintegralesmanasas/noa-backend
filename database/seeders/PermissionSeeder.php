@@ -224,6 +224,9 @@ class PermissionSeeder extends Seeder
             'reports.vehicles.index' => ['module' => 'Reportes', 'description' => 'Ver el reporte de vehículos'],
             'reports.vehicles.export-excel' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de vehículos a Excel'],
             'reports.vehicles.export-pdf' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de vehículos a PDF'],
+            'reports.vehicle_activity.index' => ['module' => 'Reportes', 'description' => 'Ver el reporte de actividad vehicular'],
+            'reports.vehicle_activity.export-excel' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de actividad vehicular a Excel'],
+            'reports.vehicle_activity.export-pdf' => ['module' => 'Reportes', 'description' => 'Exportar el reporte de actividad vehicular a PDF'],
 
             // --- Resultados de Inspección ---
             'inspection_results.index'  => ['module' => 'Resultados de Inspección', 'description' => 'Listar todos los resultados de inspección'],
@@ -318,6 +321,7 @@ class PermissionSeeder extends Seeder
             'fuec.profile'  => ['module' => 'FUEC', 'description' => 'Ver el perfil detallado de un FUEC'],
             'fuec.update'   => ['module' => 'FUEC', 'description' => 'Actualizar un FUEC'],
             'fuec.delete'   => ['module' => 'FUEC', 'description' => 'Eliminar un FUEC'],
+            'fuec.renew'    => ['module' => 'FUEC', 'description' => 'Renovar extractos de contrato FUEC'],
 
             // --- Configuraciones del Sistema ---
             'system_configurations.index'  => ['module' => 'Configuraciones del Sistema', 'description' => 'Listar todas las configuraciones del sistema'],
@@ -392,13 +396,6 @@ class PermissionSeeder extends Seeder
             'debit_notes.create'  => ['module' => 'Notas Débito', 'description' => 'Crear una nueva nota débito'],
             'debit_notes.update'  => ['module' => 'Notas Débito', 'description' => 'Actualizar una nota débito'],
             'debit_notes.delete'  => ['module' => 'Notas Débito', 'description' => 'Eliminar una nota débito'],
-
-            // --- Documentos electrónicos genéricos ApiDian (soporte, equivalentes, nómina, eventos) ---
-            'electronic_documents.index'   => ['module' => 'Documentos Electrónicos', 'description' => 'Listar los documentos electrónicos enviados a ApiDian'],
-            'electronic_documents.create'  => ['module' => 'Documentos Electrónicos', 'description' => 'Registrar y emitir un documento electrónico'],
-            'electronic_documents.update'  => ['module' => 'Documentos Electrónicos', 'description' => 'Actualizar un documento electrónico aún no emitido'],
-            'electronic_documents.delete'  => ['module' => 'Documentos Electrónicos', 'description' => 'Eliminar un documento electrónico no transmitido'],
-            'electronic_documents.profile' => ['module' => 'Documentos Electrónicos', 'description' => 'Ver el detalle y estado DIAN de un documento electrónico'],
 
             // --- Geolocalización ---
             'locations.view'        => ['module' => 'Geolocalización', 'description' => 'Ver mapa de conductores en tiempo real'],

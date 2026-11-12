@@ -91,15 +91,6 @@ abstract class BaseService
     }
 
     /**
-     * Tablas de flota cuyo acceso por UUID (show, update, delete) se limita al afiliado dueño.
-     * Fuera de esta lista el comportamiento no cambia; ampliarla exige su prueba en AislamientoAfiliadoTest.
-     */
-    private const TABLAS_AISLADAS_POR_AFILIADO = [
-        'vehicles', 'vehicle_documents', 'operation_cards', 'vehicle_inspections', 'owners_drivers',
-        'third_parties', 'contractors', 'fuec', 'procedures',
-    ];
-
-    /**
      * Sede efectiva del usuario para escrituras:
      * - null: sin restricción (administradores).
      * - '': restringido pero sin sede asignada.
@@ -152,20 +143,7 @@ abstract class BaseService
      */
     public function aislarPorAfiliado(Builder $query): void
     {
-        $user = Auth::user();
-        if (! $user || ! $user->hasRole('AFILIADO') || ! in_array($this->model->getTable(), self::TABLAS_AISLADAS_POR_AFILIADO, true)) {
-            return;
-        }
-
-        $companyUuid = request()->attributes->get('current_company_uuid')
-            ?? $user->companies()->first()?->uuid;
-        if (! $companyUuid) {
-            $query->whereRaw('1 = 0');
-
-            return;
-        }
-
-        $this->aplicarFiltroAfiliado($query, $companyUuid, false);
+        app(\App\Services\ActorScope\AlcanceDelActor::class)->aislarPorAfiliado($query, $this->model);
     }
 
     /**
@@ -378,7 +356,10 @@ abstract class BaseService
 
                 // Soporte nativo para filtrado por empresa
                 if ($field === 'company_uuid') {
-                    $this->applyCompanyFilter($query, $value);
+                    $companyStr = is_array($value) ? (string) (reset($value) ?: '') : (string) $value;
+                    if ($companyStr !== '') {
+                        $this->applyCompanyFilter($query, $companyStr);
+                    }
 
                     continue;
                 }
@@ -495,178 +476,12 @@ abstract class BaseService
     /**
      * Restringe la consulta a lo que ve el AFILIADO (y el CONDUCTOR si $incluirConductor) autenticado:
      * sus vehículos, conductores y documentos, no los de otros afiliados de la misma empresa.
+     *
+     * SPEC-013: Delega en AlcanceDelActor para unificación de alcance y memoria de consultas.
      */
     protected function aplicarFiltroAfiliado(Builder $query, string $companyUuid, bool $incluirConductor = true): void
     {
-        $table = $this->model->getTable();
-        $fillable = $this->model->getFillable();
-        $user = Auth::user();
-
-        if ($user && ($user->hasRole('AFILIADO') || ($incluirConductor && $user->hasRole('CONDUCTOR')))) {
-            $thirdPartyUuid = request()->attributes->get('current_third_party_uuid');
-
-            if (! $thirdPartyUuid) {
-                $companyUser = $user->companies()->where('company_user.company_uuid', $companyUuid)->first()
-                    ?? $user->companies()->where('companies.uuid', $companyUuid)->first()
-                    ?? $user->companies()->first();
-                $thirdPartyUuid = $companyUser ? $companyUser->pivot->third_party_uuid : null;
-            }
-
-            $affiliateUuid = request()->attributes->get('current_affiliate_uuid');
-
-            if (! $affiliateUuid && $user->hasRole('CONDUCTOR') && $thirdPartyUuid) {
-                $affiliate = \App\Models\OwnerDriver::withoutGlobalScopes()->whereIn(
-                    'driver_license_uuid',
-                    \App\Models\DriverLicense::withoutGlobalScopes()
-                        ->where('third_party_uuid', $thirdPartyUuid)
-                        ->whereIn('status', ['VIGENTE', 'ACTIVA'])
-                        ->pluck('uuid')
-                )->first();
-                if ($affiliate) {
-                    $affiliateUuid = $affiliate->third_party_uuid;
-                }
-            }
-
-            // Fallback si no hay afiliado (ej. no es conductor o no tiene dueño asignado)
-            $affiliateUuid = $affiliateUuid ?? $thirdPartyUuid;
-
-            if (! $affiliateUuid) {
-                // Si el usuario es AFILIADO pero no tiene un third_party_uuid asociado en su contexto,
-                // forzamos a que la consulta devuelva vacío por seguridad, para que no vea la info de todos.
-                $query->whereRaw('1 = 0');
-            } else {
-                if ($table === 'third_parties') {
-                    if ($user->hasRole('AFILIADO')) {
-                        // Un afiliado ve a sus conductores vinculados (pivote nueva o
-                        // legado de owners_drivers) y a sí mismo.
-                        $allowedUuids = array_unique(array_merge(
-                            [$affiliateUuid],
-                            $this->conductoresVinculadosAlAfiliado($affiliateUuid)
-                        ));
-
-                        $query->whereIn($table . '.uuid', $allowedUuids);
-                    } elseif ($user->hasRole('CONDUCTOR')) {
-                        // Un conductor solo se ve a sí mismo
-                        $query->where($table . '.uuid', $thirdPartyUuid);
-                    }
-                } elseif ($table === 'driver_licenses') {
-                    if ($user->hasRole('AFILIADO')) {
-                        $driverUuids = $this->conductoresVinculadosAlAfiliado($affiliateUuid);
-                        $licenciasPropias = \App\Models\OwnerDriver::withoutGlobalScopes()
-                            ->where('third_party_uuid', $affiliateUuid)
-                            ->pluck('driver_license_uuid')
-                            ->toArray();
-
-                        $query->where(function ($q) use ($table, $affiliateUuid, $driverUuids, $licenciasPropias) {
-                            $q->where($table . '.third_party_uuid', $affiliateUuid)
-                                ->orWhereIn($table . '.third_party_uuid', $driverUuids)
-                                ->orWhereIn($table . '.uuid', $licenciasPropias);
-                        });
-                    } elseif ($user->hasRole('CONDUCTOR')) {
-                        $query->where($table . '.third_party_uuid', $thirdPartyUuid);
-                    }
-                } elseif ($table === 'social_security_contributions') {
-                    if ($user->hasRole('AFILIADO')) {
-                        $allowedUuids = array_unique(array_merge(
-                            [$affiliateUuid],
-                            $this->conductoresVinculadosAlAfiliado($affiliateUuid)
-                        ));
-
-                        $query->whereIn($table . '.third_party_uuid', $allowedUuids);
-                    } elseif ($user->hasRole('CONDUCTOR')) {
-                        $query->where($table . '.third_party_uuid', $thirdPartyUuid);
-                    }
-                } elseif ($table === 'owners_drivers') {
-                    if ($user->hasRole('AFILIADO')) {
-                        $query->where($table . '.third_party_uuid', $affiliateUuid);
-                    } elseif ($user->hasRole('CONDUCTOR')) {
-                        $driverLicenseUuids = \App\Models\DriverLicense::withoutGlobalScopes()
-                            ->where('third_party_uuid', $thirdPartyUuid)
-                            ->pluck('uuid')
-                            ->toArray();
-
-                        $query->whereIn($table . '.driver_license_uuid', $driverLicenseUuids);
-                    }
-                } elseif ($table === 'vehicles') {
-                    if ($user->hasRole('AFILIADO')) {
-                        $query->where(function ($q) use ($affiliateUuid) {
-                            $q->where('vehicles.third_party_uuid', $affiliateUuid)
-                                ->orWhereHas('owners', function ($ownerQuery) use ($affiliateUuid) {
-                                    $ownerQuery->where('third_party_uuid', $affiliateUuid);
-                                });
-                        });
-                    } elseif ($user->hasRole('CONDUCTOR')) {
-                        $driverThirdPartyUuid = $thirdPartyUuid;
-                        if ($driverThirdPartyUuid) {
-                            $allowedUuids = app(\App\Services\Fleet\VehicleService::class)->getVehicleUuidsForConductor($driverThirdPartyUuid);
-                            $query->whereIn('vehicles.uuid', $allowedUuids);
-                        } else {
-                            $query->whereRaw('1 = 0');
-                        }
-                    }
-                } elseif ($table === 'vehicle_inspections') {
-                    if ($user->hasRole('AFILIADO')) {
-                        $query->whereHas('vehicle', function ($q) use ($affiliateUuid) {
-                            $q->where('vehicles.third_party_uuid', $affiliateUuid)
-                                ->orWhereHas('owners', function ($oq) use ($affiliateUuid) {
-                                    $oq->where('third_party_uuid', $affiliateUuid);
-                                });
-                        });
-                    } elseif ($user->hasRole('CONDUCTOR')) {
-                        $driverThirdPartyUuid = $thirdPartyUuid;
-                        if ($driverThirdPartyUuid) {
-                            $allowedUuids = app(\App\Services\Fleet\VehicleService::class)->getVehicleUuidsForConductor($driverThirdPartyUuid);
-                            $query->where(function ($q) use ($driverThirdPartyUuid, $allowedUuids) {
-                                $q->where('vehicle_inspections.driver_uuid', $driverThirdPartyUuid)
-                                    ->orWhereIn('vehicle_inspections.vehicle_uuid', $allowedUuids);
-                            });
-                        } else {
-                            $query->whereRaw('1 = 0');
-                        }
-                    }
-                } elseif ($table === 'procedures') {
-                    if ($user->hasRole('AFILIADO')) {
-                        $query->where(function ($q) use ($affiliateUuid) {
-                            $q->where('procedures.third_party_uuid', $affiliateUuid)
-                                ->orWhereHas('vehicle', function ($vq) use ($affiliateUuid) {
-                                    $vq->where('vehicles.third_party_uuid', $affiliateUuid)
-                                        ->orWhereHas('owners', fn ($o) => $o->where('third_party_uuid', $affiliateUuid));
-                                });
-                        });
-                    }
-                } elseif (in_array('third_party_uuid', $fillable)) {
-                    $query->where($table . '.third_party_uuid', $affiliateUuid);
-                } elseif (method_exists($this->model, 'third_party')) {
-                    $query->whereHas('third_party', function ($q) use ($affiliateUuid) {
-                        $q->where('third_parties.uuid', $affiliateUuid);
-                    });
-                } elseif (method_exists($this->model, 'thirdParty')) {
-                    $query->whereHas('thirdParty', function ($q) use ($affiliateUuid) {
-                        $q->where('third_parties.uuid', $affiliateUuid);
-                    });
-                } elseif ($user->hasRole('AFILIADO') && method_exists($this->model, 'vehicle')) {
-                    // Documentos, tarjetas, mantenimientos...: pertenecen al afiliado por su vehículo.
-                    $query->whereHas('vehicle', function ($q) use ($affiliateUuid) {
-                        $q->where(function ($w) use ($affiliateUuid) {
-                            $w->where('vehicles.third_party_uuid', $affiliateUuid)
-                                ->orWhereHas('owners', fn ($o) => $o->where('third_party_uuid', $affiliateUuid));
-                        });
-                    });
-                }
-            }
-        }
-    }
-
-    /**
-     * Conductores visibles para un afiliado según la pivote nueva y el legado
-     * de owners_drivers. Se centraliza aquí para no duplicar la regla en cada
-     * rama del aislamiento.
-     *
-     * @return array<int, string>
-     */
-    private function conductoresVinculadosAlAfiliado(string $affiliateUuid): array
-    {
-        return app(\App\Services\Affiliates\AffiliateDriverService::class)
-            ->driverUuidsForAffiliate($affiliateUuid);
+        app(\App\Services\ActorScope\AlcanceDelActor::class)
+            ->aplicarFiltroAfiliado($query, $this->model, $companyUuid, $incluirConductor);
     }
 }

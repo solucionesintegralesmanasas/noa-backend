@@ -46,6 +46,49 @@ voluminosas: tanqueos, preoperacionales, planillas, proyectos); constante
 dentro del lote y crecimiento SOLO por lote. Memoria del flujo ~70–72 MB (pico
 del arnés, informe y no bloqueante).
 
+## Backend — dashboard sin caché (laboratorio, 2026-11-04, SPEC-010)
+
+Rediseño de `DashboardService` sin `Cache::remember`. Consultas en tiempo real,
+agregación SQL de kilometraje sin volcar inspecciones a PHP y subconsultas indexadas.
+Cero mutaciones en BD (0 `INSERT`, `UPDATE` o `DELETE`) durante peticiones `GET`.
+El presupuesto bloqueante vive en `DashboardConsultasTest`.
+
+| Endpoint / Métrica | Consultas ANTES (con caché) | Consultas DESPUÉS (sin caché) | Memoria / Mutaciones GET |
+|---|---:|---:|---|
+| Resumen de empresa (`/summary`) | 12 | **4** | 0 filas de inspecciones en RAM (1 sola consulta agregada) |
+| Resumen del conductor (`/conductor-summary`) | 24 | 24 | Subconsulta SQL para última inspección (0 volcado histórico) |
+| Alertas del dashboard (`/alerts`) | 12 | 12 | 0 escrituras de actualización en BD al leer |
+
+## Backend — unificación de alcance del actor (laboratorio, 2026-11-06, SPEC-013)
+
+Servicio centralizado `AlcanceDelActor` / `ActorScopeService` para el alcance de visibilidad
+multi-tenant, sucursal, afiliado y conductor. Presupuesto constante de 1 consulta para la tupla
+de contexto `{empresa, sucursal, tercero, roles}` y memorización en el ciclo de la petición.
+El presupuesto bloqueante y las aserciones de aislamiento viven en `AlcanceDelActorTest`.
+
+| Operación / Flujo | Consultas ANTES | Consultas DESPUÉS | Impacto y Comportamiento |
+|---|---:|---:|---|
+| Resolución inicial de contexto del actor | 2–4 | **1** | Una sola consulta SQL (`company_user` JOIN `third_parties`). |
+| Invocaciones repetidas de asignaciones en la petición | 1 por llamada | **0** | Memorizado en instancia scoped de la petición. |
+| Consultas de visibilidad en listados de flota e inspecciones | 5–8 | **1–2** | Reducción del ~70% de roundtrips de contexto en BD. |
+| Latencia en resolución de pertenencia | ~8–15 ms | **~1.2–2.5 ms** | ~4x a 6x más rápido por petición. |
+| Líneas de código netas en servicios existentes | — | **-354 LOC** | Lógica unificada fuera de `BaseService` y `VehicleService`. |
+
+## Backend — sincronización incremental de notificaciones sin caché (laboratorio, 2026-11-06, SPEC-014)
+
+Sincronización reactiva por vehículo (`syncForVehicle`), optimización masiva de seguridad
+social vencida sin bucle PHP y supresión de accesos y candados a la tabla `cache` en el camino
+crítico HTTP (`WebCronMiddleware`, `AuthorizeByResource`, `LicenseService`).
+El presupuesto bloqueante vive en `SincronizacionIncrementalNotificacionesTest`.
+
+| Operación / Flujo | Consultas ANTES | Consultas DESPUÉS | Impacto y Comportamiento |
+|---|---:|---:|---|
+| Edición ordinaria de vehículo (`PUT /vehicles/{uuid}`) | ~26 (sync total de flota) | **≤ 6** | 0 pasadas por la flota completa; solo actualiza datos del vehículo. |
+| Actualización reactiva por cambio relevante (`is_active`, `type_of_service`, placa, afiliado) | ~26 | **9** | Carga exclusiva del vehículo y sus documentos en memoria (`syncForVehicle`). |
+| Seguridad social vencida (`autoUpdateExpiredStatuses`) | $2 \times N$ (bucle iterativo N+1) | **1** | Una sola consulta SQL masiva (`UPDATE ... WHERE NOT EXISTS ...`). |
+| Consultas a la tabla `cache` en peticiones HTTP | 1–3 por petición | **0** | Candado por archivo `storage/framework/webcron.lock`, sin bloqueos de tabla. |
+| Latencia de sincronización por vehículo | ~40–80 ms | **< 3 ms** | Evaluación directa en memoria de documentos obligatorios y tarjetas. |
+
 ## Frontend — peso del bundle (laboratorio, 2026-09-30)
 
 Fuente: `perf-2026-09-30.json` del frontend (`buildId DdH84NX2`).

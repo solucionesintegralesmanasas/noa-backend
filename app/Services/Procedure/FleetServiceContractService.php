@@ -71,9 +71,11 @@ class FleetServiceContractService extends BaseService
      */
     public function createFleetServiceContract(array $data): Model
     {
+        $companyUuid = (string) ($data['company_uuid'] ?? app(\App\Services\ActorScope\AlcanceDelActor::class)->companyUuid());
+
         return $this->transaction(fn () => FleetServiceContract::create([
             'procedure_uuid' => $data['procedure_uuid'],
-            'company_uuid' => $data['company_uuid'] ?? null,
+            'company_uuid' => $companyUuid,
             'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
             'third_party_uuid' => $data['third_party_uuid'] ?? null,
             'item' => $data['item'] ?? 1,
@@ -83,7 +85,9 @@ class FleetServiceContractService extends BaseService
             'end_date' => $data['end_date'],
             'duration' => $data['duration'],
             'contract_type' => $data['contract_type'] ?? '1',
-            'contract_number' => $data['contract_number'],
+            // El número siempre lo asigna el consecutivo compartido de la
+            // empresa; el formulario ya no lo captura.
+            'contract_number' => app(ContractNumberService::class)->reservar($companyUuid),
             'signature_validation' => $data['signature_validation'] ?? 'S',
             'valuation_amount' => $data['valuation_amount'] ?? 0,
         ]));
@@ -116,6 +120,9 @@ class FleetServiceContractService extends BaseService
                 'signature_validation' => $data['signature_validation'] ?? $record->signature_validation,
                 'valuation_amount' => $data['valuation_amount'] ?? $record->valuation_amount,
             ]);
+
+            // El TXT de administración de flota debe reflejar el contrato ya editado.
+            app(RadicacionService::class)->regenerarTxtsDeContrato($record->procedure_uuid, 'ADMIN_FLOTA');
 
             return $record->fresh();
         });

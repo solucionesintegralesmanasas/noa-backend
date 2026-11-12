@@ -127,6 +127,35 @@ class ServiceDeliveryControlSheetController extends Controller
     }
 
     #[OA\Get(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/assigned-without-sheets',
+        summary: 'Vehículos con asignación activa en el proyecto que aún no tienen hojas de control',
+        operationId: 'getAssignedVehiclesWithoutSheets',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'Lista de vehículos asignados sin hojas.'),
+            new OA\Response(response: 422, description: 'UUID de proyecto inválido.'),
+        ]
+    )]
+    public function assignedWithoutSheets(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'project_uuid' => ['required', 'uuid', 'exists:projects,uuid'],
+            ]);
+
+            $data = $this->serviceDeliveryControlSheetService
+                ->vehiculosAsignadosSinHojas($validated['project_uuid']);
+
+            return $this->successResponse($data, 'Vehículos asignados sin hojas recuperados.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
         path: '/api/v1/control-sheets/service-delivery-control-sheets/list',
         summary: 'Obtener catálogo de Hojas de Control de Entrega de Servicios',
         operationId: 'getAllServiceDeliveryControlSheets',
@@ -675,12 +704,13 @@ class ServiceDeliveryControlSheetController extends Controller
         operationId: 'downloadReportPdfServiceDeliveryControlSheet',
         tags: ['ServiceDeliveryControlSheet'],
         parameters: [
-            new OA\Parameter(name: 'tipo', in: 'path', required: true, schema: new OA\Schema(type: 'string', enum: ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'])),
+            new OA\Parameter(name: 'tipo', in: 'path', required: true, schema: new OA\Schema(type: 'string', enum: ['rango', 'vehiculo', 'conductor', 'dia', 'mensual', 'proyecto'])),
             new OA\Parameter(name: 'fecha_desde', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
             new OA\Parameter(name: 'fecha_hasta', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
             new OA\Parameter(name: 'fecha', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
             new OA\Parameter(name: 'vehicle_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'third_party_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'year', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
             new OA\Parameter(name: 'month', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
         ],
@@ -692,7 +722,7 @@ class ServiceDeliveryControlSheetController extends Controller
     public function downloadReportPdf(Request $request, string $tipo)
     {
         try {
-            $tipos = ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'];
+            $tipos = ['rango', 'vehiculo', 'conductor', 'dia', 'mensual', 'proyecto'];
             if (! in_array($tipo, $tipos, true)) {
                 return $this->errorResponse('Tipo de reporte inválido.', 422);
             }
@@ -702,6 +732,7 @@ class ServiceDeliveryControlSheetController extends Controller
                 'fecha' => 'nullable|date',
                 'vehicle_uuid' => 'nullable|string',
                 'third_party_uuid' => 'nullable|string',
+                'project_uuid' => 'nullable|string',
                 'year' => 'nullable|integer|min:2020|max:2100',
                 'month' => 'nullable|integer|between:1,12',
             ]);
@@ -719,6 +750,9 @@ class ServiceDeliveryControlSheetController extends Controller
             }
             if ($tipo === 'mensual' && (! $request->query('year') || ! $request->query('month'))) {
                 return $this->errorResponse('El reporte mensual requiere year y month.', 422);
+            }
+            if ($tipo === 'proyecto' && ! $request->query('project_uuid')) {
+                return $this->errorResponse('El reporte por proyecto requiere project_uuid.', 422);
             }
 
             // El mensual con vehículo usa el generador clásico (historial, peajes,
@@ -758,7 +792,8 @@ class ServiceDeliveryControlSheetController extends Controller
         operationId: 'downloadReportExcelServiceDeliveryControlSheet',
         tags: ['ServiceDeliveryControlSheet'],
         parameters: [
-            new OA\Parameter(name: 'tipo', in: 'path', required: true, schema: new OA\Schema(type: 'string', enum: ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'])),
+            new OA\Parameter(name: 'tipo', in: 'path', required: true, schema: new OA\Schema(type: 'string', enum: ['rango', 'vehiculo', 'conductor', 'dia', 'mensual', 'proyecto'])),
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Reporte Excel generado.'),
@@ -767,9 +802,12 @@ class ServiceDeliveryControlSheetController extends Controller
     public function downloadReportExcel(Request $request, string $tipo)
     {
         try {
-            $tipos = ['rango', 'vehiculo', 'conductor', 'dia', 'mensual'];
+            $tipos = ['rango', 'vehiculo', 'conductor', 'dia', 'mensual', 'proyecto'];
             if (! in_array($tipo, $tipos, true)) {
                 return $this->errorResponse('Tipo de reporte inválido.', 422);
+            }
+            if ($tipo === 'proyecto' && ! $request->query('project_uuid')) {
+                return $this->errorResponse('El reporte por proyecto requiere project_uuid.', 422);
             }
             $filtros = array_merge($request->query(), [
                 'tipo' => $tipo,

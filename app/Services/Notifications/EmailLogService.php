@@ -10,6 +10,7 @@ use App\Models\OperationCard;
 use App\Models\SystemConfiguration;
 use App\Models\Vehicle;
 use App\Models\VehicleDocument;
+use App\Notifications\DocumentosVencidosTelegramNotification;
 use App\Services\BaseService;
 use App\Traits\BelongsToCompany;
 use App\Utils\OwnCompany;
@@ -18,6 +19,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Notification;
 
 /**
  * Envía el digest consolidado de vencimientos al correo principal de la empresa.
@@ -57,8 +59,11 @@ class EmailLogService extends BaseService
         BelongsToCompany::withoutCompanyScope(function () {
             $configs = SystemConfiguration::query()
                 ->where('activate_notifications', true)
-                ->where('notify_by_email', true)
-                ->whereNotNull('notification_email')
+                ->where(function ($query) {
+                    $query->where(function ($correo) {
+                        $correo->where('notify_by_email', true)->whereNotNull('notification_email');
+                    })->orWhere('notify_by_telegram', true);
+                })
                 ->get();
 
             foreach ($configs as $config) {
@@ -78,8 +83,10 @@ class EmailLogService extends BaseService
     {
         $companyUuid = $config->company_uuid;
         $email = trim((string) $config->notification_email);
+        $porCorreo = $config->notify_by_email && $email !== '';
+        $destinos = $config->notify_by_telegram ? $config->destinosTelegram() : [];
 
-        if ($email === '') {
+        if (! $porCorreo && $destinos === []) {
             return;
         }
 
@@ -286,12 +293,15 @@ class EmailLogService extends BaseService
         }
 
         $config = SystemConfiguration::query()->where('company_uuid', $companyUuid)->first();
-        if (! $config || ! $config->activate_notifications || ! $config->notify_by_email) {
+        if (! $config || ! $config->activate_notifications) {
             return;
         }
 
         $email = trim((string) $config->notification_email);
-        if ($email === '') {
+        $porCorreo = $config->notify_by_email && $email !== '';
+        $destinos = $config->notify_by_telegram ? $config->destinosTelegram() : [];
+
+        if (! $porCorreo && $destinos === []) {
             return;
         }
 
@@ -326,32 +336,43 @@ class EmailLogService extends BaseService
             ? 'Se detectó un documento que vence hoy. Este aviso se envía en el momento de la detección.'
             : 'Se detectó un documento vencido. Este aviso se envía en el momento de la detección.';
 
-        try {
-            Mail::to($email)->send(new VehicleExpiryDigestMail($companyName, [$item], $asunto, $intro));
-            Log::info("Aviso inmediato de vencimiento enviado a {$email} | Entidad: {$entity->uuid} | Vence: {$expiry->toDateString()}");
+        $enviados = 0;
+        $fallidos = 0;
 
-            $this->registrarEnvio([
-                'company_uuid' => null,
-                'entity_type' => $entity::class,
-                'entity_uuid' => $entity->uuid,
-                'recipient_email' => $email,
-                'milestone' => $milestone,
-                'sent_date' => null,
-                'status' => 'sent',
-            ], true);
-        } catch (\Exception $e) {
-            Log::error("Error enviando aviso inmediato de vencimiento a {$email}: ".$e->getMessage());
-
-            $this->registrarEnvio([
-                'company_uuid' => null,
-                'entity_type' => $entity::class,
-                'entity_uuid' => $entity->uuid,
-                'recipient_email' => $email,
-                'milestone' => $milestone,
-                'sent_date' => null,
-                'status' => 'failed',
-            ], false);
+        if ($porCorreo) {
+            try {
+                Mail::to($email)->send(new VehicleExpiryDigestMail($companyName, [$item], $asunto, $intro));
+                Log::info("Aviso inmediato de vencimiento enviado a {$email} | Entidad: {$entity->uuid} | Vence: {$expiry->toDateString()}");
+                $enviados++;
+            } catch (\Exception $e) {
+                Log::error("Error enviando aviso inmediato de vencimiento a {$email}: ".$e->getMessage());
+                $fallidos++;
+            }
         }
+
+        if ($config->notify_by_telegram) {
+            foreach ($destinos as $chatId) {
+                if ($this->enviarTelegram($chatId, $companyName, [$item], $asunto, $intro)) {
+                    $enviados++;
+                } else {
+                    $fallidos++;
+                }
+            }
+        }
+
+        if ($enviados === 0 && $fallidos === 0) {
+            return;
+        }
+
+        $this->registrarEnvio([
+            'company_uuid' => null,
+            'entity_type' => $entity::class,
+            'entity_uuid' => $entity->uuid,
+            'recipient_email' => $email !== '' ? $email : implode(',', $destinos),
+            'milestone' => $milestone,
+            'sent_date' => null,
+            'status' => $enviados > 0 ? 'sent' : 'failed',
+        ], $enviados > 0);
     }
 
     /**
@@ -466,59 +487,84 @@ class EmailLogService extends BaseService
         bool $porEntidad
     ): void {
         $companyName = $config->company?->business_name ?? $config->company?->trade_name ?? 'la empresa';
+        $enviados = 0;
+        $fallidos = 0;
 
+        if (trim($email) !== '' && $config->notify_by_email) {
+            try {
+                Mail::to($email)->send(new VehicleExpiryDigestMail($companyName, $items, $asunto, $intro));
+                Log::info("Digest de vencimientos enviado a {$email} | Empresa: {$config->company_uuid} | Slot: {$slot} | Items: ".count($items));
+                $enviados++;
+            } catch (\Exception $e) {
+                Log::error("Error enviando digest de vencimientos a {$email}: ".$e->getMessage());
+                $fallidos++;
+            }
+        }
+
+        if ($config->notify_by_telegram) {
+            foreach ($config->destinosTelegram() as $chatId) {
+                if ($this->enviarTelegram($chatId, $companyName, $items, $asunto, $intro)) {
+                    $enviados++;
+                } else {
+                    $fallidos++;
+                }
+            }
+        }
+
+        // Sin canales intentados no hay nada que registrar.
+        if ($enviados === 0 && $fallidos === 0) {
+            return;
+        }
+
+        // Un solo envío exitoso basta para no repetir el slot; solo se marca
+        // fallido cuando todos los canales fallaron.
+        $status = $enviados > 0 ? 'sent' : 'failed';
+        $destinatario = trim($email) !== '' ? $email : implode(',', $config->destinosTelegram());
+
+        if ($porEntidad) {
+            // Clave por entidad (sin empresa ni fecha): el recordatorio es
+            // único y el índice (entity, milestone) lo garantiza.
+            foreach ($items as $item) {
+                $this->registrarEnvio([
+                    'company_uuid' => null,
+                    'entity_type' => $item['entity_type'],
+                    'entity_uuid' => $item['entity_uuid'],
+                    'recipient_email' => $destinatario,
+                    'milestone' => $slot,
+                    'sent_date' => null,
+                    'status' => $status,
+                ], $enviados > 0);
+            }
+        } else {
+            $this->registrarEnvio([
+                'company_uuid' => $config->company_uuid,
+                'recipient_email' => $destinatario,
+                'milestone' => $slot,
+                'sent_date' => Carbon::today(),
+                'status' => $status,
+            ], $enviados > 0);
+        }
+    }
+
+    /**
+     * Envía la alerta a un chat_id de Telegram. Un chat que falla no impide
+     * los demás ni el canal de correo.
+     *
+     * @param  array<int, array{placa: string, documento: string, fecha: string, days_left: int, estado: string}>  $items
+     */
+    private function enviarTelegram(string $chatId, string $companyName, array $items, string $asunto, string $intro): bool
+    {
         try {
-            Mail::to($email)->send(new VehicleExpiryDigestMail($companyName, $items, $asunto, $intro));
-            Log::info("Digest de vencimientos enviado a {$email} | Empresa: {$config->company_uuid} | Slot: {$slot} | Items: ".count($items));
+            Notification::route('telegram', $chatId)
+                ->notify(new DocumentosVencidosTelegramNotification($companyName, $items, $asunto, $intro));
 
-            if ($porEntidad) {
-                // Clave por entidad (sin empresa ni fecha): el recordatorio es
-                // único y el índice (entity, milestone) lo garantiza.
-                foreach ($items as $item) {
-                    $this->registrarEnvio([
-                        'company_uuid' => null,
-                        'entity_type' => $item['entity_type'],
-                        'entity_uuid' => $item['entity_uuid'],
-                        'recipient_email' => $email,
-                        'milestone' => $slot,
-                        'sent_date' => null,
-                        'status' => 'sent',
-                    ], true);
-                }
-            } else {
-                $this->registrarEnvio([
-                    'company_uuid' => $config->company_uuid,
-                    'recipient_email' => $email,
-                    'milestone' => $slot,
-                    'sent_date' => Carbon::today(),
-                    'status' => 'sent',
-                ], true);
-            }
-        } catch (\Exception $e) {
-            Log::error("Error enviando digest de vencimientos a {$email}: ".$e->getMessage());
+            Log::info("Alerta de vencimientos enviada por Telegram a {$chatId} | Items: ".count($items));
 
-            // El fallo se registra sin pisar un envío exitoso concurrente.
-            if ($porEntidad) {
-                foreach ($items as $item) {
-                    $this->registrarEnvio([
-                        'company_uuid' => null,
-                        'entity_type' => $item['entity_type'],
-                        'entity_uuid' => $item['entity_uuid'],
-                        'recipient_email' => $email,
-                        'milestone' => $slot,
-                        'sent_date' => null,
-                        'status' => 'failed',
-                    ], false);
-                }
-            } else {
-                $this->registrarEnvio([
-                    'company_uuid' => $config->company_uuid,
-                    'recipient_email' => $email,
-                    'milestone' => $slot,
-                    'sent_date' => Carbon::today(),
-                    'status' => 'failed',
-                ], false);
-            }
+            return true;
+        } catch (\Throwable $e) {
+            Log::error("Error enviando alerta de vencimientos por Telegram a {$chatId}: ".$e->getMessage());
+
+            return false;
         }
     }
 

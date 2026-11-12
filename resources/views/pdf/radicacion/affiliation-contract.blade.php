@@ -46,6 +46,30 @@
                 <th>Lugar</th>
                 <td>{{ $expediente['ciudad'] ?? $empresa['ciudad'] ?? '' }}</td>
             </tr>
+            <tr>
+                <th>Empresa de transporte</th>
+                <td>{{ $empresa['razon_social'] ?? '' }}</td>
+            </tr>
+            <tr>
+                <th>NIT</th>
+                <td>{{ $empresa['nit'] ?? '' }}</td>
+            </tr>
+            <tr>
+                <th>Representante legal</th>
+                <td>{{ $empresa['representante'] ?? '' }}</td>
+            </tr>
+            <tr>
+                <th>Dirección de la empresa</th>
+                <td>{{ $empresa['direccion'] ?? '' }}</td>
+            </tr>
+            <tr>
+                <th>Teléfono de la empresa</th>
+                <td>{{ $empresa['telefono'] ?? '' }}</td>
+            </tr>
+            <tr>
+                <th>Correo de la empresa</th>
+                <td>{{ $empresa['correo'] ?? '' }}</td>
+            </tr>
         </table>
     </div>
 

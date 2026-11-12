@@ -8,6 +8,7 @@ use App\Traits\HasUuid;
 use App\Traits\LogsActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ServiceProvisionContract extends Model
 {
@@ -17,7 +18,7 @@ class ServiceProvisionContract extends Model
 
     protected $fillable = [
         'uuid', 'company_uuid', 'procedure_uuid', 'vehicle_uuid', 'third_party_uuid',
-        'contract_number', 'issue_date', 'start_date', 'end_date', 'duration',
+        'contract_number', 'type_of_action', 'contract_type', 'issue_date', 'start_date', 'end_date', 'duration',
         'valuation_amount', 'coverage', 'object_description', 'status', 'document_hash',
     ];
 
@@ -30,7 +31,7 @@ class ServiceProvisionContract extends Model
         return $this->belongsTo(Procedure::class, 'procedure_uuid', 'uuid');
     }
 
-    public function vehicle()
+    public function vehicle(): BelongsTo
     {
         return $this->belongsTo(Vehicle::class, 'vehicle_uuid', 'uuid');
     }
