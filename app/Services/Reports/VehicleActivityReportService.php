@@ -57,6 +57,13 @@ final class VehicleActivityReportService
             return DB::query()->fromRaw('(select 1 where 1 = 0) as actividad');
         }
 
+        // Blindaje cross-tenant: actor no SUPERADMIN no puede consultar otra empresa.
+        if (! empty($filtros['company_uuid']) && ! $this->alcance->esSuperadmin() && $filtros['company_uuid'] !== $this->alcance->companyUuid()) {
+            return DB::query()->fromRaw('(select 1 where 1 = 0) as actividad');
+        }
+
+        $filtros['company_uuid'] = $companyUuid;
+
         $union = $this->brazoInspeccion($filtros);
         $union->unionAll($this->brazoMantenimiento($filtros));
         $union->unionAll($this->brazoCombustible($filtros));

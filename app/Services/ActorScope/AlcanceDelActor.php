@@ -561,6 +561,10 @@ class AlcanceDelActor
             return $query->whereRaw('1 = 0');
         }
 
+        if ($companyUuid !== null && ! $this->esSuperadmin && $companyUuid !== $this->companyUuid) {
+            return $query->whereRaw('1 = 0');
+        }
+
         $companyEfectiva = $companyUuid ?? $this->companyUuid;
 
         if (! $companyEfectiva && ! $this->esSuperadmin) {
@@ -637,6 +641,10 @@ class AlcanceDelActor
             return $query->whereRaw('1 = 0');
         }
 
+        if ($companyUuid !== null && ! $this->esSuperadmin && $companyUuid !== $this->companyUuid) {
+            return $query->whereRaw('1 = 0');
+        }
+
         $companyEfectiva = $companyUuid ?? $this->companyUuid;
 
         if (! $companyEfectiva && ! $this->esSuperadmin) {
@@ -698,6 +706,10 @@ class AlcanceDelActor
         $this->asegurarContexto();
 
         if (! $this->usuario) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($companyUuid !== null && ! $this->esSuperadmin && $companyUuid !== $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -881,6 +893,10 @@ class AlcanceDelActor
         $this->asegurarContexto();
 
         if (! $this->usuario) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($companyUuid !== null && ! $this->esSuperadmin && $companyUuid !== $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
