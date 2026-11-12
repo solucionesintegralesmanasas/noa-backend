@@ -85,6 +85,10 @@ class ServiceProvisionContractService extends BaseService
                 'status' => $data['status'] ?? $record->status,
                 'document_hash' => $data['document_hash'] ?? $record->document_hash,
             ]);
+
+            // El TXT de prestación debe reflejar el contrato ya editado.
+            app(RadicacionService::class)->regenerarTxtsDeContrato($record->procedure_uuid, 'PRESTACION');
+
             return true;
         });
     }

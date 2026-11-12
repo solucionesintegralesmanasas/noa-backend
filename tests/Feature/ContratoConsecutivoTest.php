@@ -94,9 +94,9 @@ class ContratoConsecutivoTest extends TestCase
         return array_merge([
             'company_uuid' => $this->empresa,
             'procedure_uuid' => $this->paso,
-            'issue_date' => '2026-11-10',
-            'start_date' => '2026-11-10',
-            'end_date' => '2027-11-10',
+            'issue_date' => now()->toDateString(),
+            'start_date' => now()->toDateString(),
+            'end_date' => now()->addYearNoOverflow()->toDateString(),
             'duration' => 365,
             'valuation_amount' => 0,
         ], $extra);
@@ -166,6 +166,41 @@ class ContratoConsecutivoTest extends TestCase
             ]))
             ->assertCreated()
             ->assertJsonPath('data.contract_number', '0001');
+    }
+
+    public function test_el_contrato_de_vinculacion_no_puede_superar_24_meses(): void
+    {
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/fleet-service-contracts', $this->contrato([
+                'end_date' => now()->addMonthsNoOverflow(25)->toDateString(),
+                'duration' => 760,
+            ]))
+            ->assertStatus(422)
+            ->assertJsonPath('error.details.0.field', 'end_date');
+
+        // Exactamente 24 meses sí se acepta.
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/fleet-service-contracts', $this->contrato([
+                'end_date' => now()->addMonthsNoOverflow(24)->toDateString(),
+                'duration' => 730,
+            ]))
+            ->assertCreated();
+    }
+
+    public function test_el_contrato_de_vinculacion_debe_estar_vigente(): void
+    {
+        Sanctum::actingAs($this->admin(), ['*']);
+
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson('/api/v1/procedure/fleet-service-contracts', $this->contrato([
+                'issue_date' => now()->subYearNoOverflow()->toDateString(),
+                'start_date' => now()->subYearNoOverflow()->toDateString(),
+                'end_date' => now()->subDay()->toDateString(),
+            ]))
+            ->assertStatus(422)
+            ->assertJsonPath('error.details.0.field', 'end_date');
     }
 
     public function test_el_detalle_expone_los_datos_para_contratos_y_el_proximo_numero(): void

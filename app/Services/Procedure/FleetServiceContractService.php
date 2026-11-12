@@ -119,6 +119,9 @@ class FleetServiceContractService extends BaseService
                 'valuation_amount' => $data['valuation_amount'] ?? $record->valuation_amount,
             ]);
 
+            // El TXT de administración de flota debe reflejar el contrato ya editado.
+            app(RadicacionService::class)->regenerarTxtsDeContrato($record->procedure_uuid, 'ADMIN_FLOTA');
+
             return $record->fresh();
         });
     }

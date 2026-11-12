@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Requests\Procedure\FleetServiceContract;
 
 use App\Traits\HandlesApiResponse;
+use Closure;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Support\Carbon;
 
 /**
  * Petición de validación para la creación de un nuevo ContratoGestionFlota.
@@ -46,7 +48,19 @@ class StoreFleetServiceContractRequest extends FormRequest
             'type_of_action' => 'nullable|in:C,M,E',
             'issue_date' => 'required|date',
             'start_date' => 'required|date',
-            'end_date' => 'required|date|after_or_equal:start_date',
+            'end_date' => [
+                'required',
+                'date',
+                'after_or_equal:start_date',
+                'after_or_equal:today',
+                // Regla RUNT del contrato de vinculación: vigencia máxima de 24 meses.
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    $inicio = Carbon::parse((string) $this->input('start_date'));
+                    if (Carbon::parse((string) $value)->gt($inicio->copy()->addMonthsNoOverflow(24))) {
+                        $fail('El contrato de vinculación no puede superar 24 meses (2 años).');
+                    }
+                },
+            ],
             'duration' => 'required|integer',
             'contract_type' => 'nullable|in:1,2',
             'contract_number' => 'nullable|string|max:50',

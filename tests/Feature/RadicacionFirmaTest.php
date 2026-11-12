@@ -220,10 +220,16 @@ class RadicacionFirmaTest extends TestCase
         DB::table('procedures')->where('uuid', $hijoTo)->update(['vehicle_uuid' => $vehiculo]);
 
         // Tercero/proprietario asociado al vehículo
+        $tipoDocumento = $this->insertar('type_of_documents', [
+            'name' => 'Cédula de ciudadanía',
+            'prefix' => 'CC',
+            'status' => 1,
+        ]);
         $tercero = $this->insertar('third_parties', [
             'company_uuid' => $this->empresa,
             'company_name' => 'HUGO ALEXANDER MOLINA',
             'document_number' => '98479678',
+            'document_type_uuid' => $tipoDocumento,
             'address' => 'CLL 24C # 9B - 43 URBANIZACIÓN LA BUCARAMANGA',
             'phone' => '3234513622',
             'email' => 'transespecialessinbarreras@gmail.com',
@@ -242,7 +248,7 @@ class RadicacionFirmaTest extends TestCase
             'start_date' => '2026-09-02',
             'end_date' => '2028-09-02',
             'duration' => 730,
-            'contract_type' => '2',
+            'contract_type' => '1',
             'contract_number' => 'FC-001',
         ]);
 
@@ -257,6 +263,17 @@ class RadicacionFirmaTest extends TestCase
             'token_hash' => hash('sha256', 'admin-flota-token-'.time()),
             'status' => 'FIRMADO',
             'signed_at' => now(),
+        ]);
+
+        // Configuración de la empresa contratante para el TXT de prestación.
+        $this->insertar('system_configuration', [
+            'company_uuid' => $this->empresa,
+            'contract_company_name' => 'FUNDACION COLOMBIANA NUEVO SIGLO',
+            'contract_company_address' => 'CARRERA 13 NO. 24-66',
+            'contract_company_phone' => '3002978382',
+            'contract_company_email' => 'fundacolsincelejo@yahoo.es',
+            'contract_company_rep_name' => 'LUIS TADEO',
+            'contract_company_rep_last_name' => 'MACHADO ROMERO',
         ]);
 
         // Contrato de prestación de servicios (requerido para validación)
@@ -302,35 +319,68 @@ class RadicacionFirmaTest extends TestCase
         // Verificar línea cabecera (3 campos)
         $cabecera = explode('|', $lineas[0]);
         $this->assertCount(3, $cabecera);
-        $this->assertSame('11001', $cabecera[0], 'Código DANE del municipio');
+        $this->assertSame('1', $cabecera[0], 'Consecutivo por empresa (inicia en 1)');
+        $this->assertSame('20260902', $cabecera[1], 'Fecha de emisión del contrato');
         $this->assertSame('901797712', $cabecera[2], 'NIT de la empresa sin dígito');
 
-        // Verificar línea de datos (22 campos)
+        // Verificar línea de datos (22 campos del formato de vinculación)
         $datos = explode('|', $lineas[1]);
         $this->assertCount(22, $datos, 'La línea de datos debe tener exactamente 22 campos');
 
         // Validar cada campo
-        $this->assertSame('11001', $datos[0], 'Código DANE municipio');
+        $this->assertSame('1', $datos[0], 'Consecutivo por empresa');
         $this->assertSame('TRANSPORTES ESPECIALES SIN BARRERAS S.A.S', $datos[1], 'Razón social empresa');
         $this->assertSame('Carrera 14 No. 21-12 Chinú', $datos[2], 'Dirección empresa');
         $this->assertSame('3234513620', $datos[3], 'Teléfono empresa');
         $this->assertSame('transespecialessinbarreras@gmail.com', $datos[4], 'Correo empresa');
-        $this->assertSame('ALEXANDER MIGUEL CARDENAS NARANJO', $datos[5], 'Nombre representante legal');
-        $this->assertSame('20260902', $datos[6], 'Fecha expedición documento rep. legal');
-        $this->assertSame('2', $datos[7], 'Tipo contrato (2 = prestación)');
+        $this->assertSame('C', $datos[5], 'Tipo de acción (Creación)');
+        $this->assertSame('20260902', $datos[6], 'Fecha de emisión del contrato');
+        $this->assertSame('ALEXANDER MIGUEL CARDENAS NARANJO', $datos[7], 'Nombre representante legal');
         $this->assertSame('20260902', $datos[8], 'Fecha inicio contrato');
         $this->assertSame('20280902', $datos[9], 'Fecha fin contrato');
-        $this->assertSame('SZV872', $datos[10], 'Placa vehículo');
-        $this->assertSame('', $datos[11], 'Código clase vehículo (no configurado)');
-        $this->assertSame('C', $datos[12], 'Tipo acción (Creación)');
-        $this->assertSame('98479678', $datos[13], 'NIT propietario');
-        $this->assertSame('HUGO ALEXANDER MOLINA', $datos[14], 'Nombre propietario');
-        $this->assertSame('CLL 24C # 9B - 43 URBANIZACIÓN LA BUCARAMANGA', $datos[15], 'Dirección propietario');
-        $this->assertSame('3234513622', $datos[16], 'Teléfono propietario');
-        $this->assertSame('transespecialessinbarreras@gmail.com', $datos[17], 'Correo propietario');
-        $this->assertSame('20260902', $datos[18], 'Fecha contrato');
-        $this->assertSame('730', $datos[19], 'Duración en días');
-        $this->assertSame('0050', $datos[20], 'Código fijo');
-        $this->assertSame('S', $datos[21], 'Estado radicado');
+        $this->assertSame('24', $datos[10], 'Duración en meses');
+        $this->assertSame('SZV872', $datos[11], 'Placa vehículo');
+        $this->assertSame('7', $datos[12], 'Código clase vehículo');
+        $this->assertSame('C', $datos[13], 'Tipo documento propietario (CC → C)');
+        $this->assertSame('98479678', $datos[14], 'Documento propietario');
+        $this->assertSame('HUGO ALEXANDER MOLINA', $datos[15], 'Nombre propietario');
+        $this->assertSame('Carrera 14 No. 21-12 Chinú', $datos[16], 'Dirección de la empresa de transportes');
+        $this->assertSame('3234513620', $datos[17], 'Teléfono de la empresa de transportes');
+        $this->assertSame('transespecialessinbarreras@gmail.com', $datos[18], 'Correo de la empresa de transportes');
+        $this->assertSame('1', $datos[19], 'Tipo contrato (1 = vinculación de flota)');
+        $this->assertSame('FC-001', $datos[20], 'Número del contrato');
+        $this->assertSame('S', $datos[21], 'Estado por defecto (único fijo)');
+
+        // Volver a generar no crea otro TXT: se reutiliza el del contrato.
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson("/api/v1/procedure/radicacion/{$hijoTo}/txt", ['origin' => 'ADMIN_FLOTA'])
+            ->assertCreated();
+        $this->assertSame(
+            1,
+            \App\Models\RuntTxtBatch::where('procedure_uuid', $hijoTo)->where('origin', 'ADMIN_FLOTA')->count(),
+            'Un solo TXT por contrato'
+        );
+
+        // El TXT de prestación debe salir de service_provision_contracts, no de flota.
+        $this->withHeader('X-Company-UUID', $this->empresa)
+            ->postJson("/api/v1/procedure/radicacion/{$hijoTo}/txt", ['origin' => 'PRESTACION'])
+            ->assertCreated();
+
+        $lotePrestacion = \App\Models\RuntTxtBatch::where('procedure_uuid', $hijoTo)
+            ->where('origin', 'PRESTACION')
+            ->firstOrFail();
+        $datosPrestacion = explode('|', explode("\r\n", trim($lotePrestacion->content))[1]);
+        $this->assertCount(22, $datosPrestacion, 'El TXT de prestación también tiene 22 campos');
+        $this->assertSame('2', $datosPrestacion[0], 'Consecutivo de la empresa (segundo TXT)');
+        $this->assertSame('SP-001', $datosPrestacion[20], 'Número del contrato de prestación');
+        $this->assertSame('FUNDACION COLOMBIANA NUEVO SIGLO', $datosPrestacion[1], 'Empresa contratante configurada');
+        $this->assertSame('CARRERA 13 NO. 24-66', $datosPrestacion[2], 'Dirección de la contratante');
+        $this->assertSame('3002978382', $datosPrestacion[3], 'Teléfono de la contratante');
+        $this->assertSame('fundacolsincelejo@yahoo.es', $datosPrestacion[4], 'Correo de la contratante');
+        $this->assertSame('LUIS TADEO MACHADO ROMERO', $datosPrestacion[7], 'Representante de la contratante');
+        $this->assertSame('Carrera 14 No. 21-12 Chinú', $datosPrestacion[16], 'Campos 17-19 siempre de la empresa de transportes');
+        $this->assertSame('3234513620', $datosPrestacion[17], 'Teléfono de la empresa de transportes');
+        $this->assertSame('transespecialessinbarreras@gmail.com', $datosPrestacion[18], 'Correo de la empresa de transportes');
+        $this->assertSame('2', $datosPrestacion[19], 'Tipo contrato (2 = prestación)');
     }
 }
