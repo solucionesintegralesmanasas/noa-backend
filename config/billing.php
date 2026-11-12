@@ -16,4 +16,17 @@ return [
     */
     'timeout' => env('APIDIAN_TIMEOUT', 30),
 
+    /*
+    |--------------------------------------------------------------------------
+    | ApiDian Credentials
+    |--------------------------------------------------------------------------
+    |
+    | Credenciales globales para autenticación con el API de ApiDian.
+    |
+    */
+    'apidian' => [
+        'base_url' => env('APIDIAN_BASE_URL', 'https://apidian.systemsfact.com.co'),
+        // Token de API de FACTW para regenerar el catálogo (billing:sync-apidian-catalogs).
+        'token' => env('APIDIAN_TOKEN'),
+    ],
 ];

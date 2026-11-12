@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Billing;
 
+use App\Models\BillingProvider;
 use App\Traits\HandlesApiResponse;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
-/** Registro de proveedor tecnológico (driver único: Factus). */
+/** Registro de proveedor tecnológico (driver por empresa: factus o apidian). */
 class StoreBillingProviderRequest extends FormRequest
 {
     use HandlesApiResponse;
@@ -24,6 +25,7 @@ class StoreBillingProviderRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:100'],
+            'driver' => ['nullable', 'in:'.BillingProvider::DRIVER_FACTUS.','.BillingProvider::DRIVER_APIDIAN],
             'server_url' => ['nullable', 'url', 'starts_with:https', 'max:200'],
             'send_to_dian' => ['nullable', 'boolean'],
             'settings' => ['nullable', 'array'],

@@ -30,6 +30,8 @@ class BillingProvider extends Model
 
     public const DRIVER_FACTUS = 'factus';
 
+    public const DRIVER_APIDIAN = 'apidian';
+
     protected $fillable = [
         'uuid',
         'name',
@@ -78,6 +80,11 @@ class BillingProvider extends Model
     public function usaFactus(): bool
     {
         return $this->driver === self::DRIVER_FACTUS;
+    }
+
+    public function usaApidian(): bool
+    {
+        return $this->driver === self::DRIVER_APIDIAN;
     }
 
     public function resolutions(): HasMany

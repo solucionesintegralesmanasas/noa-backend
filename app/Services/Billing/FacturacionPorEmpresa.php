@@ -11,8 +11,8 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Resuelve el driver de facturación electrónica por empresa.
  *
- * Driver único: Factus (billing_providers.driver='factus' con credenciales
- * propias). Sin proveedor activo → driver nulo (genera el UBL sin transmitir).
+ * El driver sale de `billing_providers.driver` ('factus' o 'apidian'). Sin
+ * proveedor activo → driver nulo (genera el UBL sin transmitir).
  */
 class FacturacionPorEmpresa implements ContratoFacturacionElectronica, ContratoNotasElectronica
 {
@@ -46,13 +46,17 @@ class FacturacionPorEmpresa implements ContratoFacturacionElectronica, ContratoN
             ->consultarEstadoNota($nota);
     }
 
-    /** Driver activo de la empresa; nulo si no tiene proveedor Factus configurado. */
+    /** Driver activo de la empresa; nulo si no tiene proveedor configurado. */
     private function paraDocumento(?string $companyUuid): ContratoFacturacionElectronica|ContratoNotasElectronica
     {
         $proveedor = $companyUuid ? $this->proveedorDe($companyUuid) : null;
 
         if ($proveedor?->usaFactus()) {
             return new FactusFacturacion($proveedor);
+        }
+
+        if ($proveedor?->usaApidian()) {
+            return new ApidianFacturacion($proveedor);
         }
 
         return new FacturacionNula;
@@ -63,7 +67,6 @@ class FacturacionPorEmpresa implements ContratoFacturacionElectronica, ContratoN
         return BillingProvider::query()
             ->where('company_uuid', $companyUuid)
             ->where('is_active', true)
-            ->where('driver', BillingProvider::DRIVER_FACTUS)
             ->orderBy('id')
             ->first();
     }

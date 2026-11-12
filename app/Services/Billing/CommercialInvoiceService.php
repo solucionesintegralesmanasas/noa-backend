@@ -160,7 +160,6 @@ class CommercialInvoiceService extends BaseService
         $hayProveedor = BillingProvider::query()
             ->where('company_uuid', $factura->company_uuid)
             ->where('is_active', true)
-            ->where('driver', BillingProvider::DRIVER_FACTUS)
             ->exists();
         if (! $hayProveedor) {
             throw new \RuntimeException('La empresa no tiene un proveedor de facturación electrónica activo.');
