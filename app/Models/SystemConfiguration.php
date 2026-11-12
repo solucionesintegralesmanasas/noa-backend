@@ -55,6 +55,8 @@ class SystemConfiguration extends Model implements HasMedia
         'activate_notifications',
         'notify_by_email',
         'notification_email',
+        'notify_by_telegram',
+        'notification_telegram_chat_ids',
         'own_company_names',
         'fuec_pdf_show_signatures',
         'fuec_pdf_show_contractor_details',
@@ -98,6 +100,7 @@ class SystemConfiguration extends Model implements HasMedia
         'rtm_alert_days' => 'integer',
         'activate_notifications' => 'boolean',
         'notify_by_email' => 'boolean',
+        'notify_by_telegram' => 'boolean',
         'own_company_names' => 'array',
         'fuec_pdf_show_signatures' => 'boolean',
         'fuec_pdf_show_contractor_details' => 'boolean',
@@ -119,6 +122,44 @@ class SystemConfiguration extends Model implements HasMedia
         $this->addMediaCollection('MINISTRY_LOGO')->singleFile();
         $this->addMediaCollection('SUPER_LOGO')->singleFile();
         $this->addMediaCollection('LETTERHEAD')->singleFile();
+    }
+
+    /**
+     * Destinatarios de Telegram de la empresa (máximo 5).
+     *
+     * Se configuran separados por coma en la pantalla; si no hay ninguno, se
+     * usa TELEGRAM_CHAT_ID del .env como respaldo.
+     *
+     * @return array<int, string>
+     */
+    public function destinosTelegram(): array
+    {
+        $destinos = self::separarChatIds($this->notification_telegram_chat_ids);
+
+        if ($destinos === []) {
+            $respaldo = trim((string) config('services.telegram-bot-api.chat_id'));
+            if ($respaldo !== '') {
+                $destinos = self::separarChatIds($respaldo);
+            }
+        }
+
+        return $destinos;
+    }
+
+    /**
+     * Normaliza una lista de chat_id separada por comas (máximo 5).
+     *
+     * @return array<int, string>
+     */
+    public static function separarChatIds(?string $valor): array
+    {
+        return collect(explode(',', (string) $valor))
+            ->map(fn (string $chatId) => trim($chatId))
+            ->filter(fn (string $chatId) => $chatId !== '')
+            ->unique()
+            ->take(5)
+            ->values()
+            ->all();
     }
 
     // ============================================================================

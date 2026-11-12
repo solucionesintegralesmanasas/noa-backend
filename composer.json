@@ -12,6 +12,7 @@
         "darkaonline/l5-swagger": "^11.0",
         "gdebrauwer/laravel-hateoas": "^2.4",
         "laragear/two-factor": "^4.0",
+        "laravel-notification-channels/telegram": "^6.0",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.0",
         "laravel/socialite": "^5.27",

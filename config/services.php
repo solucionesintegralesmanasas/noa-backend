@@ -35,6 +35,13 @@ return [
         ],
     ],
 
+    // Bot de Telegram para alertas de documentos vencidos. `chat_id` es solo un
+    // respaldo: el valor real se configura por empresa en Configuración del sistema.
+    'telegram-bot-api' => [
+        'token' => env('TELEGRAM_BOT_TOKEN'),
+        'chat_id' => env('TELEGRAM_CHAT_ID'),
+    ],
+
     'google' => [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),

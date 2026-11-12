@@ -73,6 +73,7 @@ use App\Http\Controllers\Api\V1\Fleet\GeofenceController;
 use App\Http\Controllers\Api\V1\Fleet\LocationHistoryController;
 use App\Http\Controllers\Api\V1\Integration\GoogleDriveController;
 use App\Http\Controllers\Api\V1\Notifications\NotificationsController;
+use App\Http\Controllers\Api\V1\Notifications\TelegramController;
 use App\Http\Controllers\Api\V1\Procedure\FleetServiceContractController;
 use App\Http\Controllers\Api\V1\Procedure\ProcedureController;
 use App\Http\Controllers\Api\V1\Procedure\RadicacionController;
@@ -85,6 +86,7 @@ use App\Http\Controllers\Api\V1\ThirdParties\ThirdPartyController;
 use App\Http\Controllers\Api\V1\Projects\ProjectController;
 use App\Http\Controllers\Api\V1\HumanResources\EmploymentContractController;
 use App\Http\Controllers\Api\V1\License\LicenseController;
+use App\Http\Controllers\Api\V1\Public\WebCronController;
 use App\Services\Fleet\SocialSecurityContributionService;
 use App\Services\Notifications\EmailLogService;
 use App\Services\Notifications\NotificationsService;
@@ -131,6 +133,22 @@ Route::prefix('v1')->group(function () {
 
         Route::get('/fuel-requests/{token}', [FuelRequestController::class, 'publicShow'])
             ->name('api.v1.public.fuel-requests.show');
+
+        // ─── RUTAS DE WEB CRON (hosting compartido) ───
+        Route::prefix('cron')->group(function () {
+            Route::get('/status', [WebCronController::class, 'status'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.status');
+            Route::get('/config', [WebCronController::class, 'config'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.config');
+            Route::post('/run', [WebCronController::class, 'run'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.run');
+            Route::post('/stop', [WebCronController::class, 'stop'])
+                ->middleware(['throttle:12,1'])
+                ->name('api.v1.public.cron.stop');
+        });
 
         // Endpoint para Web Cron (cPanel / Hostings Compartidos)
         Route::get('/cron/trigger-notifications', function (EmailLogService $service) {
@@ -1042,6 +1060,9 @@ Route::prefix('v1')->group(function () {
             Route::patch('/{uuid}/read', [NotificationsController::class, 'markAsRead'])->name('api.v1.notifications.read');
             Route::delete('/{uuid}', [NotificationsController::class, 'destroy'])->name('api.v1.notifications.destroy');
         });
+
+        // ─── PRUEBA DE TELEGRAM (alertas de documentos vencidos) ───
+        Route::post('telegram/test', [TelegramController::class, 'test'])->name('api.v1.notifications.telegram-test');
 
         // ─── MÓDULO FIRMAS ───
         Route::prefix('signatures')->group(function () {
