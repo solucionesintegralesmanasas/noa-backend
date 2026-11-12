@@ -23,7 +23,7 @@ class ContractNumberService
     {
         $actual = DB::table('contract_sequences')->where('company_uuid', $companyUuid)->value('last_number');
 
-        $base = $actual === null ? $this->maximoExistente($companyUuid) : (int) $actual;
+        $base = max($actual === null ? 0 : (int) $actual, $this->maximoExistente($companyUuid));
 
         return $this->formatear($base + 1);
     }
@@ -32,19 +32,30 @@ class ContractNumberService
     public function reservar(string $companyUuid): string
     {
         return DB::transaction(function () use ($companyUuid) {
-            // Si la empresa aún no tiene fila, se crea sembrada con el mayor
-            // número ya usado por sus contratos para no repetir datos históricos.
-            DB::table('contract_sequences')->insertOrIgnore([
-                'company_uuid' => $companyUuid,
-                'last_number' => $this->maximoExistente($companyUuid),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
-
-            $actual = (int) DB::table('contract_sequences')
+            $actual = DB::table('contract_sequences')
                 ->where('company_uuid', $companyUuid)
                 ->lockForUpdate()
                 ->value('last_number');
+
+            if ($actual === null) {
+                // Si la empresa aún no tiene fila, se crea sembrada con el mayor
+                // número ya usado por sus contratos para no repetir datos históricos.
+                $base = $this->maximoExistente($companyUuid);
+
+                DB::table('contract_sequences')->insertOrIgnore([
+                    'company_uuid' => $companyUuid,
+                    'last_number' => $base,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                $actual = (int) DB::table('contract_sequences')
+                    ->where('company_uuid', $companyUuid)
+                    ->lockForUpdate()
+                    ->value('last_number');
+            } else {
+                $actual = max((int) $actual, $this->maximoExistente($companyUuid));
+            }
 
             $siguiente = $actual + 1;
 
@@ -56,9 +67,11 @@ class ContractNumberService
         });
     }
 
-    private function formatear(int $numero): string
+    private function formatear(int|string|float $numero): string
     {
-        return str_pad((string) $numero, self::LONGITUD, '0', STR_PAD_LEFT);
+        $cadena = is_float($numero) ? sprintf('%.0f', $numero) : (string) $numero;
+
+        return str_pad($cadena, self::LONGITUD, '0', STR_PAD_LEFT);
     }
 
     /** Mayor número puramente numérico ya usado por la empresa en ambos contratos. */

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Procedure\FleetServiceContract;
 
+use App\Http\Requests\Procedure\Radicacion\ValidaEmpresaDelContexto;
+use App\Models\Procedure;
 use App\Traits\HandlesApiResponse;
 use Closure;
 use Illuminate\Contracts\Validation\Validator;
@@ -24,7 +26,7 @@ use Illuminate\Support\Carbon;
  */
 class StoreFleetServiceContractRequest extends FormRequest
 {
-    use HandlesApiResponse;
+    use HandlesApiResponse, ValidaEmpresaDelContexto;
 
     /**
      * Determina si el usuario está autorizado para realizar esta petición.
@@ -34,14 +36,29 @@ class StoreFleetServiceContractRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $this->prepararEmpresaDelContexto();
+    }
+
     /**
      * Obtiene las reglas de validación que se aplicarán a la petición.
      */
     public function rules(): array
     {
         return [
-            'procedure_uuid' => 'required|uuid|exists:procedures,uuid',
-            'company_uuid' => 'required|uuid|exists:companies,uuid',
+            'procedure_uuid' => [
+                'required',
+                'uuid',
+                'exists:procedures,uuid',
+                function (string $attribute, mixed $value, Closure $fail): void {
+                    $companyUuid = $this->input('company_uuid') ?? $this->attributes->get('current_company_uuid');
+                    if ($companyUuid && ! Procedure::where('company_uuid', $companyUuid)->where('uuid', $value)->exists()) {
+                        $fail('El expediente no pertenece a la empresa activa.');
+                    }
+                },
+            ],
+            'company_uuid' => ['required', 'uuid', 'exists:companies,uuid', $this->reglaEmpresaDelContexto()],
             'vehicle_uuid' => 'nullable|uuid',
             'third_party_uuid' => 'nullable|uuid',
             'item' => 'nullable|integer',
