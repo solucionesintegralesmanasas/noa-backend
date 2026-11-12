@@ -11,6 +11,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Servicio de negocio altamente detallado para la gestión integral de LicenciaConduccion.
@@ -196,16 +197,16 @@ class DriverLicenseService extends BaseService
      * propietario al renovar desde el modal de licencias (no envía
      * affiliate_uuid) y no perderlo en la licencia nueva.
      */
-    private function afiliadoDelConductor(string $thirdPartyUuid): ?string
+    private function afiliadoDelConductor(string $thirdPartyUuid, ?string $companyUuid = null): ?string
     {
-        return DriverLicense::where('third_party_uuid', $thirdPartyUuid)
-            ->whereHas('ownerDriver', fn ($q) => $q->whereColumn('owners_drivers.third_party_uuid', '!=', 'driver_licenses.third_party_uuid'))
-            ->orderByDesc('expiration_date')
-            ->orderByDesc('id')
-            ->with('ownerDriver')
-            ->first()
-            ?->ownerDriver
-            ?->third_party_uuid;
+        return DB::table('driver_licenses')
+            ->join('owners_drivers', 'driver_licenses.uuid', '=', 'owners_drivers.driver_license_uuid')
+            ->where('driver_licenses.third_party_uuid', $thirdPartyUuid)
+            ->when($companyUuid, fn ($q) => $q->where('driver_licenses.company_uuid', $companyUuid))
+            ->whereColumn('owners_drivers.third_party_uuid', '!=', 'driver_licenses.third_party_uuid')
+            ->orderByDesc('driver_licenses.expiration_date')
+            ->orderByDesc('driver_licenses.id')
+            ->value('owners_drivers.third_party_uuid');
     }
 
     /**
@@ -236,7 +237,7 @@ class DriverLicenseService extends BaseService
                 'company_uuid' => $license->company_uuid,
                 'driver_license_uuid' => $license->uuid,
                 'third_party_uuid' => $data['affiliate_uuid']
-                    ?? $this->afiliadoDelConductor($license->third_party_uuid)
+                    ?? $this->afiliadoDelConductor($license->third_party_uuid, $license->company_uuid)
                     ?? $license->third_party_uuid,
             ]);
 

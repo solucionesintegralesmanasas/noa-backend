@@ -45,6 +45,7 @@ class RouteMapService
         if ($points->isEmpty()) {
             return [
                 'imagen_base64' => null,
+                'image_base64' => null,
                 'mime' => 'image/png',
                 'sin_datos' => true,
                 'stats' => $stats,
@@ -53,12 +54,13 @@ class RouteMapService
 
         $coords = $points
             ->map(fn ($p) => [(float) $p->latitude, (float) $p->longitude])
-            ->filter(fn ($c) => $c[0] !== 0.0 && $c[1] !== 0.0)
+            ->filter(fn ($c) => ! ($c[0] === 0.0 && $c[1] === 0.0))
             ->values();
 
         if ($coords->isEmpty()) {
             return [
                 'imagen_base64' => null,
+                'image_base64' => null,
                 'mime' => 'image/png',
                 'sin_datos' => true,
                 'stats' => $stats,
@@ -67,8 +69,10 @@ class RouteMapService
 
         // Un solo punto: no hay polyline, se muestra marcador único con respaldo PNG.
         if ($coords->count() === 1) {
+            $respaldo = $this->generarPngRespaldo($coords);
             return [
-                'imagen_base64' => $this->generarPngRespaldo($coords),
+                'imagen_base64' => $respaldo,
+                'image_base64' => $respaldo,
                 'mime' => 'image/png',
                 'sin_datos' => false,
                 'stats' => $stats,
@@ -84,6 +88,7 @@ class RouteMapService
             if (! empty($base64)) {
                 return [
                     'imagen_base64' => $base64,
+                    'image_base64' => $base64,
                     'mime' => 'image/png',
                     'sin_datos' => false,
                     'stats' => $stats,
@@ -93,8 +98,10 @@ class RouteMapService
             Logger::warning('RouteMapService: fallo mapa OSM, se usa respaldo PNG: '.$e->getMessage());
         }
 
+        $respaldo = $this->generarPngRespaldo($dibujo);
         return [
-            'imagen_base64' => $this->generarPngRespaldo($dibujo),
+            'imagen_base64' => $respaldo,
+            'image_base64' => $respaldo,
             'mime' => 'image/png',
             'sin_datos' => false,
             'stats' => $stats,
@@ -130,11 +137,28 @@ class RouteMapService
         $inicio = $points->first()->recorded_at ?? null;
         $fin = $points->last()->recorded_at ?? null;
 
+        $horaInicio = null;
+        $horaFin = null;
+        if ($inicio) {
+            try {
+                $horaInicio = Carbon::parse($inicio)->format('H:i');
+            } catch (\Throwable) {
+                $horaInicio = null;
+            }
+        }
+        if ($fin) {
+            try {
+                $horaFin = Carbon::parse($fin)->format('H:i');
+            } catch (\Throwable) {
+                $horaFin = null;
+            }
+        }
+
         return [
             'total_puntos' => $points->count(),
             'distancia_km' => round($distanciaM / 1000, 2),
-            'hora_inicio' => $inicio ? Carbon::parse($inicio)->format('H:i') : null,
-            'hora_fin' => $fin ? Carbon::parse($fin)->format('H:i') : null,
+            'hora_inicio' => $horaInicio,
+            'hora_fin' => $horaFin,
         ];
     }
 

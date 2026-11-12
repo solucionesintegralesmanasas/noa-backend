@@ -111,7 +111,7 @@ class LicenseService
             // 1. Decodificar base64url o base64 clásico (compatibilidad con claves viejas)
             $normalizada = strtr($licenseKey, '-_', '+/');
             $decoded = json_decode(base64_decode($normalizada . str_repeat('=', (4 - strlen($normalizada) % 4) % 4)), true);
-            if (json_last_error() !== JSON_ERROR_NONE || !$decoded) return null;
+            if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) return null;
 
             // 2. Verificar firma digital
             $dataWithoutSig = Arr::except($decoded, ['sig']);
@@ -126,8 +126,9 @@ class LicenseService
             }
 
             // 4. Verificar expiración
-            $expiry = Carbon::createFromFormat('Y-m-d H:i:s', $decoded['expires_at']);
-            if ($expiry->isPast()) {
+            if (! is_string($decoded['expires_at'])) return null;
+            $expiry = Carbon::tryParse($decoded['expires_at']) ?? Carbon::createFromFormat('Y-m-d H:i:s', $decoded['expires_at']);
+            if (! $expiry || $expiry->isPast()) {
                 // Actualizar status en BD si existe
                 $license = License::where('license_key', $licenseKey)->first();
                 if ($license) $license->expire();
@@ -139,9 +140,9 @@ class LicenseService
                 'status' => 'valid',
                 'company_uuid' => $decoded['company_uuid'],
                 'expires_at' => $decoded['expires_at'],
-                'permissions' => $decoded['permissions'] ?? [],
+                'permissions' => is_array($decoded['permissions'] ?? null) ? $decoded['permissions'] : [],
             ];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             // Cualquier error = licencia inválida
             return null;
         }

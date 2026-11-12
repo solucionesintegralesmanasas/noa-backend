@@ -39,7 +39,7 @@ class StoreSystemConfigurationRequest extends FormRequest
             'maintenance_alert_days' => 'nullable|integer|min:0|max:255',
             'maintenance_numbers_days' => 'nullable|string|max:3',
             'maintenance_alert_km' => 'nullable|integer|min:0',
-            'payment_cutoff_day' => 'required|integer|min:1|max:31',
+            'payment_cutoff_day' => 'nullable|integer|min:1|max:31',
             'document_alert_days' => 'nullable|integer|min:0|max:255',
             'license_alert_days' => 'nullable|integer|min:0|max:255',
             'operation_card_alert_days' => 'nullable|integer|min:0|max:255',

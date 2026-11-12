@@ -30,17 +30,24 @@ class OwnCompany
         }
 
         $normalizado = Str::ascii(mb_strtoupper(trim($nombre), 'UTF-8'));
-        // Los puntos se eliminan (no se vuelven espacio) para que "S.A.S." y "SAS" coincidan.
-        $normalizado = str_replace('.', '', $normalizado);
+        // Reemplazar signos y caracteres no alfanuméricos por espacio
         $normalizado = (string) preg_replace('/[^A-Z0-9]+/', ' ', $normalizado);
         $normalizado = trim((string) preg_replace('/\s+/', ' ', $normalizado));
 
-        // Letras sueltas consecutivas ("S A S", "S. A. S.") forman una sigla: "SAS".
-        return (string) preg_replace_callback(
-            '/(?<![A-Z0-9])[A-Z](?: [A-Z](?![A-Z0-9]))+/',
-            fn(array $m) => str_replace(' ', '', $m[0]),
-            $normalizado
-        );
+        // Unificar siglas comerciales comunes antes de cualquier colapso de letras sueltas
+        $siglas = [
+            '/\bS A S\b/' => 'SAS',
+            '/\bE S P\b/' => 'ESP',
+            '/\bL T D A\b/' => 'LTDA',
+            '/\bS A\b/' => 'SA',
+            '/\bB I C\b/' => 'BIC',
+            '/\bS C A\b/' => 'SCA',
+        ];
+        foreach ($siglas as $patron => $reemplazo) {
+            $normalizado = (string) preg_replace($patron, $reemplazo, $normalizado);
+        }
+
+        return trim($normalizado);
     }
 
     /**

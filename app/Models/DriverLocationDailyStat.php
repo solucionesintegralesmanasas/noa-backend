@@ -80,8 +80,16 @@ class DriverLocationDailyStat extends Model
      */
     public static function indicesParaTope(int $total, int $tope): array
     {
+        if ($total <= 0 || $tope <= 0) {
+            return [];
+        }
+
         if ($total <= $tope) {
             return range(0, $total - 1);
+        }
+
+        if ($tope === 1) {
+            return [0];
         }
 
         $paso = ($total - 1) / ($tope - 1);

@@ -356,7 +356,10 @@ abstract class BaseService
 
                 // Soporte nativo para filtrado por empresa
                 if ($field === 'company_uuid') {
-                    $this->applyCompanyFilter($query, $value);
+                    $companyStr = is_array($value) ? (string) (reset($value) ?: '') : (string) $value;
+                    if ($companyStr !== '') {
+                        $this->applyCompanyFilter($query, $companyStr);
+                    }
 
                     continue;
                 }

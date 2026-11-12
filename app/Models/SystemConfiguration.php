@@ -10,6 +10,7 @@ use App\Traits\LogsActivity;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Arr;
 use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -246,7 +247,8 @@ class SystemConfiguration extends Model implements HasMedia
 
         if (is_array($value)) {
             $normalizados = [];
-            foreach ($value as $item) {
+            $aplanado = Arr::flatten($value);
+            foreach ($aplanado as $item) {
                 if (is_string($item) && trim($item) !== '') {
                     $normalizado = \App\Utils\OwnCompany::normalizarNombre($item);
                     if ($normalizado !== '' && ! in_array($normalizado, $normalizados, true)) {
