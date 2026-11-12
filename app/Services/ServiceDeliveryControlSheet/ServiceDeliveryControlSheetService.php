@@ -560,6 +560,9 @@ class ServiceDeliveryControlSheetService extends BaseService
      */
     private function validateProjectDates(?string $projectUuid, ?string $startDate, ?string $endDate): void
     {
+        if ($startDate && $endDate && Carbon::parse($startDate)->gt(Carbon::parse($endDate))) {
+            throw ValidationException::withMessages(['start_date' => 'La fecha de inicio no puede ser posterior a la fecha de fin.']);
+        }
         if (! $projectUuid) {
             return;
         }
@@ -568,10 +571,11 @@ class ServiceDeliveryControlSheetService extends BaseService
             throw ValidationException::withMessages(['project_uuid' => 'El proyecto seleccionado no existe.']);
         }
         if ($startDate && $project->start_date && Carbon::parse($startDate)->lt(Carbon::parse($project->start_date))) {
-            throw ValidationException::withMessages(['start_date' => 'La fecha de inicio no puede ser anterior al inicio del proyecto (' . $project->start_date->format('d/m/Y') . ').']);
+            throw ValidationException::withMessages(['start_date' => 'La fecha de inicio no puede ser anterior al inicio del proyecto (' . Carbon::parse($project->start_date)->format('d/m/Y') . ').']);
         }
-        if ($endDate && $project->completion_date && Carbon::parse($endDate)->gt(Carbon::parse($project->completion_date))) {
-            throw ValidationException::withMessages(['end_date' => 'La fecha de fin no puede superar el fin del proyecto (' . $project->completion_date->format('d/m/Y') . ').']);
+        $fechaFinProyecto = $project->completion_date ?? $project->end_date ?? null;
+        if ($endDate && $fechaFinProyecto && Carbon::parse($endDate)->gt(Carbon::parse($fechaFinProyecto))) {
+            throw ValidationException::withMessages(['end_date' => 'La fecha de fin no puede superar el fin del proyecto (' . Carbon::parse($fechaFinProyecto)->format('d/m/Y') . ').']);
         }
     }
 
@@ -817,6 +821,7 @@ class ServiceDeliveryControlSheetService extends BaseService
             return ['planilla' => null, 'route' => null];
         }
 
+        $this->asegurarEditable($record, 'close_route');
         $this->asegurarDiaVigente($record, 'close_route');
 
         $routes = $record->routes()->orderBy('order_index')->get();
@@ -1037,6 +1042,11 @@ class ServiceDeliveryControlSheetService extends BaseService
                 'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
             ]);
         }
+
+        // Fechas se validan antes de chequear asignaciones operativas
+        $startRaw = $data['start_date'] ?? $data['service_date'] ?? null;
+        $endRaw = $data['end_date'] ?? null;
+        $this->validateProjectDates($projectUuid, $startRaw, $endRaw);
 
         $porVehiculo = $this->asignacionesActivasPorVehiculo($projectUuid);
         if (empty($porVehiculo)) {
@@ -1482,7 +1492,10 @@ class ServiceDeliveryControlSheetService extends BaseService
         $asignaciones = ProjectDriverVehicle::query()
             ->where('project_uuid', $projectUuid)
             ->active()
-            ->with(['thirdParty', 'vehicle'])
+            ->with([
+                'thirdParty:id,uuid,first_name,last_name,company_name,document_number',
+                'vehicle:id,uuid,vehicle_license_plate,internal_number,model,branch_uuid,third_party_uuid',
+            ])
             ->orderBy('id')
             ->get();
 
@@ -1507,16 +1520,40 @@ class ServiceDeliveryControlSheetService extends BaseService
     public function vehiculosAsignadosSinHojas(string $projectUuid): array
     {
         $companyUuid = $this->resolverEmpresa(null);
-        if (! $companyUuid || ! Project::query()->where('company_uuid', $companyUuid)->where('uuid', $projectUuid)->exists()) {
+        if (! $companyUuid) {
             throw ValidationException::withMessages([
                 'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
             ]);
+        }
+
+        $project = Project::query()
+            ->where('company_uuid', $companyUuid)
+            ->where('uuid', $projectUuid)
+            ->first();
+
+        if (! $project) {
+            throw ValidationException::withMessages([
+                'project_uuid' => 'El proyecto no pertenece a la empresa activa.',
+            ]);
+        }
+
+        $alcance = app(\App\Services\ActorScope\AlcanceDelActor::class);
+        if ($alcance->esSucursalRestringida() && $alcance->branchUuid()) {
+            if ($project->branch_uuid && $project->branch_uuid !== $alcance->branchUuid()) {
+                throw ValidationException::withMessages([
+                    'project_uuid' => 'El proyecto no pertenece a la sede activa.',
+                ]);
+            }
         }
 
         $porVehiculo = $this->asignacionesActivasPorVehiculo($projectUuid);
         if (empty($porVehiculo)) {
             return [];
         }
+
+        $vehiclesQuery = Vehicle::query()->where('company_uuid', $companyUuid)->whereIn('uuid', array_keys($porVehiculo));
+        $alcance->aplicarAVehiculos($vehiclesQuery);
+        $vehiculosPermitidos = $vehiclesQuery->pluck('uuid')->all();
 
         $conHoja = ServiceInternalControl::query()
             ->whereIn('vehicle_uuid', array_keys($porVehiculo))
@@ -1530,6 +1567,9 @@ class ServiceDeliveryControlSheetService extends BaseService
         $sinHoja = [];
         foreach ($porVehiculo as $vehicleUuid => $asignacion) {
             if (in_array($vehicleUuid, $conHoja, true)) {
+                continue;
+            }
+            if (! in_array($vehicleUuid, $vehiculosPermitidos, true)) {
                 continue;
             }
 
@@ -2029,6 +2069,36 @@ class ServiceDeliveryControlSheetService extends BaseService
             ->where('entity_type', $hija->getMorphClass())
             ->where('entity_id', $hija->getKey())
             ->exists();
+    }
+
+    public function update(string $uuid, array $attributes): bool
+    {
+        $record = $this->findByUuid($uuid);
+        if ($record) {
+            $this->asegurarEditable($record, 'update');
+        }
+
+        return parent::update($uuid, $attributes);
+    }
+
+    public function delete(string $uuid): bool
+    {
+        $record = $this->findByUuid($uuid);
+        if ($record) {
+            $this->asegurarEditable($record, 'delete');
+        }
+
+        return parent::delete($uuid);
+    }
+
+    public function toggleStatus(string $uuid, string $field = 'status', array $enumMapping = []): bool
+    {
+        $record = $this->findByUuid($uuid);
+        if ($record) {
+            $this->asegurarEditable($record, 'toggle_status');
+        }
+
+        return parent::toggleStatus($uuid, $field, $enumMapping);
     }
 
     public function deleteServiceDeliveryControlSheet(string $uuid): void

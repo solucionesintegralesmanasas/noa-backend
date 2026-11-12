@@ -32,21 +32,24 @@ class RestoreProjectSheetRetiradas extends Command
             ->where('is_active', false)
             ->pluck('vehicle_uuid');
 
-        $retirados = $vehiculosInactivos->filter(fn (string $v) => ! $activosVehiculos->contains($v))
-            ->diff($activosVehiculos)
+        // Restaurar hojas de vehículos retirados cuyo conductor aún está activo en el proyecto con otro coche
+        $vehiculosARestaurar = $asignaciones
+            ->where('is_active', false)
+            ->filter(fn (ProjectDriverVehicle $a) => ! $activosVehiculos->contains($a->vehicle_uuid))
+            ->groupBy('vehicle_uuid')
+            ->filter(fn ($filas) => $filas->pluck('third_party_uuid')->intersect($conductoresActivos)->isNotEmpty())
+            ->keys()
             ->values();
 
-        // Restaurar hojas de vehículos retirados cuyo conductor aún está activo
         $restauradas = 0;
-        foreach ($retirados as $vehicleUuid) {
-            $affected = ServiceDeliveryControlSheet::where('project_uuid', $projectUuid)
-                ->whereHas('internalControl', fn ($q) => $q->where('vehicle_uuid', $vehicleUuid))
+        if ($vehiculosARestaurar->isNotEmpty()) {
+            $restauradas = ServiceDeliveryControlSheet::where('project_uuid', $projectUuid)
+                ->whereHas('internalControl', fn ($q) => $q->whereIn('vehicle_uuid', $vehiculosARestaurar))
                 ->where('retirada_de_proyecto', true)
                 ->update(['retirada_de_proyecto' => false]);
-            $restauradas += $affected;
         }
 
-        $this->info("Comando ejecutado. Verifique los resultados manualmente.");
+        $this->info("Comando ejecutado. Hojas restauradas: {$restauradas}.");
         return Command::SUCCESS;
     }
 }
