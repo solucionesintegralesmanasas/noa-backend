@@ -71,7 +71,7 @@ class FleetServiceContractService extends BaseService
      */
     public function createFleetServiceContract(array $data): Model
     {
-        $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
+        $companyUuid = (string) ($data['company_uuid'] ?? app(\App\Services\ActorScope\AlcanceDelActor::class)->companyUuid());
 
         return $this->transaction(fn () => FleetServiceContract::create([
             'procedure_uuid' => $data['procedure_uuid'],
@@ -87,7 +87,7 @@ class FleetServiceContractService extends BaseService
             'contract_type' => $data['contract_type'] ?? '1',
             // El número siempre lo asigna el consecutivo compartido de la
             // empresa; el formulario ya no lo captura.
-            'contract_number' => app(ContractNumberService::class)->reservar((string) $companyUuid),
+            'contract_number' => app(ContractNumberService::class)->reservar($companyUuid),
             'signature_validation' => $data['signature_validation'] ?? 'S',
             'valuation_amount' => $data['valuation_amount'] ?? 0,
         ]));

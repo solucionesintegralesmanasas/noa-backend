@@ -39,7 +39,7 @@ class ServiceProvisionContractService extends BaseService
 
     public function create(array $data): Model
     {
-        $companyUuid = $this->resolverEmpresa($data['company_uuid'] ?? null);
+        $companyUuid = (string) ($data['company_uuid'] ?? app(\App\Services\ActorScope\AlcanceDelActor::class)->companyUuid());
 
         return $this->transaction(fn () => ServiceProvisionContract::create([
             'company_uuid' => $companyUuid,
@@ -47,7 +47,7 @@ class ServiceProvisionContractService extends BaseService
             'vehicle_uuid' => $data['vehicle_uuid'] ?? null,
             'third_party_uuid' => $data['third_party_uuid'] ?? null,
             // Consecutivo compartido con el contrato de administración de flota.
-            'contract_number' => app(ContractNumberService::class)->reservar((string) $companyUuid),
+            'contract_number' => app(ContractNumberService::class)->reservar($companyUuid),
             'type_of_action' => $data['type_of_action'] ?? 'C',
             'contract_type' => $data['contract_type'] ?? '2',
             'issue_date' => $data['issue_date'],

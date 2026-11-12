@@ -1493,8 +1493,8 @@ class ServiceDeliveryControlSheetService extends BaseService
             ->where('project_uuid', $projectUuid)
             ->active()
             ->with([
-                'thirdParty:id,uuid,first_name,last_name,company_name,document_number',
-                'vehicle:id,uuid,vehicle_license_plate,internal_number,model,branch_uuid,third_party_uuid',
+                'thirdParty:id,uuid,first_name,last_name,company_name,document_number,branch_uuid',
+                'vehicle:id,uuid,vehicle_license_plate,internal_number,model,third_party_uuid',
             ])
             ->orderBy('id')
             ->get();
