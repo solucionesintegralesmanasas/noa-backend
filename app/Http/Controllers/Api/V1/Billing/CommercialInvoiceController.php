@@ -177,6 +177,33 @@ class CommercialInvoiceController extends Controller
         }
     }
 
+    #[OA\Get(path: '/api/v1/billing/commercial-invoices/{uuid}/estado-dian', summary: 'Consultar estado electrónico ante DIAN', operationId: 'statusDianCommercialInvoice', tags: ['Facturación'], security: [['bearerAuth' => []]])]
+    public function estadoDian(string $uuid): JsonResponse
+    {
+        try {
+            $resultado = $this->documentos->consultarEstadoDian($uuid);
+
+            return $this->successResponse($resultado, 'Estado DIAN consultado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Post(path: '/api/v1/billing/commercial-invoices/{uuid}/enviar-correo', summary: 'Enviar documento electrónico por correo', operationId: 'sendEmailCommercialInvoice', tags: ['Facturación'], security: [['bearerAuth' => []]])]
+    public function enviarCorreo(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $datos = $request->validate([
+                'email' => ['nullable', 'email', 'max:255'],
+            ]);
+            $resultado = $this->documentos->enviarPorCorreo($uuid, $datos['email'] ?? null);
+
+            return $this->successResponse($resultado, $resultado['message']);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
     #[OA\Get(path: '/api/v1/billing/commercial-invoices/{uuid}/pdf', summary: 'Descargar PDF del documento', operationId: 'pdfCommercialInvoice', tags: ['Facturación'], security: [['bearerAuth' => []]])]
     public function pdf(string $uuid): Response|JsonResponse
     {

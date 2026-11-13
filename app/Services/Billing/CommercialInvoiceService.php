@@ -170,6 +170,74 @@ class CommercialInvoiceService extends BaseService
         return $this->getDetalle($factura->uuid);
     }
 
+    /** Consulta el estado electrónico actual de la factura ante el proveedor/DIAN. */
+    public function consultarEstadoDian(string $uuid): array
+    {
+        /** @var CommercialInvoice|null $factura */
+        $factura = $this->findByUuid($uuid);
+        if (! $factura || ! $factura->esFactura()) {
+            throw new \RuntimeException('La factura no existe.');
+        }
+
+        $resultado = $this->facturacionElectronica->consultarEstado($factura);
+
+        if (! empty($resultado['estado']) && $resultado['estado'] !== $factura->electronic_status) {
+            $factura->withoutLogging(fn () => $factura->update([
+                'electronic_status' => $resultado['estado'],
+                'dian_response' => $resultado['crudo'] ?? $factura->dian_response,
+            ]));
+        }
+
+        return $resultado + ['factura' => $this->getDetalle($factura->uuid)];
+    }
+
+    /** Envía el documento electrónico por correo a través del proveedor tecnológico (ApiDian). */
+    public function enviarPorCorreo(string $uuid, ?string $email = null): array
+    {
+        /** @var CommercialInvoice|null $factura */
+        $factura = $this->findByUuid($uuid, ['*'], ['customer']);
+        if (! $factura || ! $factura->esFactura()) {
+            throw new \RuntimeException('La factura no existe.');
+        }
+
+        $correo = trim((string) ($email ?: $factura->customer?->email ?? ''));
+        if ($correo === '') {
+            throw new \RuntimeException('El cliente no tiene correo registrado; indica un correo destino.');
+        }
+
+        $proveedor = BillingProvider::query()
+            ->where('company_uuid', $factura->company_uuid)
+            ->where('is_active', true)
+            ->orderBy('id')
+            ->first();
+
+        if (! $proveedor || ! $proveedor->usaApidian()) {
+            throw new \RuntimeException('El envío por correo desde NOA requiere el proveedor ApiDian activo.');
+        }
+
+        $docId = (string) ($factura->provider_document_id ?? '');
+        if ($docId === '') {
+            throw new \RuntimeException('La factura debe emitirse primero ante ApiDian antes de enviarse por correo.');
+        }
+
+        $cliente = new ApidianCliente($proveedor);
+        $respuesta = $cliente->enviar(
+            'post',
+            $cliente->baseUrl()."/api/ubl2.1/documents/{$docId}/send-email",
+            ['email' => $correo]
+        );
+
+        $crudo = $respuesta->json() ?? [];
+        if ($respuesta->failed() || ($crudo['success'] ?? true) === false) {
+            throw new \RuntimeException((string) ($crudo['message'] ?? 'ApiDian no pudo enviar el correo del documento.'));
+        }
+
+        return [
+            'email' => $correo,
+            'message' => (string) ($crudo['message'] ?? 'Documento enviado por correo con éxito.'),
+        ];
+    }
+
     /** Convierte una cotización aprobada en factura interna. */
     public function convertirCotizacion(string $uuid, array $data): Model
     {

@@ -7,8 +7,10 @@ namespace App\Http\Controllers\Api\V1\Billing;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\StoreNoteRequest;
 use App\Services\Billing\CreditNoteService;
+use App\Services\Billing\NotaPdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use OpenApi\Attributes as OA;
 
 /** Notas crédito internas (sin transmisión DIAN por ahora). */
@@ -69,6 +71,21 @@ class CreditNoteController extends Controller
             $registro = $this->notas->emitirNota($uuid);
 
             return $this->successResponse($registro, 'Nota crédito emitida con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(path: '/api/v1/billing/credit-notes/{uuid}/pdf', summary: 'Descargar PDF de nota crédito', operationId: 'pdfCreditNote', tags: ['Facturación'], security: [['bearerAuth' => []]])]
+    public function pdf(string $uuid, NotaPdfService $notaPdf): Response|JsonResponse
+    {
+        try {
+            $registro = $this->notas->detalle($uuid);
+            if (! $registro) {
+                return $this->errorResponse('La nota solicitada no existe.', 404);
+            }
+
+            return $notaPdf->descargar($registro, NotaPdfService::TIPO_CREDITO);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

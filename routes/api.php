@@ -670,6 +670,11 @@ Route::prefix('v1')->group(function () {
                 Route::post('/{uuid}/emitir', [CommercialInvoiceController::class, 'emitir'])
                     ->middleware('permission:commercial_invoices.update')
                     ->name('api.v1.billing.commercial-invoices.emitir');
+                Route::get('/{uuid}/estado-dian', [CommercialInvoiceController::class, 'estadoDian'])
+                    ->name('api.v1.billing.commercial-invoices.estado-dian');
+                Route::post('/{uuid}/enviar-correo', [CommercialInvoiceController::class, 'enviarCorreo'])
+                    ->middleware('permission:commercial_invoices.update')
+                    ->name('api.v1.billing.commercial-invoices.enviar-correo');
                 Route::get('/{uuid}/pdf', [CommercialInvoiceController::class, 'pdf'])->name('api.v1.billing.commercial-invoices.pdf');
                 Route::delete('/{uuid}', [CommercialInvoiceController::class, 'destroy'])->name('api.v1.billing.commercial-invoices.destroy');
             });
@@ -678,6 +683,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/', [CreditNoteController::class, 'index'])->name('api.v1.billing.credit-notes.index');
                 Route::post('/', [CreditNoteController::class, 'store'])->name('api.v1.billing.credit-notes.store');
                 Route::get('/{uuid}', [CreditNoteController::class, 'show'])->name('api.v1.billing.credit-notes.show');
+                Route::get('/{uuid}/pdf', [CreditNoteController::class, 'pdf'])->name('api.v1.billing.credit-notes.pdf');
                 Route::post('/{uuid}/emitir', [CreditNoteController::class, 'emitir'])->name('api.v1.billing.credit-notes.emitir');
                 Route::post('/{uuid}/anular', [CreditNoteController::class, 'anular'])->name('api.v1.billing.credit-notes.anular');
             });
@@ -686,6 +692,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/', [DebitNoteController::class, 'index'])->name('api.v1.billing.debit-notes.index');
                 Route::post('/', [DebitNoteController::class, 'store'])->name('api.v1.billing.debit-notes.store');
                 Route::get('/{uuid}', [DebitNoteController::class, 'show'])->name('api.v1.billing.debit-notes.show');
+                Route::get('/{uuid}/pdf', [DebitNoteController::class, 'pdf'])->name('api.v1.billing.debit-notes.pdf');
                 Route::post('/{uuid}/emitir', [DebitNoteController::class, 'emitir'])->name('api.v1.billing.debit-notes.emitir');
                 Route::post('/{uuid}/anular', [DebitNoteController::class, 'anular'])->name('api.v1.billing.debit-notes.anular');
             });

@@ -42,6 +42,11 @@ class CreditNoteItem extends Model
         return $this->belongsTo(CreditNote::class, 'note_uuid', 'uuid');
     }
 
+    public function measurementUnit(): BelongsTo
+    {
+        return $this->belongsTo(MeasurementUnit::class, 'measurement_unit_uuid', 'uuid');
+    }
+
     public function withholdings(): HasMany
     {
         return $this->hasMany(CreditNoteItemWithholding::class, 'note_item_uuid', 'uuid');
