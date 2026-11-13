@@ -32,17 +32,19 @@ class CommercialInvoiceController extends Controller
     {
         try {
             $filtros = array_filter([
-                'company_uuid' => $request->query('company_uuid'),
+                'company_uuid' => $request->attributes->get('current_company_uuid') ?? $request->query('company_uuid'),
                 'invoice_type' => $request->query('invoice_type'),
                 'status' => $request->query('status'),
+                'electronic_status' => $request->query('electronic_status'),
                 'third_party_uuid' => $request->query('third_party_uuid'),
             ]);
 
-            $pagina = $this->documentos->search(
+            $pagina = $this->documentos->listar(
                 $filtros,
-                ['*'],
                 (int) $request->query('per_page', 15),
-                ['customer', 'project']
+                $request->query('search'),
+                $request->query('sort_by'),
+                $request->query('sort_order', 'desc')
             );
 
             return $this->successResponse($pagina, 'Documentos recuperados con éxito.');

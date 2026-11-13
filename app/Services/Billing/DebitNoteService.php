@@ -8,14 +8,25 @@ use App\Models\CommercialInvoice;
 use App\Models\DebitNote;
 use App\Models\DebitNoteItem;
 use App\Models\DebitNoteItemWithholding;
+use App\Services\ActorScope\AlcanceDelActor;
 use App\Services\BaseService;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 
-/** Notas débito internas que aumentan el total de una factura. */
+/** Notas débito comerciales con transmisión electrónica opcional. */
 class DebitNoteService extends BaseService
 {
     protected array $searchableFields = ['note_number', 'observation'];
+
+    protected array $sortableFields = [
+        'issue_date' => 'debit_notes.issue_date',
+        'note_number' => 'debit_notes.note_number',
+        'total' => 'debit_notes.total',
+        'status' => 'debit_notes.status',
+        'electronic_status' => 'debit_notes.electronic_status',
+        'created_at' => 'debit_notes.created_at',
+    ];
 
     public function __construct(private readonly ContratoNotasElectronica $emisionElectronica)
     {
@@ -27,12 +38,59 @@ class DebitNoteService extends BaseService
         return new DebitNote;
     }
 
+    /**
+     * Lista notas débito aplicando contexto de empresa, alcance del actor,
+     * filtros exactos, búsqueda libre (incluyendo número de factura) y ordenamiento server-side.
+     */
+    public function listar(
+        array $filtros = [],
+        int $perPage = 15,
+        ?string $search = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = 'desc'
+    ): LengthAwarePaginator {
+        $query = $this->query()->with(['invoice', 'customer']);
+
+        $companyUuid = $filtros['company_uuid'] ?? (app()->bound('current_company_uuid') ? app('current_company_uuid') : null);
+        if ($companyUuid !== null && $companyUuid !== '') {
+            $this->applyCompanyFilter($query, (string) $companyUuid);
+        }
+
+        foreach (['status', 'electronic_status', 'invoice_uuid', 'third_party_uuid'] as $campo) {
+            if (! empty($filtros[$campo])) {
+                $query->where('debit_notes.' . $campo, $filtros[$campo]);
+            }
+        }
+
+        $termino = trim((string) $search);
+        if ($termino !== '') {
+            $query->where(function ($q) use ($termino) {
+                $q->where('debit_notes.note_number', 'like', "%{$termino}%")
+                    ->orWhere('debit_notes.observation', 'like', "%{$termino}%")
+                    ->orWhereHas('invoice', fn ($iq) => $iq->where('invoice_number', 'like', "%{$termino}%"));
+            });
+        }
+
+        if ($sortBy && array_key_exists($sortBy, $this->sortableFields)) {
+            $this->applySorting($query, $sortBy, $sortOrder);
+        } else {
+            $query->orderByDesc('debit_notes.issue_date')
+                ->orderByDesc('debit_notes.id');
+        }
+
+        return $query->paginate($perPage);
+    }
+
     public function crearNota(array $data): Model
     {
         return $this->transaction(function () use ($data) {
+            $queryFactura = CommercialInvoice::where('uuid', $data['invoice_uuid']);
+            app(AlcanceDelActor::class)->aislarPorAfiliado($queryFactura, new CommercialInvoice);
+
             /** @var CommercialInvoice|null $factura */
-            $factura = CommercialInvoice::where('uuid', $data['invoice_uuid'])->first();
-            if (! $factura || ! $factura->esFactura()) {
+            $factura = $queryFactura->first();
+            $companyCtx = app()->bound('current_company_uuid') ? app('current_company_uuid') : null;
+            if (! $factura || ! $factura->esFactura() || ($companyCtx && $factura->company_uuid !== $companyCtx)) {
                 throw new \RuntimeException('La factura afectada no existe.');
             }
             if (! in_array($factura->status, ['EMITIDA_INTERNA', 'PAGADA_PARCIAL', 'VENCIDA', 'PAGADA'], true)) {

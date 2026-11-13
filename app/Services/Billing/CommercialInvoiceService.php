@@ -13,9 +13,9 @@ use App\Models\CommercialInvoicePayment;
 use App\Models\ElectronicInvoice;
 use App\Models\ThirdParty;
 use App\Services\BaseService;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
-use Illuminate\Support\Facades\Auth;
 
 /**
  * Documentos comerciales: cotizaciones (fase 1) y facturas internas (fase 2).
@@ -26,6 +26,17 @@ use Illuminate\Support\Facades\Auth;
 class CommercialInvoiceService extends BaseService
 {
     protected array $searchableFields = ['invoice_number', 'notes', 'origin_route', 'destination_route'];
+
+    protected array $sortableFields = [
+        'issue_date' => 'commercial_invoices.issue_date',
+        'due_date' => 'commercial_invoices.due_date',
+        'invoice_number' => 'commercial_invoices.invoice_number',
+        'invoice_total' => 'commercial_invoices.invoice_total',
+        'total' => 'commercial_invoices.invoice_total',
+        'status' => 'commercial_invoices.status',
+        'electronic_status' => 'commercial_invoices.electronic_status',
+        'created_at' => 'commercial_invoices.created_at',
+    ];
 
     public function __construct(
         private readonly BillingResolutionService $resoluciones,
@@ -40,21 +51,53 @@ class CommercialInvoiceService extends BaseService
     }
 
     /**
-     * El afiliado solo abre por UUID sus propios documentos (por cliente).
-     * Firma idéntica a la base: cambiar el tipo de retorno rompería la app.
+     * Lista documentos comerciales aplicando contexto de empresa, alcance del actor,
+     * filtros exactos, búsqueda libre y ordenamiento server-side.
      */
-    public function findByUuid(string $uuid, array $columns = ['*'], array $relations = []): ?Model
-    {
-        $registro = parent::findByUuid($uuid, $columns, $relations);
+    public function listar(
+        array $filtros = [],
+        int $perPage = 15,
+        ?string $search = null,
+        ?string $sortBy = null,
+        ?string $sortOrder = 'desc'
+    ): LengthAwarePaginator {
+        $query = $this->query()->with(['customer', 'project']);
 
-        if ($registro && Auth::user()?->hasRole('AFILIADO')) {
-            $tercero = $this->terceroAfiliado($registro->company_uuid);
-            if ($tercero && $registro->third_party_uuid !== $tercero) {
-                return null;
+        $companyUuid = $filtros['company_uuid'] ?? (app()->bound('current_company_uuid') ? app('current_company_uuid') : null);
+        if ($companyUuid !== null && $companyUuid !== '') {
+            $this->applyCompanyFilter($query, (string) $companyUuid);
+        }
+
+        foreach (['invoice_type', 'status', 'electronic_status', 'third_party_uuid'] as $campo) {
+            if (! empty($filtros[$campo])) {
+                $query->where('commercial_invoices.' . $campo, $filtros[$campo]);
             }
         }
 
-        return $registro;
+        $termino = trim((string) $search);
+        if ($termino !== '') {
+            $query->where(function ($q) use ($termino) {
+                $q->where('commercial_invoices.invoice_number', 'like', "%{$termino}%")
+                    ->orWhere('commercial_invoices.notes', 'like', "%{$termino}%")
+                    ->orWhere('commercial_invoices.origin_route', 'like', "%{$termino}%")
+                    ->orWhere('commercial_invoices.destination_route', 'like', "%{$termino}%")
+                    ->orWhereHas('customer', function ($cq) use ($termino) {
+                        $cq->where('first_name', 'like', "%{$termino}%")
+                            ->orWhere('last_name', 'like', "%{$termino}%")
+                            ->orWhere('company_name', 'like', "%{$termino}%")
+                            ->orWhere('identification_number', 'like', "%{$termino}%");
+                    });
+            });
+        }
+
+        if ($sortBy && array_key_exists($sortBy, $this->sortableFields)) {
+            $this->applySorting($query, $sortBy, $sortOrder);
+        } else {
+            $query->orderByDesc('commercial_invoices.issue_date')
+                ->orderByDesc('commercial_invoices.id');
+        }
+
+        return $query->paginate($perPage);
     }
 
     /** Crea una cotización con sus ítems y totales calculados. */
@@ -170,7 +213,7 @@ class CommercialInvoiceService extends BaseService
         return $this->getDetalle($factura->uuid);
     }
 
-    /** Consulta el estado electrónico actual de la factura ante el proveedor/DIAN. */
+    /** Consulta en solo lectura el estado electrónico actual de la factura ante el proveedor/DIAN. */
     public function consultarEstadoDian(string $uuid): array
     {
         /** @var CommercialInvoice|null $factura */
@@ -181,14 +224,13 @@ class CommercialInvoiceService extends BaseService
 
         $resultado = $this->facturacionElectronica->consultarEstado($factura);
 
-        if (! empty($resultado['estado']) && $resultado['estado'] !== $factura->electronic_status) {
-            $factura->withoutLogging(fn () => $factura->update([
-                'electronic_status' => $resultado['estado'],
-                'dian_response' => $resultado['crudo'] ?? $factura->dian_response,
-            ]));
+        $detalle = $this->getDetalle($factura->uuid);
+        if (! empty($resultado['estado']) && $detalle) {
+            // Solo lectura en GET (Principio #2): refleja el estado consultado en memoria sin escribir en BD.
+            $detalle->setAttribute('electronic_status', $resultado['estado']);
         }
 
-        return $resultado + ['factura' => $this->getDetalle($factura->uuid)];
+        return $resultado + ['factura' => $detalle];
     }
 
     /** Envía el documento electrónico por correo a través del proveedor tecnológico (ApiDian). */
@@ -533,18 +575,5 @@ class CommercialInvoiceService extends BaseService
             'total_withholding' => $totales['retencion'],
             'invoice_total' => $totales['total'],
         ]));
-    }
-
-    private function terceroAfiliado(string $companyUuid): ?string
-    {
-        $tercero = request()->attributes->get('current_third_party_uuid');
-        if ($tercero) {
-            return $tercero;
-        }
-
-        $empresa = Auth::user()?->companies()->where('company_user.company_uuid', $companyUuid)->first()
-            ?? Auth::user()?->companies()->first();
-
-        return $empresa?->pivot->third_party_uuid;
     }
 }
