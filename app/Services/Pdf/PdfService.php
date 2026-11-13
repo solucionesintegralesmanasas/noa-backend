@@ -465,7 +465,7 @@ class PdfService
 
             $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
             if ($companyUuid) {
-                $config = SystemConfiguration::where('company_uuid', $companyUuid)->first();
+                $config = SystemConfiguration::withoutGlobalScopes()->where('company_uuid', $companyUuid)->first();
                 $media = $config?->getFirstMedia('LETTERHEAD');
             }
 
@@ -515,6 +515,8 @@ class PdfService
         'fuec',
         'cotizacion',
         'factura_comercial',
+        'nota_credito',
+        'nota_debito',
         'hoja_vida_vehicular',
         'ficha_tecnica_vehiculo',
         'acta_entrega',
@@ -537,7 +539,7 @@ class PdfService
     {
         try {
             if ($companyUuid) {
-                $config = SystemConfiguration::where('company_uuid', $companyUuid)->first();
+                $config = SystemConfiguration::withoutGlobalScopes()->where('company_uuid', $companyUuid)->first();
                 $modo = is_array($config?->pdf_branding ?? null)
                     ? ($config->pdf_branding[$clave] ?? null)
                     : null;

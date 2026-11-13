@@ -45,6 +45,8 @@ class PdfBrandingTest extends TestCase
         $this->assertSame('membrete', $servicio->modoPdfPara($empresa, 'mantenimiento'));
         $this->assertSame('limpio', $servicio->modoPdfPara($empresa, 'fuec'));
         $this->assertSame(PdfService::PDF_MODO_FONDO, $servicio->modoPdfPara($empresa, 'planilla_diaria'));
+        $this->assertContains('nota_credito', PdfService::PDF_CLAVES);
+        $this->assertContains('nota_debito', PdfService::PDF_CLAVES);
     }
 
     public function test_con_marca_inyecta_las_claves_en_los_datos_de_la_vista(): void
