@@ -31,6 +31,9 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('DISC', $html);
         // El encabezado default de 3 logos no se usa.
         $this->assertStringNotContainsString('class="logo-header"', $html);
+        // Usa la micro-tabla de placa de la base estándar y sin reset universal de margen.
+        $this->assertStringContainsString('class="placa-inline-tbl"', $html);
+        $this->assertDoesNotMatchRegularExpression('/\*\s*\{[^}]*margin\s*:/s', $html);
     }
 
     public function test_la_ficha_del_vehiculo_cabe_en_una_hoja_vertical(): void

@@ -14,6 +14,7 @@ use App\Services\Fleet\AffiliateAdminChargeService;
 use App\Services\Fleet\BusinessCollaborationAgreementService;
 use App\Services\Fleet\VehicleService;
 use App\Services\ThirdParties\ThirdPartyService;
+use App\Support\Billing\QrDian;
 use App\Utils\Logger;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
@@ -690,6 +691,9 @@ class PdfService
     /** Margen derecho de la Planilla de Control (7 mm) en puntos: 7 * 72 / 25.4. */
     public const MARGEN_DERECHO_PLANILLA_PT = 19.84;
 
+    /** Margen derecho de la base estándar (10 mm) en puntos: 10 * 72 / 25.4. */
+    public const MARGEN_DERECHO_ESTANDAR_PT = 28.35;
+
     /**
      * @param  float|null  $margenDerechoPt  Margen derecho real del documento en puntos. Con él, la
      *                                       leyenda queda centrada en la franja entre el contenido y
@@ -929,58 +933,43 @@ class PdfService
         try {
             $vehicle = $this->vehicleService->getTechnicalSheetData($vehicleUuid);
 
-            // ✅ Cargar imágenes estáticas locales
-            $superPath = public_path('img/super2.png');
-            $transporPath = public_path('img/transporte.png');
-
-            $superBase64 = file_exists($superPath) ? base64_encode(file_get_contents($superPath)) : null;
-            $transporBase64 = file_exists($transporPath) ? base64_encode(file_get_contents($transporPath)) : null;
-
-            // ✅ Intentar obtener el logo y firma de la empresa y la página web
             $webPage = 'falcon-fuec.com';
+            $company = null;
             $logoModel = null;
-            $signatureModel = null;
 
             if ($vehicle->company_uuid) {
                 $company = $this->companyService->getCompanyByUuid($vehicle->company_uuid);
                 if ($company) {
                     $webPage = $company->web_page ?? 'falcon-fuec.com';
                     $logoModel = self::logoParaMarca($company);
-                    $signatureModel = $company->getFirstMedia('signatures') ?? $company->signature ?? null;
                 }
             }
 
-            $base64Images = $this->getBase64Parallel([
-                'logo' => $logoModel,
-                'firma' => $signatureModel,
-            ]);
-
-            // ✅ Generar Código QR usando BaconQrCode (disponible nativamente)
+            $identidad = $this->identidadEmpresa($company);
             $qrUrl = $this->buildWebBaseUrl($webPage) . '/validar-vehiculo/' . $vehicle->uuid;
 
-            $renderer = new ImageRenderer(
-                new RendererStyle(150),
-                new SvgImageBackEnd
-            );
-            $writer = new Writer($renderer);
-            $qrCodeSvg = $writer->writeString($qrUrl);
-            $qrCodeBase64 = base64_encode($qrCodeSvg);
-
             $data = [
-                'super' => $superBase64,
-                'transpor' => $transporBase64,
-                'logo' => $base64Images['logo'],
-                'firma' => $base64Images['firma'],
-                'qrcode' => $qrCodeBase64,
+                'logo' => null,
+                'qrcode' => QrDian::pngBase64($qrUrl, 160),
+                'qrcode_mime' => 'image/png',
             ];
 
-            $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $this->conMarca([
+            $payload = $this->conMarca([
                 'title' => 'Ficha Técnica Vehículo',
                 'vehicle' => $vehicle,
                 'data' => $data,
-            ], $company ?? null, 'ficha_tecnica_vehiculo', $logoModel));
+                'logo_data_url' => $identidad['logo_data_url'],
+                'empresa_siglas' => $identidad['empresa_siglas'],
+            ], $company, 'ficha_tecnica_vehiculo', $logoModel);
+
+            $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $payload);
             $pdf->setPaper('letter', 'portrait');
-            $this->sellarPaginado($pdf);
+            $pdf->setOption([
+                'dpi' => 120,
+                'isFontSubsettingEnabled' => true,
+                'isRemoteEnabled' => false,
+            ]);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_ESTANDAR_PT);
 
             $fileName = self::nombreArchivo('Ficha Técnica Vehículo', $vehicle->vehicle_license_plate ?? $vehicleUuid);
 

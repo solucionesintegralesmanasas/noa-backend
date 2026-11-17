@@ -6,6 +6,16 @@
     $__margen = ($pdfMargen ?? 'denso') === 'cartas' ? '18mm 20mm 18mm 20mm' : '8mm 10mm 8mm 8mm';
 @endphp
 <style>
+        :root {
+            --pdf-banda: #e2e8f0;
+            --pdf-banda-texto: #0f172a;
+            --pdf-acento: #1e3a8a;
+            --pdf-encabezado: #eef2f6;
+            --pdf-tenue: #f8fafc;
+            --pdf-borde: #0f172a;
+            --pdf-borde-interno: #cbd5e1;
+        }
+
         @page {
             size: letter {{ $__orient }};
             margin: {{ $__margen }};
@@ -151,9 +161,9 @@
 
         /* 2. Banda de secciÃ³n */
         .section-banner {
-            border: 1px solid #0f172a;
-            border-left: 4px solid #1e3a8a;
-            background-color: #e2e8f0;
+            border: 1px solid var(--pdf-borde);
+            border-left: 4px solid var(--pdf-acento);
+            background-color: var(--pdf-banda);
             margin-top: 4px;
             margin-bottom: 0;
         }
