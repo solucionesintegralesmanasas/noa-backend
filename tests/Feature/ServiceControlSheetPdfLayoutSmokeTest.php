@@ -177,4 +177,34 @@ class ServiceControlSheetPdfLayoutSmokeTest extends TestCase
             'dias_con_excepcion' => [],
         ];
     }
+
+    public function test_adversarial_planilla_sin_logo_usa_siglas_dinamicas_y_esquema_neutro_sin_quemar_otra_empresa(): void
+    {
+        $datos = $this->datos();
+        $datos['logo'] = null;
+        $datos['empresa_transportadora'] = 'LOGÍSTICA DEL CARIBE S.A.S.';
+        $datos['empresa_siglas'] = PdfService::siglasEmpresa($datos['empresa_transportadora']);
+
+        $html = view('pdf.maintenance.service-control-sheet', $datos)->render();
+
+        $this->assertStringContainsString('>LDC<', preg_replace('/\s+/', '', $html) ?? '');
+        $this->assertStringContainsString("font-family: 'Inter'", $html);
+        $this->assertStringContainsString('#d8d8d8', $html);
+        $this->assertStringContainsString('#f0f0f0', $html);
+        $this->assertStringNotContainsString('Transportes Sin Barreras', $html);
+        $this->assertStringNotContainsString('>SB<', $html);
+        $this->assertStringNotContainsString('#1e3a8a', $html);
+        $this->assertStringNotContainsString("'Courier'", $html);
+    }
+
+    public function test_adversarial_resolve_logo_with_mime_nulo_no_filtra_logos_de_disco(): void
+    {
+        $servicio = app(PdfService::class);
+        $metodo = new \ReflectionMethod($servicio, 'resolveLogoWithMime');
+        $metodo->setAccessible(true);
+
+        $resultado = $metodo->invoke($servicio, null, null);
+
+        $this->assertSame(['logo' => null, 'mime' => 'image/png'], $resultado);
+    }
 }

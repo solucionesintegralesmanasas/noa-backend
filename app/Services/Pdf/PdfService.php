@@ -617,11 +617,12 @@ class PdfService
      * y Firmas (colección LOGO de `Company`). Si no tiene, no se toma el de otra
      * empresa: la vista cae al monograma con las siglas de la razón social.
      *
+     * @param  mixed  $logoModel  Modelo pre-resuelto (opcional) para evitar buscarlo dos veces.
      * @return array{logo_data_url: string|null, empresa_siglas: string}
      */
-    public function identidadEmpresa(?object $company): array
+    public function identidadEmpresa(?object $company, mixed $logoModel = null): array
     {
-        $logoModel = self::logoParaMarca($company);
+        $logoModel ??= self::logoParaMarca($company);
         $dataUrl = null;
 
         if ($logoModel) {
@@ -945,7 +946,7 @@ class PdfService
                 }
             }
 
-            $identidad = $this->identidadEmpresa($company);
+            $identidad = $this->identidadEmpresa($company, $logoModel);
             $qrUrl = $this->buildWebBaseUrl($webPage) . '/validar-vehiculo/' . $vehicle->uuid;
 
             $data = [
@@ -1430,6 +1431,7 @@ class PdfService
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
+                'empresa_siglas' => self::siglasEmpresa((string) ($empresaTransportadora ?? '')),
                 'periodo' => $periodo,
                 'es_historial' => false,
                 'placa' => $placa,
@@ -1796,6 +1798,7 @@ class PdfService
                 'logo' => $logoDataMensual['logo'],
                 'logo_mime' => $logoDataMensual['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
+                'empresa_siglas' => self::siglasEmpresa((string) ($empresaTransportadora ?? '')),
                 'periodo' => $periodo . ($soloFinalizados ? ' — SOLO DÍAS FINALIZADOS' : ''),
                 'es_historial' => $esHistorial,
                 'solo_finalizados' => $soloFinalizados,
@@ -2015,6 +2018,7 @@ class PdfService
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
+                'empresa_siglas' => self::siglasEmpresa((string) ($empresaTransportadora ?? '')),
                 'periodo' => ($etiquetas[$tipo] ?? 'REPORTE') . ' — SOLO DÍAS FINALIZADOS',
                 'es_historial' => false,
                 'solo_finalizados' => true,
@@ -2116,8 +2120,9 @@ class PdfService
     }
 
     /**
-     * Resuelve el logo de la empresa con respaldo en disco cuando MediaLibrary no tiene imagen.
-     * Retorna el base64 ya codificado y el mime para usar en el data-uri del PDF.
+     * Resuelve el logo y MIME únicamente desde el modelo de la empresa activa.
+     * Si la empresa no tiene logotipo configurado, devuelve null para mostrar el
+     * monograma con sus siglas sin filtrar imágenes de disco o de otra empresa.
      *
      * @param  mixed  $logoModel  Modelo de MediaLibrary, ruta o nulo.
      * @param  string|null  $logoBase64  Base64 ya cargado (puede ser nulo).
@@ -2134,63 +2139,6 @@ class PdfService
             }
 
             return ['logo' => $logoBase64, 'mime' => $mime];
-        }
-
-        $candidatos = [
-            public_path('img/logo.png'),
-            public_path('img/logo.jpg'),
-            public_path('img/logo.jpeg'),
-            public_path('images/logo.png'),
-            public_path('images/logo.jpg'),
-        ];
-
-        foreach ($candidatos as $ruta) {
-            if (is_string($ruta) && file_exists($ruta)) {
-                $codificado = $this->optimizeAndEncodeImage($ruta);
-                if (! empty($codificado)) {
-                    $porExtension = strtolower(pathinfo($ruta, PATHINFO_EXTENSION));
-                    if ($porExtension === 'jpg' || $porExtension === 'jpeg') {
-                        $mime = 'image/jpeg';
-                    }
-
-                    return ['logo' => $codificado, 'mime' => $mime];
-                }
-            }
-        }
-
-        // Respaldo: logo guardado en disco por empresa (storage/app/public/companies/*/LOGO/*)
-        // aunque la tabla media esté vacía. Se toma la primera imagen válida encontrada.
-        try {
-            $base = storage_path('app/public/companies');
-            if (is_dir($base)) {
-                $archivos = [];
-                $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS));
-                foreach ($it as $archivo) {
-                    if (! $archivo->isFile()) {
-                        continue;
-                    }
-                    $rutaLogo = $archivo->getPathname();
-                    if (! str_contains(str_replace('\\', '/', $rutaLogo), '/LOGO/')) {
-                        continue;
-                    }
-                    $ext = strtolower($archivo->getExtension());
-                    if (in_array($ext, ['png', 'jpg', 'jpeg'], true) && $archivo->getSize() > 1024) {
-                        $archivos[] = $rutaLogo;
-                    }
-                }
-                sort($archivos);
-                foreach ($archivos as $rutaLogo) {
-                    $codificado = $this->optimizeAndEncodeImage($rutaLogo);
-                    if (! empty($codificado)) {
-                        $ext = strtolower(pathinfo($rutaLogo, PATHINFO_EXTENSION));
-                        $mime = ($ext === 'jpg' || $ext === 'jpeg') ? 'image/jpeg' : 'image/png';
-
-                        return ['logo' => $codificado, 'mime' => $mime];
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-            Logger::warning('No se pudo cargar logo en disco por empresa: ' . $e->getMessage());
         }
 
         return ['logo' => null, 'mime' => $mime];
