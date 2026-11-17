@@ -68,12 +68,12 @@ class PdfService
     private function claseDeHoja(ServiceDeliveryControlSheet $sheet): string
     {
         if ($sheet->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
-            return $sheet->internalControl?->vehicle?->vehicleClass?->name ?: 'N/A';
+            return $sheet->internalControl?->vehicle?->vehicleClass?->description ?: 'N/A';
         }
 
         if (in_array($sheet->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
-            return $sheet->subcontractedControl?->vehicleClass?->name
-                ?? $sheet->internalControl?->vehicle?->vehicleClass?->name
+            return $sheet->subcontractedControl?->vehicleClass?->description
+                ?? $sheet->internalControl?->vehicle?->vehicleClass?->description
                 ?? 'N/A';
         }
 
@@ -687,7 +687,15 @@ class PdfService
      * re-renderiza, el sello sobrevive al download()/stream()/output() posterior.
      * Coordenadas del canvas: se adaptan solas a vertical u horizontal.
      */
-    public function sellarPaginado(\Barryvdh\DomPDF\PDF $pdf): \Barryvdh\DomPDF\PDF
+    /** Margen derecho de la Planilla de Control (7 mm) en puntos: 7 * 72 / 25.4. */
+    public const MARGEN_DERECHO_PLANILLA_PT = 19.84;
+
+    /**
+     * @param  float|null  $margenDerechoPt  Margen derecho real del documento en puntos. Con él, la
+     *                                       leyenda queda centrada en la franja entre el contenido y
+     *                                       el borde de la hoja; sin él se conserva el offset histórico.
+     */
+    public function sellarPaginado(\Barryvdh\DomPDF\PDF $pdf, ?float $margenDerechoPt = null): \Barryvdh\DomPDF\PDF
     {
         // Parte de cero: los avisos que haya dejado otro PDF del proceso no
         // deben tumbar este sellado (el global de DomPDF es acumulativo).
@@ -705,7 +713,12 @@ class PdfService
             $anchoTexto = $metricas->getTextWidth($texto, $fuente, $tamano);
 
             // Vertical: el texto arranca abajo del centro y sube por el borde derecho.
-            $x = $canvas->get_width() - 14;
+            // Girado -90°, la línea base queda en x y los glifos crecen hacia la izquierda
+            // (ascendente ≈ 0,72·tamaño) con un descendente ≈ 0,22·tamaño a la derecha:
+            // para centrar la caja visible en la franja se desplaza la base 0,25·tamaño.
+            $x = $margenDerechoPt !== null
+                ? $canvas->get_width() - ($margenDerechoPt / 2) + ($tamano * 0.25)
+                : $canvas->get_width() - 14;
             $y = ($canvas->get_height() + $anchoTexto) / 2;
 
             $canvas->page_text($x, $y, $texto, $fuente, $tamano, [0.47, 0.47, 0.47], 0.0, 0.0, -90);
@@ -1462,7 +1475,7 @@ class PdfService
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
             $pdf->setPaper('letter', 'landscape');
-            $this->sellarPaginado($pdf);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_PLANILLA_PT);
 
             $fileName = self::nombreArchivo('Planilla de Control Diaria', $placa ?? 'Vehículo', $date->format('d-m-Y'));
 
@@ -1551,7 +1564,7 @@ class PdfService
             $placa = $vehicle->vehicle_license_plate;
             $numeroInterno = $vehicle->internal_number;
             $area = $lastSheet ? $lastSheet->official_name_and_surname : 'N/A';
-            $clase = $vehicle->vehicleClass?->name ?? 'N/A';
+            $clase = $vehicle->vehicleClass?->description ?? 'N/A';
 
             $empresa = 'N/A';
             $nit = 'N/A';
@@ -1816,7 +1829,7 @@ class PdfService
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
             $pdf->setPaper('letter', 'landscape');
-            $this->sellarPaginado($pdf);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_PLANILLA_PT);
 
             $fileName = self::nombreArchivo(
                 ($esHistorial ? 'Historial de Planilla de Control Mensual' : 'Planilla de Control Mensual'),
@@ -2035,7 +2048,7 @@ class PdfService
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
             $pdf->setPaper('letter', 'landscape');
-            $this->sellarPaginado($pdf);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_PLANILLA_PT);
 
             return [
                 'pdf' => $pdf,

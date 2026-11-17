@@ -191,17 +191,48 @@
             color: #0f172a;
         }
 
-        .placa-badge {
+        /* Placa · interno: micro-tabla alineada (base estándar pdf.standard.vehicle-line). */
+        .placa-inline-tbl {
+            width: auto;
+            table-layout: auto;
+            border-collapse: collapse;
+            margin: 0;
+        }
+
+        .placa-inline-tbl td {
+            border: none;
+            padding: 0;
+            vertical-align: middle;
+            line-height: 1.1;
+        }
+
+        .placa-inline-tbl td.placa-badge {
             background-color: #fef08a;
             color: #854d0e;
+            border: 0.6pt solid #ca8a04;
             font-family: 'Courier', monospace;
-            font-size: 8.5pt;
-            font-weight: 800;
-            padding: 0.5px 5px;
-            border-radius: 2px;
-            border: 1px solid #facc15;
-            letter-spacing: 0.6px;
-            display: inline-block;
+            font-weight: bold;
+            font-size: 7.6pt;
+            padding: 1.2px 5px;
+            white-space: nowrap;
+        }
+
+        .placa-inline-tbl td.vehiculo-sep {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-weight: bold;
+            font-size: 8pt;
+            color: #64748b;
+            padding: 0 4px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .placa-inline-tbl td.vehiculo-interno {
+            font-family: 'Courier', monospace;
+            font-weight: bold;
+            font-size: 7.4pt;
+            color: #1e3a8a;
+            white-space: nowrap;
         }
 
         .highlight-client {
@@ -661,10 +692,10 @@
         <tr>
             <td class="info-lbl" style="width: 12%;">Placa Vehículo:</td>
             <td class="info-val" style="width: 20%;">
-                <span class="placa-badge">{{ $placa ?? 'N/A' }}</span>
-                @if (!empty($numero_interno))
-                    &nbsp;<strong style="font-size: 7.5pt; color: #1e3a8a;">{{ $numero_interno }}</strong>
-                @endif
+                @include('pdf.standard.vehicle-line', [
+                    'placa' => $placa ?? 'N/A',
+                    'numero_interno' => $numero_interno ?? null,
+                ])
             </td>
             <td class="info-lbl" style="width: 14%;">Clase de Vehículo:</td>
             <td class="info-val uppercase" style="width: 20%;">{{ $clase ?? 'N/A' }}</td>

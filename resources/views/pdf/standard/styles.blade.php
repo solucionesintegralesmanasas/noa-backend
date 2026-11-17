@@ -1,4 +1,4 @@
-﻿{{-- Base estándar de impresión PDF (Prototipo A aprobado, 2026-11-17).
+{{-- Base estándar de impresión PDF (Prototipo A aprobado, 2026-11-17).
      Parámetros: $orientation ('portrait'|'landscape'), $pdfMargen ('denso' por defecto | 'cartas').
      Reglas: sin '* { margin }' (rompe @page en DomPDF), solo tablas, sin flex/grid, unidades en pt. --}}
 @php
