@@ -37,9 +37,13 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('class="estado-activo">ACTIVO', $html);
         $this->assertStringNotContainsString('class="badge-active"', $html);
         $this->assertStringNotContainsString('>Estado</th>', $html);
-        // Ajustes de la segunda ronda: N° Interno separado, paleta neutra y sin nowrap en etiquetas.
+        // Ajustes de la segunda y tercera ronda: N° Interno separado, banda #F0F0F0, fuente Inter, sin Pago Exacto ni Courier.
         $this->assertStringContainsString('>N° Interno:</td>', $html);
-        $this->assertStringContainsString('--pdf-acento: #334155;', $html);
+        $this->assertStringContainsString('--pdf-banda: #d8d8d8;', $html);
+        $this->assertStringContainsString('--pdf-encabezado: #f0f0f0;', $html);
+        $this->assertStringContainsString("font-family: 'Inter'", $html);
+        $this->assertStringNotContainsString("'Courier'", $html);
+        $this->assertStringNotContainsString('Pago Exacto', $html);
         $this->assertStringNotContainsString('#1e3a8a', $html);
         $this->assertDoesNotMatchRegularExpression('/\.info-lbl\s*\{[^}]*white-space\s*:\s*nowrap/s', $html);
     }
@@ -58,6 +62,7 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         }
         $v->passenger_capacity = 0;
         $v->seated_passenger_capacity = 19;
+        $v->serial_number = '0';
         $v->third_party->address = 'Calle 29 N° 14-38';
         $v->third_party->phone = '3117894521';
 
@@ -67,9 +72,12 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('3. Información del Propietario', $html);
         $this->assertStringContainsString('19 Sentados', $html);
         $this->assertStringNotContainsString('0 Pasajeros', $html);
-        $this->assertStringContainsString('>Dirección:</td>', $html);
-        $this->assertStringContainsString('>Contacto:</td>', $html);
-        $this->assertStringContainsString('3117894521', $html);
+        $this->assertMatchesRegularExpression('/N° de Serie:<\/td>\s*<td class="info-val mono"><\/td>/', $html);
+        $this->assertStringNotContainsString('>Dirección:</td>', $html);
+        $this->assertStringNotContainsString('>Contacto:</td>', $html);
+        $this->assertStringNotContainsString('3117894521', $html);
+        $this->assertStringNotContainsString('<table class="footer-meta"', $html);
+        $this->assertStringNotContainsString('Ficha Técnica Vehicular', $html);
 
         $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $datos)->setPaper('letter', 'portrait');
         app(PdfService::class)->sellarPaginado($pdf, PdfService::MARGEN_DERECHO_ESTANDAR_PT);
@@ -81,7 +89,7 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
     {
         $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $this->datosFicha())
             ->setPaper('letter', 'portrait');
-        app(PdfService::class)->sellarPaginado($pdf);
+        app(PdfService::class)->sellarPaginado($pdf, PdfService::MARGEN_DERECHO_ESTANDAR_PT);
 
         preg_match_all('~/Type\s*/Page([^s]|$)~', $pdf->output(), $c);
 
@@ -141,11 +149,65 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
 
         $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $datos)
             ->setPaper('letter', 'portrait');
-        app(PdfService::class)->sellarPaginado($pdf);
+        app(PdfService::class)->sellarPaginado($pdf, PdfService::MARGEN_DERECHO_ESTANDAR_PT);
 
         preg_match_all('~/Type\s*/Page([^s]|$)~', $pdf->output(), $c);
 
         $this->assertSame(1, count($c[0]));
+    }
+
+    public function test_adversarial_especificaciones_mecanicas_con_ceros_na_y_espacios_se_ocultan_pero_un_dato_real_las_muestra(): void
+    {
+        $datosVacios = $this->datosFicha();
+        $vacio = $datosVacios['vehicle'];
+        $basura = ['0', 0, 'N/A', 'n/a', '   ', '', null, '0', 'N/A', '   ', ''];
+        $campos = [
+            'steering_type', 'transmission_type', 'number_of_speeds',
+            'bearing_type', 'rear_suspension', 'number_of_tires',
+            'rim_size', 'rim_material', 'front_brake_type',
+            'rear_brake_type', 'number_of_windows',
+        ];
+        foreach ($campos as $i => $campo) {
+            $vacio->{$campo} = $basura[$i];
+        }
+
+        $htmlOculto = view('pdf.fleet.technical-sheet-vehicles', $datosVacios)->render();
+        $this->assertStringNotContainsString('Especificaciones Mecánicas', $htmlOculto);
+        $this->assertStringContainsString('3. Información del Propietario', $htmlOculto);
+        $this->assertStringContainsString('6. Convenio de Colaboración Empresarial', $htmlOculto);
+
+        $datosConDatoReal = $this->datosFicha();
+        $vReal = $datosConDatoReal['vehicle'];
+        foreach ($campos as $i => $campo) {
+            $vReal->{$campo} = $basura[$i];
+        }
+        $vReal->front_brake_type = 'DISCO';
+
+        $htmlVisible = view('pdf.fleet.technical-sheet-vehicles', $datosConDatoReal)->render();
+        $this->assertStringContainsString('3. Especificaciones Mecánicas', $htmlVisible);
+        $this->assertStringContainsString('4. Información del Propietario', $htmlVisible);
+        $this->assertStringContainsString('7. Convenio de Colaboración Empresarial', $htmlVisible);
+    }
+
+    public function test_adversarial_combinaciones_de_capacidad_de_pasajeros_nunca_muestran_cero(): void
+    {
+        $casos = [
+            [0, 0, 'N/A'],
+            [0, 14, '14 Sentados'],
+            [22, 0, '22 Pasajeros'],
+            [-3, 9, '9 Sentados'],
+        ];
+
+        foreach ($casos as [$total, $sentados, $esperado]) {
+            $datos = $this->datosFicha();
+            $datos['vehicle']->passenger_capacity = $total;
+            $datos['vehicle']->seated_passenger_capacity = $sentados;
+
+            $html = view('pdf.fleet.technical-sheet-vehicles', $datos)->render();
+            $this->assertStringContainsString($esperado, $html);
+            $this->assertStringNotContainsString('0 Pasajeros', $html);
+            $this->assertStringNotContainsString('0 Sentados', $html);
+        }
     }
 
     /** @return array<string, mixed> */

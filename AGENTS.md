@@ -69,6 +69,7 @@ Lectura obligatoria antes de tocar el backend: resume el estado real del sistema
 | Reporte de vehículos / propiedad | `--filter="ReporteVehiculos\|OwnCompany"` |
 | Reporte de actividad vehicular | `--filter=ReporteActividadVehicular` |
 | Planillas de control (PCP) | `--filter="CreacionMasivaHojasTest\|EdicionHojaControlTest\|PcpAislamientoTest\|ServiceControlSheet"` |
+| Plantillas y base estándar PDF | `--filter="PdfBaseEstandarTest\|TechSheetVehiclesPdfLayoutSmokeTest\|ServiceControlSheetPdfLayoutSmokeTest\|EvidenceStatusPdfTest"` |
 | Notificaciones y cron | `--filter="SincronizacionIncrementalNotificacionesTest\|NotificacionesConsultasTest\|DigestVencimientosTest"` |
 | Mapas y GPS | `--filter="CacheMapasRutaTest\|ResumenDiarioMapaTest\|MonitorFlotaTest\|IngestaGpsTest"` |
 | Facturación | `--filter="ApidianFacturacionTest\|Factus\|FacturacionComercialTest\|ProveedoresBillingHttpTest\|AutorizacionModulosFacturacionTest"` |
@@ -471,6 +472,13 @@ Un conductor sigue siendo **un único tercero por empresa** (documento único). 
 ### Endurecimiento de seguridad (2026-11-09)
 
 Commits `2d17798`, `5bc61f7`, `01898de`, `8b3ad2c` y `5145bc9`: `throttle` en la validación pública de FUEC (30/min); verificación del certificado SSL rehabilitada al descargar logos en `PdfService`; rutas web `limpiar-cache`/`migrar` eliminadas; contraseña temporal aleatoria al crear usuarios y sin contraseña en claro en `.env.example`; refresh tokens de Google Drive cifrados (migración `2026_11_09_000001_encrypt_google_drive_refresh_tokens`, correr `php artisan migrate --force` en producción); PHP `^8.3`; 2FA con token de desafío (ver "Auth"). Pendientes que siguen abiertos: rotar `APP_KEY`/SMTP de producción, `VITE_ENCRYPTION_KEY` expuesta en el bundle, cuenta SMTP suspendida, `LICENSE_HMAC_SECRET`/`APP_LICENSE_KEY` y `CRON_SECRET` en producción.
+
+### Estándar de diseño e impresión PDF (2026-11-17)
+
+- **Parciales compartidos y tipografía (`resources/views/pdf/standard/`):** los PDFs estandarizados incluyen `styles.blade.php` (parámetros `$orientation` y `$pdfMargen`), `header.blade.php` y `vehicle-line.blade.php` (micro-tabla alineada para placa e interno separados por `&middot;`). Se usa tipografía estática local **Inter v4.1** (`resources/fonts/inter/*.ttf`, pesos 400/500/600/700/italic, licencia SIL OFL 1.1; caché de métricas DomPDF en `storage/fonts/` ignorado en git), sin `'Courier'` ni descarga remota (`isRemoteEnabled = false`), y sin `* { margin }`, flexbox, grid ni `box-shadow`.
+- **Esquema de colores oficial (digital + B/N):** bandas de título de sección `#d8d8d8` (`--pdf-banda`), encabezados de tablas internas `#f0f0f0` (`--pdf-encabezado`), celdas de etiquetas `#f7f7f7` (`--pdf-tenue`), texto `#000000`/`#111827` y bordes `#1f2937` / `#9ca3af`. En `.meta-table td` se fijan bordes horizontales explícitos `1px solid #0f172a`.
+- **Identidad y sellado por empresa (`PdfService`):** `identidadEmpresa()` y `siglasEmpresa()` resuelven el logo de la colección `LOGO` de la empresa activa o caen al monograma con sus siglas (sin quemar logos ni datos de otra empresa; `resolveLogoWithMime()` ya no barre `public/img` ni `storage/app/public/companies`). `sellarPaginado()` recibe `MARGEN_DERECHO_ESTANDAR_PT` (`28.35`) o `MARGEN_DERECHO_PLANILLA_PT` (`19.84`) para centrar la leyenda lateral.
+- **Reglas de plantillas actualizadas:** la **Planilla de Control** (`service-control-sheet.blade.php`) conserva Carta Horizontal y sus anchos, adopta Inter, tonos `#d8d8d8`/`#f0f0f0`/`#f7f7f7` y siglas dinámicas, y toma la clase desde `vehicleClass?->description`. La **Ficha Técnica del Vehículo** (`technical-sheet-vehicles.blade.php`, `JG-VEH-001`) cabe en **1 hoja Carta Vertical**, oculta y renumera la sección *Especificaciones Mecánicas* cuando todos sus campos están vacíos/`0`/`N/A`, separa `N° Interno` de `Placa`, omite `Pago Exacto`, muestra `N° de Serie` en blanco si no tiene, muestra sentados si `passenger_capacity` es 0, omite columna `Estado` en documentos/TO, omite dirección/contacto del propietario y suprime el pie redundante.
 
 ## Convención de Commits
 

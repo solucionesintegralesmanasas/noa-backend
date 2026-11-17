@@ -31,11 +31,19 @@
         $vehicle->front_brake_type ?? null,
         $vehicle->rear_brake_type ?? null,
     ];
-    $tieneMecanicas = collect($camposMecanicos)->contains(fn ($v) => $v !== null && trim((string) $v) !== '');
+    $tieneMecanicas = collect($camposMecanicos)->contains(function ($v): bool {
+        $limpio = trim((string) ($v ?? ''));
+
+        return $limpio !== '' && $limpio !== '0' && strtoupper($limpio) !== 'N/A';
+    });
 
     // Capacidad de pasajeros: si la capacidad total es 0/vacía, mostrar sentados si existe.
     $capTotal = (int) ($vehicle->passenger_capacity ?? 0);
     $capSentados = (int) ($vehicle->seated_passenger_capacity ?? 0);
+
+    // Número de serie: en blanco si no tiene o viene en 0 / N/A.
+    $serialRaw = trim((string) ($vehicle->serial_number ?? ''));
+    $serialMostrar = ($serialRaw !== '' && $serialRaw !== '0' && strtoupper($serialRaw) !== 'N/A') ? $serialRaw : '';
 
     $marcaFondo = $logo_fondo ?? $data['logo_fondo'] ?? null;
     $qrBase64 = $data['qrcode'] ?? null;
@@ -51,8 +59,8 @@
     <style>
         /* Escala legible de impresión Carta Vertical; se expande ligeramente cuando no hay sección mecánica */
         body {
-            font-size: {{ $tieneMecanicas ? '7.8pt' : '8.1pt' }};
-            line-height: 1.3;
+            font-size: {{ $tieneMecanicas ? '7.3pt' : '7.7pt' }};
+            line-height: {{ $tieneMecanicas ? '1.16' : '1.22' }};
         }
 
         #watermark {
@@ -80,16 +88,16 @@
         }
 
         .header-table {
-            margin-bottom: {{ $tieneMecanicas ? '6px' : '9px' }};
+            margin-bottom: {{ $tieneMecanicas ? '4.5px' : '8px' }};
         }
 
         .section-banner {
-            margin-top: {{ $tieneMecanicas ? '6px' : '9px' }};
+            margin-top: {{ $tieneMecanicas ? '4.5px' : '8px' }};
         }
 
         .section-banner td {
-            padding: {{ $tieneMecanicas ? '3.2px 7px' : '4px 7px' }};
-            font-size: {{ $tieneMecanicas ? '7.4pt' : '7.7pt' }};
+            padding: {{ $tieneMecanicas ? '2.6px 7px' : '3.6px 7px' }};
+            font-size: {{ $tieneMecanicas ? '7.1pt' : '7.5pt' }};
         }
 
         .info-table {
@@ -97,27 +105,25 @@
         }
 
         .info-table td {
-            padding: {{ $tieneMecanicas ? '3.6px 6px' : '4.8px 6px' }};
-            font-size: {{ $tieneMecanicas ? '7.6pt' : '7.9pt' }};
-            line-height: 1.25;
+            padding: {{ $tieneMecanicas ? '2.9px 5.5px' : '4.4px 6px' }};
+            font-size: {{ $tieneMecanicas ? '7.1pt' : '7.6pt' }};
+            line-height: {{ $tieneMecanicas ? '1.16' : '1.22' }};
         }
 
         .info-lbl {
-            font-size: {{ $tieneMecanicas ? '6.7pt' : '7pt' }};
+            font-size: {{ $tieneMecanicas ? '6.4pt' : '6.8pt' }};
         }
 
         .placa-txt {
-            font-family: 'Courier', monospace;
             font-weight: bold;
             font-size: 8.6pt;
-            color: #0f172a;
+            color: #000000;
         }
 
         .interno-txt {
-            font-family: 'Courier', monospace;
             font-weight: bold;
             font-size: 8pt;
-            color: #334155;
+            color: #111827;
         }
 
         .estado-activo {
@@ -139,25 +145,25 @@
         }
 
         .main-table thead th {
-            padding: {{ $tieneMecanicas ? '3.8px 4px' : '4.5px 5px' }};
-            font-size: {{ $tieneMecanicas ? '6.8pt' : '7.1pt' }};
+            padding: {{ $tieneMecanicas ? '3px 4px' : '4.2px 5px' }};
+            font-size: {{ $tieneMecanicas ? '6.5pt' : '7pt' }};
         }
 
         .main-table tbody td {
-            padding: {{ $tieneMecanicas ? '3.4px 5px' : '4.4px 5px' }};
-            font-size: {{ $tieneMecanicas ? '7.4pt' : '7.7pt' }};
-            line-height: 1.25;
+            padding: {{ $tieneMecanicas ? '2.8px 5px' : '4px 5px' }};
+            font-size: {{ $tieneMecanicas ? '7pt' : '7.5pt' }};
+            line-height: {{ $tieneMecanicas ? '1.15' : '1.22' }};
         }
 
         .qr-footer-table {
             border: 1px solid var(--pdf-borde);
-            margin-top: {{ $tieneMecanicas ? '7px' : '10px' }};
+            margin-top: {{ $tieneMecanicas ? '5px' : '9px' }};
             background-color: #ffffff;
             page-break-inside: avoid;
         }
 
         .qr-footer-table td {
-            padding: {{ $tieneMecanicas ? '5.5px 8px' : '7px 9px' }};
+            padding: {{ $tieneMecanicas ? '4.5px 8px' : '6.5px 9px' }};
             vertical-align: middle;
         }
 
@@ -172,7 +178,7 @@
             width: 84%;
             font-size: {{ $tieneMecanicas ? '7pt' : '7.3pt' }};
             line-height: 1.32;
-            color: #334155;
+            color: #111827;
             text-align: justify;
         }
 
@@ -281,25 +287,23 @@
             <td class="info-lbl">VIN:</td>
             <td class="info-val mono">{{ $vehicle->vin_number ?? 'N/A' }}</td>
             <td class="info-lbl">N° de Serie:</td>
-            <td class="info-val mono">{{ $vehicle->serial_number ?? 'N/A' }}</td>
+            <td class="info-val mono">{{ $serialMostrar }}</td>
         </tr>
         <tr>
             <td class="info-lbl">Licencia Tránsito:</td>
-            <td class="info-val mono">
+            <td class="info-val mono" colspan="3">
                 {{ $vehicle->transit_license_number ?? 'N/A' }}
                 @if (!empty($vehicle->transit_authority))
                     ({{ $vehicle->transit_authority }})
                 @endif
             </td>
-            <td class="info-lbl">Pago Exacto:</td>
-            <td class="info-val">{{ !empty($vehicle->exact_payment) ? 'SÍ' : 'NO' }}</td>
         </tr>
         <tr>
             <td class="info-lbl">Cap. Pasajeros:</td>
             <td class="info-val">
                 @if ($capTotal > 0 && $capSentados > 0)
                     <strong>{{ $capTotal }} Pasajeros</strong>
-                    <span style="color: #64748b;">({{ $capSentados }} Sentados)</span>
+                    <span style="color: #262626;">({{ $capSentados }} Sentados)</span>
                 @elseif ($capTotal > 0)
                     <strong>{{ $capTotal }} Pasajeros</strong>
                 @elseif ($capSentados > 0)
@@ -309,7 +313,7 @@
                 @endif
             </td>
             <td class="info-lbl">Modalidad:</td>
-            <td class="info-val" style="color: #0f172a; font-weight: bold;">
+            <td class="info-val" style="color: #000000; font-weight: bold;">
                 {{ $vehicle->type_of_service ?? 'SERVICIO PÚBLICO ESPECIAL' }}
             </td>
         </tr>
@@ -367,18 +371,9 @@
     <table class="info-table" cellpadding="0" cellspacing="0">
         <tr>
             <td class="info-lbl" style="width: 20%;">Nombre / Razón Social:</td>
-            <td class="info-val uppercase" style="width: 47%; color: #0f172a; font-weight: bold;">{{ $tpName }}</td>
+            <td class="info-val uppercase" style="width: 47%; color: #000000; font-weight: bold;">{{ $tpName }}</td>
             <td class="info-lbl" style="width: 13%;">Documento:</td>
             <td class="info-val mono" style="width: 20%;">{{ $tpDocType }} {{ $tpDocNum }}</td>
-        </tr>
-        <tr>
-            <td class="info-lbl">Dirección:</td>
-            <td class="info-val">
-                {{ $tpAddress }}
-                @if ($tpCity), {{ $tpCity }}@endif
-            </td>
-            <td class="info-lbl">Contacto:</td>
-            <td class="info-val mono">{{ $tpPhone ?: 'N/A' }}</td>
         </tr>
     </table>
 
@@ -408,7 +403,7 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="4" class="txt-center" style="color: #64748b; font-style: italic; padding: 4px;">
+                    <td colspan="4" class="txt-center" style="color: #374151; font-style: italic; padding: 4px;">
                         Sin documentos reglamentarios registrados
                     </td>
                 </tr>
@@ -444,7 +439,7 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="4" class="txt-center" style="color: #64748b; font-style: italic; padding: 4px;">
+                    <td colspan="4" class="txt-center" style="color: #374151; font-style: italic; padding: 4px;">
                         Sin tarjetas de operación registradas
                     </td>
                 </tr>
@@ -464,16 +459,16 @@
                     {{ $agreement->contracting_entity_name ?? 'N/A' }}
                 </td>
                 <td class="info-lbl" style="width: 14%;">N° / Vigencia:</td>
-                <td class="info-val mono" style="width: 21%; color: #0f172a; font-weight: bold;">
+                <td class="info-val mono" style="width: 21%; color: #000000; font-weight: bold;">
                     {{ $agreement->agreement_internal_id ?? 'N/A' }}
                     @if (!empty($agreement->expiry_date))
-                        <span style="color: #475569; font-weight: normal;">({{ \Carbon\Carbon::parse($agreement->expiry_date)->format('d/m/Y') }})</span>
+                        <span style="color: #262626; font-weight: normal;">({{ \Carbon\Carbon::parse($agreement->expiry_date)->format('d/m/Y') }})</span>
                     @endif
                 </td>
             </tr>
         @empty
             <tr>
-                <td class="info-val txt-center" colspan="4" style="color: #64748b; font-style: italic; padding: 3.5px;">
+                <td class="info-val txt-center" colspan="4" style="color: #374151; font-style: italic; padding: 3.5px;">
                     No registra convenio de colaboración empresarial activo
                 </td>
             </tr>
@@ -490,23 +485,16 @@
                             @if (!empty($qrBase64))
                                 <img src="data:{{ $qrMime }};base64,{{ $qrBase64 }}" alt="QR" style="width: 68px; height: 68px; display: block; margin: 0 auto;">
                             @else
-                                <div style="font-size: 6.2pt; font-weight: bold; color: #64748b; text-align: center;">
+                                <div style="font-size: 6.2pt; font-weight: bold; color: #262626; text-align: center;">
                                     VALIDACIÓN<br>PESV
                                 </div>
                             @endif
-                            <div style="font-size: 5.4pt; font-weight: bold; color: #475569; margin-top: 1px;">ESCANEAR QR</div>
+                            <div style="font-size: 5.4pt; font-weight: bold; color: #111827; margin-top: 1px;">ESCANEAR QR</div>
                         </td>
                         <td class="qr-text-cell">
                             <strong style="color: #0f172a; text-transform: uppercase;">Validación Electrónica y Certificación PESV:</strong><br>
                             El presente documento constituye la <strong>Ficha Técnica Oficial</strong> del vehículo automotor, expedida de conformidad con las exigencias del <strong>Plan Estratégico de Seguridad Vial (PESV - Ley 1503 de 2011, Res. 20223040040595 de 2022)</strong> y directrices del Ministerio de Transporte. Escanee el código QR para validar en tiempo real la autenticidad, vigencia de pólizas obligatorias (SOAT, RCC, RCE), estado de inspección preoperacional diaria y la habilitación de la tarjeta de operación en la plataforma central de gestión de flota.
                         </td>
-                    </tr>
-                </table>
-
-                <table class="footer-meta" cellpadding="0" cellspacing="0">
-                    <tr>
-                        <td style="width: 70%; text-align: left;">{{ $companyName }} &middot; Ficha Técnica Vehicular</td>
-                        <td style="width: 30%; text-align: right;" class="mono">JG-VEH-001 &middot; v1.0</td>
                     </tr>
                 </table>
             </td>
