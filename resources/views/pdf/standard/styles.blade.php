@@ -4,16 +4,52 @@
 @php
     $__orient = ($orientation ?? 'portrait') === 'landscape' ? 'landscape' : 'portrait';
     $__margen = ($pdfMargen ?? 'denso') === 'cartas' ? '18mm 20mm 18mm 20mm' : '8mm 10mm 8mm 8mm';
+    $__fontDir = str_replace('\\', '/', resource_path('fonts/inter'));
 @endphp
 <style>
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 400;
+            src: url('{{ $__fontDir }}/Inter-Regular.ttf') format('truetype');
+        }
+
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 500;
+            src: url('{{ $__fontDir }}/Inter-Medium.ttf') format('truetype');
+        }
+
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 600;
+            src: url('{{ $__fontDir }}/Inter-SemiBold.ttf') format('truetype');
+        }
+
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 700;
+            src: url('{{ $__fontDir }}/Inter-Bold.ttf') format('truetype');
+        }
+
+        @font-face {
+            font-family: 'Inter';
+            font-style: italic;
+            font-weight: 400;
+            src: url('{{ $__fontDir }}/Inter-Italic.ttf') format('truetype');
+        }
+
         :root {
-            --pdf-banda: #e5e7eb;
-            --pdf-banda-texto: #0f172a;
-            --pdf-acento: #334155;
-            --pdf-encabezado: #f1f5f9;
-            --pdf-tenue: #f8fafc;
-            --pdf-borde: #1e293b;
-            --pdf-borde-interno: #cbd5e1;
+            --pdf-banda: #d8d8d8;
+            --pdf-banda-texto: #000000;
+            --pdf-acento: #262626;
+            --pdf-encabezado: #f0f0f0;
+            --pdf-tenue: #f7f7f7;
+            --pdf-borde: #1f2937;
+            --pdf-borde-interno: #9ca3af;
         }
 
         @page {
@@ -28,10 +64,11 @@
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-weight: 400;
             font-size: 7.5pt;
             line-height: 1.25;
-            color: #0f172a;
+            color: #111827;
             background-color: #ffffff;
         }
 
@@ -85,7 +122,7 @@
         .logo-caption {
             font-size: 5.5pt;
             font-weight: bold;
-            color: #334155;
+            color: #111827;
             text-transform: uppercase;
             margin-top: 2px;
         }
@@ -99,30 +136,31 @@
         .company-name {
             font-size: 8.4pt;
             font-weight: bold;
-            color: #0f172a;
+            color: #000000;
             text-transform: uppercase;
-            letter-spacing: 0.25px;
+            letter-spacing: 0.2px;
         }
 
         .company-sub {
-            font-size: 6.4pt;
-            color: #475569;
+            font-size: 6.5pt;
+            font-weight: 500;
+            color: #1f2937;
             margin-top: 1px;
         }
 
         .doc-main-title {
             font-size: 9.2pt;
             font-weight: bold;
-            color: var(--pdf-acento);
+            color: #000000;
             text-transform: uppercase;
             margin-top: 3px;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.25px;
         }
 
         .doc-sub-title {
             font-size: 6.2pt;
-            font-weight: bold;
-            color: #64748b;
+            font-weight: 600;
+            color: #262626;
             text-transform: uppercase;
             margin-top: 1px;
         }
@@ -134,12 +172,18 @@
         }
 
         .meta-table td {
-            border: none !important;
-            border-bottom: 0.8px solid var(--pdf-borde) !important;
-            padding: 4px 6px !important;
+            border-top: none !important;
+            border-left: none !important;
+            border-right: none !important;
+            border-bottom: 1px solid #0f172a !important;
+            padding: 5px 6px !important;
             font-size: 6.6pt;
             line-height: 1.15;
             vertical-align: middle !important;
+        }
+
+        .meta-table tr:first-child td {
+            border-top: none !important;
         }
 
         .meta-table tr:last-child td {
@@ -149,24 +193,24 @@
         .meta-label {
             width: 44%;
             background-color: var(--pdf-tenue);
-            border-right: 0.8px solid var(--pdf-borde) !important;
+            border-right: 1px solid #0f172a !important;
             font-weight: bold;
-            color: #334155;
+            color: #111827;
             text-transform: uppercase;
             text-align: left;
         }
 
         .meta-val {
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
-            color: #0f172a;
+            color: #000000;
             text-align: center;
         }
 
-        /* 2. Banda de secciÃ³n */
+        /* 2. Banda de sección */
         .section-banner {
             border: 1px solid var(--pdf-borde);
-            border-left: 4px solid var(--pdf-acento);
+            border-left: 3.5px solid #111827;
             background-color: var(--pdf-banda);
             margin-top: 4px;
             margin-bottom: 0;
@@ -176,20 +220,20 @@
             padding: 2.5px 6px;
             font-size: 7pt;
             font-weight: bold;
-            color: #0f172a;
+            color: #000000;
             text-transform: uppercase;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.25px;
         }
 
         /* 3. Ficha de contexto */
         .info-table {
-            border: 1px solid #0f172a;
+            border: 1px solid #1f2937;
             border-top: none;
             margin-bottom: 5px;
         }
 
         .info-table td {
-            border: 0.7px solid #cbd5e1;
+            border: 0.7px solid #9ca3af;
             padding: 2.6px 5px;
             font-size: 7.1pt;
             line-height: 1.25;
@@ -199,13 +243,14 @@
         .info-lbl {
             background-color: var(--pdf-tenue);
             font-weight: bold;
-            color: #334155;
+            color: #111827;
             text-transform: uppercase;
-            font-size: 6.3pt;
+            font-size: 6.4pt;
         }
 
         .info-val {
-            color: #0f172a;
+            color: #000000;
+            font-weight: 500;
         }
 
         .placa-inline-tbl {
@@ -226,7 +271,7 @@
             background-color: #fef08a;
             color: #854d0e;
             border: 0.6pt solid #ca8a04 !important;
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
             font-size: 7.1pt;
             padding: 1.2px 5px;
@@ -234,26 +279,26 @@
         }
 
         .placa-inline-tbl td.vehiculo-sep {
-            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
             font-size: 8pt;
-            color: #64748b;
+            color: #4b5563;
             padding: 0 4px;
             text-align: center;
             white-space: nowrap;
         }
 
         .placa-inline-tbl td.vehiculo-interno {
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
             font-size: 7pt;
-            color: var(--pdf-acento);
+            color: #111827;
             white-space: nowrap;
         }
 
         /* 4. Tabla de registros */
         .main-table {
-            border: 1.2px solid #0f172a;
+            border: 1.2px solid #1f2937;
             margin-bottom: 5px;
             page-break-inside: auto;
         }
@@ -267,9 +312,10 @@
         }
 
         .main-table thead th {
-            background-color: var(--pdf-acento);
-            color: #ffffff;
-            border: 0.8px solid var(--pdf-borde);
+            background-color: var(--pdf-encabezado);
+            color: #000000;
+            border: 0.7px solid var(--pdf-borde-interno);
+            border-bottom: 1.2px solid var(--pdf-borde);
             padding: 3.2px 3px;
             font-size: 6.6pt;
             font-weight: bold;
@@ -278,23 +324,28 @@
         }
 
         .main-table tbody td {
-            border: 0.6px solid #cbd5e1;
+            border: 0.7px solid #9ca3af;
             padding: 3px 4px;
             font-size: 7pt;
+            color: #000000;
+            font-weight: 500;
         }
 
         .main-table tbody tr:nth-child(even) td {
-            background-color: #f8fafc;
+            background-color: #fafafa;
         }
 
         .mono {
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-weight: 500;
+            color: #000000;
         }
 
         .num {
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             text-align: right;
             font-weight: bold;
+            color: #000000;
         }
 
         .txt-center {
@@ -354,12 +405,12 @@
 
         .totals-table {
             border: 1px solid #0f172a;
-            background-color: #f1f5f9;
+            background-color: var(--pdf-encabezado);
             margin-bottom: 4px;
         }
 
         .totals-table td {
-            border: 0.7px solid #cbd5e1;
+            border: 0.7px solid var(--pdf-borde-interno);
             padding: 3.5px 6px;
             font-size: 7.2pt;
             text-align: center;
@@ -383,7 +434,7 @@
         .obs-body {
             padding: 4px 6px;
             font-size: 6.9pt;
-            color: #334155;
+            color: #1f2937;
         }
 
         .firmas-table {
@@ -404,9 +455,9 @@
 
         .sig-space {
             height: 30px;
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-size: 6.4pt;
-            color: #94a3b8;
+            color: #4b5563;
             padding-top: 12px;
         }
 
@@ -419,26 +470,28 @@
             font-size: 7pt;
             font-weight: bold;
             text-transform: uppercase;
+            color: #000000;
         }
 
         .sig-role {
             font-size: 6.2pt;
-            color: #475569;
+            color: #262626;
         }
 
         .legal-box {
-            border: 1px solid #0f172a;
-            background-color: #f8fafc;
+            border: 1px solid #1f2937;
+            background-color: #f7f7f7;
             padding: 3.5px 6px;
             font-size: 6pt;
-            color: #475569;
+            color: #1f2937;
             text-align: justify;
         }
 
         .footer-meta {
             margin-top: 3px;
             font-size: 6.2pt;
-            color: #64748b;
+            color: #262626;
+            font-weight: 500;
         }
 </style>
 

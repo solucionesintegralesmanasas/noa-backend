@@ -91,4 +91,65 @@ class PdfBaseEstandarTest extends TestCase
         preg_match_all('~/Type\s*/Page([^s]|$)~', $salida, $paginas);
         $this->assertSame(1, count($paginas[0]));
     }
+
+    public function test_adversarial_siglas_empresa_con_entradas_degradadas_y_unicode(): void
+    {
+        $this->assertSame('EMP', PdfService::siglasEmpresa('S.A.S. LTDA.'));
+        $this->assertSame('EMP', PdfService::siglasEmpresa('   ... ,  '));
+        $this->assertSame('EMP', PdfService::siglasEmpresa('de la y en'));
+        $this->assertSame('ÑÁÓ', PdfService::siglasEmpresa('Ñandú Ágil Óptimo S.A.S.'));
+        $this->assertSame('TDN', PdfService::siglasEmpresa('Transportes A1 del Norte Ltda.'));
+    }
+
+    public function test_adversarial_orientacion_y_margen_invalidos_caen_a_valores_seguros(): void
+    {
+        $html = view('pdf.standard.styles', [
+            'orientation' => 'diagonal; } body { display: flex',
+            'pdfMargen' => 'invalido',
+        ])->render();
+
+        $this->assertStringContainsString('size: letter portrait', $html);
+        $this->assertStringContainsString('margin: 8mm 10mm 8mm 8mm', $html);
+        $this->assertStringNotContainsString('diagonal', $html);
+        $this->assertStringNotContainsString('display: flex', $html);
+    }
+
+    public function test_adversarial_prototipo_a_usa_parciales_estandar_sin_colores_ni_fuentes_legadas(): void
+    {
+        $html = view('pdf.prototypes.proto-a-institucional', [
+            'orientation' => 'portrait',
+            'logo_data_url' => null,
+            'empresa_siglas' => 'LDC',
+            'empresa_transportadora' => 'LOGÍSTICA DEL CARIBE S.A.S.',
+            'empresa_nit' => '900.123.456-7',
+            'empresa_ciudad' => 'Montería',
+            'titulo_documento' => 'PLANILLA DE PRUEBA',
+            'subtitulo_documento' => 'CONTROL DE CALIDAD',
+            'codigo_sgc' => 'OPE-F-006',
+            'version_sgc' => '003',
+            'fecha_sgc' => '17/11/2026',
+            'periodo' => 'NOVIEMBRE 2026',
+            'placa' => 'XYZ789',
+            'numero_interno' => 'INT-10',
+            'clase_vehiculo' => 'CAMIONETA',
+            'sede' => 'SEDE NORTE',
+            'cliente' => 'CLIENTE PRUEBA S.A.S.',
+            'cliente_nit' => '800.111.222-3',
+            'proyecto' => 'PROYECTO DEMO',
+            'vigencia' => '2026',
+            'filas' => [],
+            'alerta' => 'Sin novedades',
+            'totales' => ['dias' => 0, 'cerrados' => 0, 'horas' => '00:00', 'km' => 0, 'peajes' => 0, 'valor_peajes' => '$0'],
+            'observaciones' => 'Ninguna',
+            'conductor_pie' => 'CONDUCTOR UNO',
+            'coordinador_pie' => 'COORDINADOR UNO',
+            'qr_png_base64' => 'iVBORw0KGgo=',
+        ])->render();
+
+        $this->assertStringContainsString('--pdf-banda: #d8d8d8;', $html);
+        $this->assertStringContainsString('--pdf-encabezado: #f0f0f0;', $html);
+        $this->assertStringContainsString("font-family: 'Inter'", $html);
+        $this->assertStringNotContainsString('#1e3a8a', $html);
+        $this->assertStringNotContainsString("'Courier'", $html);
+    }
 }
