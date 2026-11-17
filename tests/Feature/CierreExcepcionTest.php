@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use Tests\Support\InsertaFilas;
 use Tests\TestCase;
 
 /**
@@ -24,9 +25,23 @@ use Tests\TestCase;
  */
 class CierreExcepcionTest extends TestCase
 {
+    use InsertaFilas;
     use RefreshDatabase;
 
     private const RUTA = '/api/v1/control-sheets/service-delivery-control-sheets';
+
+    private string $companyUuid;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->companyUuid = $this->insertar('companies', [
+            'business_name' => 'Empresa Cierre',
+            'is_active' => true,
+        ]);
+        request()->attributes->set('current_company_uuid', $this->companyUuid);
+        config(['authorization.enforce' => false]);
+    }
 
     private function usuarioConPermiso(?string $permiso): User
     {
@@ -38,7 +53,6 @@ class CierreExcepcionTest extends TestCase
             'password' => Hash::make('secreto123'),
             'is_active' => true,
         ]);
-        Schema::enableForeignKeyConstraints();
 
         // Spatie exige el guard configurado del proyecto para estas rutas.
         $guard = 'api';
@@ -53,6 +67,15 @@ class CierreExcepcionTest extends TestCase
 
         $user->assignRole($role);
 
+        DB::table('company_user')->insert([
+            'user_id' => $user->id,
+            'company_uuid' => $this->companyUuid,
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        Schema::enableForeignKeyConstraints();
+
         return $user->fresh();
     }
 
@@ -61,7 +84,7 @@ class CierreExcepcionTest extends TestCase
         Schema::disableForeignKeyConstraints();
         $id = DB::table('service_delivery_control_sheet')->insertGetId([
             'uuid' => (string) Str::uuid(),
-            'company_uuid' => (string) Str::uuid(),
+            'company_uuid' => $this->companyUuid,
             'service_date' => '2026-09-20',
             'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
             'day_kind' => 'operacion',

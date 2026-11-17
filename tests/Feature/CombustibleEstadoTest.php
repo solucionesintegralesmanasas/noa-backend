@@ -302,6 +302,7 @@ class CombustibleEstadoTest extends TestCase
     public function test_no_mezcla_vehiculos_de_otra_empresa(): void
     {
         $otraEmpresa = $this->insertar('companies', ['business_name' => 'Otra SAS', 'is_active' => true]);
+        request()->attributes->set('current_company_uuid', $otraEmpresa);
         $otroVehiculo = $this->insertar('vehicles', [
             'company_uuid' => $otraEmpresa,
             'vehicle_license_plate' => 'OTRA01',
@@ -325,6 +326,7 @@ class CombustibleEstadoTest extends TestCase
             'mileage' => 1850,
         ]);
 
+        request()->attributes->set('current_company_uuid', $this->empresa);
         $this->tanquear();
         $this->inspeccion(1850);
 

@@ -73,6 +73,7 @@ class NotificacionesConsultasTest extends TestCase
     private function consultasDeSyncConVehiculos(int $vehiculos): int
     {
         $this->empresa = $this->insertar('companies', ['business_name' => 'Empresa sync '.$vehiculos, 'is_active' => true]);
+        request()->attributes->set('current_company_uuid', $this->empresa);
         for ($i = 1; $i <= $vehiculos; $i++) {
             $this->vehiculoConVencimientos('V'.$vehiculos.'-'.str_pad((string) $i, 3, '0', STR_PAD_LEFT));
         }
@@ -145,7 +146,11 @@ class NotificacionesConsultasTest extends TestCase
         $vehiculo = $this->insertar('vehicles', [
             'company_uuid' => $this->empresa, 'vehicle_license_plate' => 'MTO001', 'is_active' => true,
         ]);
-        $this->insertar('vehicle_inspections', ['vehicle_uuid' => $vehiculo, 'mileage' => 25000]);
+        $this->insertar('vehicle_inspections', [
+            'company_uuid' => $this->empresa,
+            'vehicle_uuid' => $vehiculo,
+            'mileage' => 25000,
+        ]);
 
         $alertas = app(NotificationsService::class)->notificationsForPreventativeMaintenance($this->empresa);
         $hitos = array_column(array_filter($alertas, fn ($a) => $a['status'] === 'VENCIDO'), 'milestone');

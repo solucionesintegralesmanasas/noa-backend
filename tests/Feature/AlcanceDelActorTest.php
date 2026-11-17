@@ -151,6 +151,8 @@ class AlcanceDelActorTest extends TestCase
         $this->userCombinado = $this->crearUsuario('AFILIADO', $this->empresaA, $this->terceroCombinado);
         $this->userCombinado->assignRole(Role::findOrCreate('CONDUCTOR', 'api'));
         $this->userCombinado = $this->userCombinado->fresh();
+
+        request()->attributes->remove('current_company_uuid');
     }
 
     private function crearEmpresa(string $nombre): string

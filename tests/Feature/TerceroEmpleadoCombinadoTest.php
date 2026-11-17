@@ -57,6 +57,7 @@ class TerceroEmpleadoCombinadoTest extends TestCase
             'is_active' => true, 'created_at' => now(), 'updated_at' => now(),
         ]);
         Schema::enableForeignKeyConstraints();
+        request()->attributes->set('current_company_uuid', $uuid);
 
         return $uuid;
     }

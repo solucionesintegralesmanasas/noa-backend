@@ -36,6 +36,7 @@ class DistanciaRecorridaTest extends TestCase
         Schema::disableForeignKeyConstraints();
         $this->companyUuid = (string) Str::uuid();
         $this->driverUuid = (string) Str::uuid();
+        request()->attributes->set('current_company_uuid', $this->companyUuid);
     }
 
     protected function tearDown(): void

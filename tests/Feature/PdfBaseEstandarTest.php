@@ -70,6 +70,9 @@ class PdfBaseEstandarTest extends TestCase
 
     public function test_documento_completo_con_la_base_renderiza_en_carta_sin_avisos(): void
     {
+        global $_dompdf_warnings;
+        $_dompdf_warnings = [];
+
         $html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
             . view('pdf.standard.styles', ['orientation' => 'portrait'])->render()
             . '</head><body>'

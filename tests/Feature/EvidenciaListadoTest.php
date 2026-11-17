@@ -23,6 +23,7 @@ class EvidenciaListadoTest extends TestCase
     {
         parent::setUp();
         $this->companyUuid = (string) Str::uuid();
+        request()->attributes->set('current_company_uuid', $this->companyUuid);
     }
 
     private function insertarPlanilla(array $datos): int
@@ -288,7 +289,7 @@ class EvidenciaListadoTest extends TestCase
         $proj1 = (string) Str::uuid();
         $proj2 = (string) Str::uuid();
 
-        $this->insertarPlanilla([
+        $p1Id = $this->insertarPlanilla([
             'uuid' => 'p1-sheet',
             'project_uuid' => $proj1,
             'service_date' => '2026-10-01',
@@ -298,8 +299,10 @@ class EvidenciaListadoTest extends TestCase
             'ending_kilometer' => '150',
             'day_kind' => 'disponibilidad',
             'availability_reason' => 'Reserva',
+            'official_name_and_surname' => 'Conductor P1',
             'is_active' => false,
         ]);
+        $this->insertarFirma($p1Id, 'App\\Models\\ServiceDeliveryControlSheet', 'conductor', 'planilla');
 
         $this->insertarPlanilla([
             'uuid' => 'p2-sheet',
