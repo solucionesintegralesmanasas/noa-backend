@@ -116,8 +116,8 @@
         .interno-txt {
             font-family: 'Courier', monospace;
             font-weight: bold;
-            font-size: 7.8pt;
-            color: #1e3a8a;
+            font-size: 8pt;
+            color: #334155;
         }
 
         .estado-activo {
@@ -215,18 +215,16 @@
     </table>
     <table class="info-table" cellpadding="0" cellspacing="0">
         <tr>
-            <td class="info-lbl" style="width: 14%;">Vehículo:</td>
-            <td class="info-val" style="width: 24%;">
+            <td class="info-lbl" style="width: 14%;">Placa:</td>
+            <td class="info-val" style="width: 21%;">
                 <strong class="placa-txt">{{ $vehicle->vehicle_license_plate ?? 'N/A' }}</strong>
-                @if (!empty($vehicle->internal_number))
-                    <span style="color: #64748b; font-weight: bold;"> &middot; </span>
-                    <strong class="interno-txt">INT-{{ $vehicle->internal_number }}</strong>
-                @endif
             </td>
-            <td class="info-lbl" style="width: 12%;">Modelo (Año):</td>
-            <td class="info-val txt-center mono" style="width: 16%; font-weight: bold;">{{ $vehicle->model ?? 'N/A' }}</td>
-            <td class="info-lbl" style="width: 12%;">Estado:</td>
-            <td class="info-val txt-center" style="width: 22%;">
+            <td class="info-lbl" style="width: 14%;">N° Interno:</td>
+            <td class="info-val" style="width: 19%;">
+                <strong class="interno-txt">{{ !empty($vehicle->internal_number) ? 'INT-' . $vehicle->internal_number : 'N/A' }}</strong>
+            </td>
+            <td class="info-lbl" style="width: 13%;">Estado:</td>
+            <td class="info-val txt-center" style="width: 19%;">
                 @if ($isActive)
                     <span class="estado-activo">ACTIVO</span>
                 @else
@@ -239,30 +237,32 @@
             <td class="info-val uppercase">{{ $brandName }}</td>
             <td class="info-lbl">Línea:</td>
             <td class="info-val uppercase">{{ $vehicle->line ?? 'N/A' }}</td>
-            <td class="info-lbl">Color:</td>
-            <td class="info-val uppercase">{{ $vehicle->color ?? 'N/A' }}</td>
+            <td class="info-lbl">Modelo (Año):</td>
+            <td class="info-val txt-center mono" style="font-weight: bold;">{{ $vehicle->model ?? 'N/A' }}</td>
         </tr>
         <tr>
             <td class="info-lbl">Clase:</td>
             <td class="info-val uppercase">{{ $className }}</td>
             <td class="info-lbl">Carrocería:</td>
             <td class="info-val uppercase">{{ $vehicle->body_type ?? 'N/A' }}</td>
-            <td class="info-lbl">Combustible:</td>
-            <td class="info-val uppercase">{{ $vehicle->fuel_type ?? 'N/A' }}</td>
+            <td class="info-lbl">Color:</td>
+            <td class="info-val uppercase">{{ $vehicle->color ?? 'N/A' }}</td>
         </tr>
         <tr>
+            <td class="info-lbl">Combustible:</td>
+            <td class="info-val uppercase">{{ $vehicle->fuel_type ?? 'N/A' }}</td>
             <td class="info-lbl">Cilindrada:</td>
             <td class="info-val mono">{{ !empty($vehicle->engine_displacement) ? $vehicle->engine_displacement . ' CC' : 'N/A' }}</td>
             <td class="info-lbl">N° de Ejes:</td>
             <td class="info-val txt-center mono">{{ !empty($vehicle->number_of_axles) ? $vehicle->number_of_axles . ' EJES' : 'N/A' }}</td>
-            <td class="info-lbl">N° de Puertas:</td>
-            <td class="info-val txt-center mono">{{ $vehicle->doors ?? 'N/A' }}</td>
         </tr>
         <tr>
             <td class="info-lbl">Matrícula:</td>
             <td class="info-val mono">{{ !empty($vehicle->registration_date) ? \Carbon\Carbon::parse($vehicle->registration_date)->format('d/m/Y') : 'N/A' }}</td>
+            <td class="info-lbl">N° de Puertas:</td>
+            <td class="info-val txt-center mono">{{ $vehicle->doors ?? 'N/A' }}</td>
             <td class="info-lbl">Sucursal:</td>
-            <td class="info-val uppercase" colspan="3">{{ $vehicle->branch->name ?? 'N/A' }}</td>
+            <td class="info-val uppercase">{{ $vehicle->branch->name ?? 'N/A' }}</td>
         </tr>
     </table>
 
@@ -273,9 +273,9 @@
     <table class="info-table" cellpadding="0" cellspacing="0">
         <tr>
             <td class="info-lbl" style="width: 18%;">N° de Motor:</td>
-            <td class="info-val mono" style="width: 32%;">{{ $vehicle->engine_number ?? 'N/A' }}</td>
-            <td class="info-lbl" style="width: 18%;">N° de Chasis:</td>
-            <td class="info-val mono" style="width: 32%;">{{ $vehicle->chassis_number ?? 'N/A' }}</td>
+            <td class="info-val mono" style="width: 30%;">{{ $vehicle->engine_number ?? 'N/A' }}</td>
+            <td class="info-lbl" style="width: 23%;">N° de Chasis:</td>
+            <td class="info-val mono" style="width: 29%;">{{ $vehicle->chassis_number ?? 'N/A' }}</td>
         </tr>
         <tr>
             <td class="info-lbl">VIN:</td>
@@ -309,7 +309,7 @@
                 @endif
             </td>
             <td class="info-lbl">Modalidad:</td>
-            <td class="info-val" style="color: #1e3a8a; font-weight: bold;">
+            <td class="info-val" style="color: #0f172a; font-weight: bold;">
                 {{ $vehicle->type_of_service ?? 'SERVICIO PÚBLICO ESPECIAL' }}
             </td>
         </tr>
@@ -367,7 +367,7 @@
     <table class="info-table" cellpadding="0" cellspacing="0">
         <tr>
             <td class="info-lbl" style="width: 20%;">Nombre / Razón Social:</td>
-            <td class="info-val uppercase" style="width: 47%; color: #1e3a8a; font-weight: bold;">{{ $tpName }}</td>
+            <td class="info-val uppercase" style="width: 47%; color: #0f172a; font-weight: bold;">{{ $tpName }}</td>
             <td class="info-lbl" style="width: 13%;">Documento:</td>
             <td class="info-val mono" style="width: 20%;">{{ $tpDocType }} {{ $tpDocNum }}</td>
         </tr>
@@ -401,7 +401,7 @@
                     $expiryDocFormatted = !empty($doc->expiry_date) ? \Carbon\Carbon::parse($doc->expiry_date)->format('d/m/Y') : 'N/A';
                 @endphp
                 <tr>
-                    <td class="txt-left" style="font-weight: bold;">{{ $doc->document_type ?? 'N/A' }}</td>
+                    <td class="txt-center" style="font-weight: bold;">{{ $doc->document_type ?? 'N/A' }}</td>
                     <td class="txt-center mono">{{ $doc->policy_number ?? 'N/A' }}</td>
                     <td class="uppercase">{{ $doc->issuing_entity ?? 'N/A' }}</td>
                     <td class="txt-center mono" style="font-weight: bold;">{{ $expiryDocFormatted }}</td>
@@ -437,7 +437,7 @@
                     $affCompany = $card->affiliated_company ?? ($vehicle->company->business_name ?? 'N/A');
                 @endphp
                 <tr>
-                    <td class="txt-center mono" style="color: #1e3a8a; font-weight: bold;">{{ $card->operating_card_number ?? 'N/A' }}</td>
+                    <td class="txt-center mono" style="color: #0f172a; font-weight: bold;">{{ $card->operating_card_number ?? 'N/A' }}</td>
                     <td class="txt-left uppercase" style="font-weight: bold;">{{ $affCompany }}</td>
                     <td class="txt-center mono">{{ $issueFormatted }}</td>
                     <td class="txt-center mono" style="font-weight: bold;">{{ $expFormatted }}</td>
@@ -464,7 +464,7 @@
                     {{ $agreement->contracting_entity_name ?? 'N/A' }}
                 </td>
                 <td class="info-lbl" style="width: 14%;">N° / Vigencia:</td>
-                <td class="info-val mono" style="width: 21%; color: #1e3a8a; font-weight: bold;">
+                <td class="info-val mono" style="width: 21%; color: #0f172a; font-weight: bold;">
                     {{ $agreement->agreement_internal_id ?? 'N/A' }}
                     @if (!empty($agreement->expiry_date))
                         <span style="color: #475569; font-weight: normal;">({{ \Carbon\Carbon::parse($agreement->expiry_date)->format('d/m/Y') }})</span>

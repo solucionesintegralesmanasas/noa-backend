@@ -7,12 +7,12 @@
 @endphp
 <style>
         :root {
-            --pdf-banda: #e2e8f0;
+            --pdf-banda: #e5e7eb;
             --pdf-banda-texto: #0f172a;
-            --pdf-acento: #1e3a8a;
-            --pdf-encabezado: #eef2f6;
+            --pdf-acento: #334155;
+            --pdf-encabezado: #f1f5f9;
             --pdf-tenue: #f8fafc;
-            --pdf-borde: #0f172a;
+            --pdf-borde: #1e293b;
             --pdf-borde-interno: #cbd5e1;
         }
 
@@ -77,7 +77,7 @@
         .logo-monogram {
             font-weight: bold;
             font-size: 13pt;
-            color: #1e3a8a;
+            color: var(--pdf-acento);
             line-height: 1;
             letter-spacing: 0.5px;
         }
@@ -113,7 +113,7 @@
         .doc-main-title {
             font-size: 9.2pt;
             font-weight: bold;
-            color: #1e3a8a;
+            color: var(--pdf-acento);
             text-transform: uppercase;
             margin-top: 3px;
             letter-spacing: 0.3px;
@@ -130,13 +130,16 @@
         .header-meta-cell {
             width: 26%;
             padding: 0 !important;
+            vertical-align: middle;
         }
 
         .meta-table td {
             border: none !important;
-            border-bottom: 0.8px solid #0f172a !important;
-            padding: 2px 5px !important;
+            border-bottom: 0.8px solid var(--pdf-borde) !important;
+            padding: 4px 6px !important;
             font-size: 6.6pt;
+            line-height: 1.15;
+            vertical-align: middle !important;
         }
 
         .meta-table tr:last-child td {
@@ -145,11 +148,12 @@
 
         .meta-label {
             width: 44%;
-            background-color: #f8fafc;
-            border-right: 0.8px solid #0f172a !important;
+            background-color: var(--pdf-tenue);
+            border-right: 0.8px solid var(--pdf-borde) !important;
             font-weight: bold;
             color: #334155;
             text-transform: uppercase;
+            text-align: left;
         }
 
         .meta-val {
@@ -193,12 +197,11 @@
         }
 
         .info-lbl {
-            background-color: #f8fafc;
+            background-color: var(--pdf-tenue);
             font-weight: bold;
             color: #334155;
             text-transform: uppercase;
             font-size: 6.3pt;
-            white-space: nowrap;
         }
 
         .info-val {
@@ -244,7 +247,7 @@
             font-family: 'Courier', monospace;
             font-weight: bold;
             font-size: 7pt;
-            color: #1e3a8a;
+            color: var(--pdf-acento);
             white-space: nowrap;
         }
 
@@ -264,9 +267,9 @@
         }
 
         .main-table thead th {
-            background-color: #1e3a8a;
+            background-color: var(--pdf-acento);
             color: #ffffff;
-            border: 0.8px solid #0f172a;
+            border: 0.8px solid var(--pdf-borde);
             padding: 3.2px 3px;
             font-size: 6.6pt;
             font-weight: bold;
@@ -368,8 +371,8 @@
         }
 
         .obs-head {
-            background-color: #e2e8f0;
-            border-left: 4px solid #1e3a8a;
+            background-color: var(--pdf-banda);
+            border-left: 4px solid var(--pdf-borde);
             border-bottom: 0.8px solid #0f172a;
             padding: 2.5px 6px;
             font-size: 6.8pt;

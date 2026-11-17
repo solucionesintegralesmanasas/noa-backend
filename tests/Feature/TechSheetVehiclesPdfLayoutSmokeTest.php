@@ -37,6 +37,11 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('class="estado-activo">ACTIVO', $html);
         $this->assertStringNotContainsString('class="badge-active"', $html);
         $this->assertStringNotContainsString('>Estado</th>', $html);
+        // Ajustes de la segunda ronda: N° Interno separado, paleta neutra y sin nowrap en etiquetas.
+        $this->assertStringContainsString('>N° Interno:</td>', $html);
+        $this->assertStringContainsString('--pdf-acento: #334155;', $html);
+        $this->assertStringNotContainsString('#1e3a8a', $html);
+        $this->assertDoesNotMatchRegularExpression('/\.info-lbl\s*\{[^}]*white-space\s*:\s*nowrap/s', $html);
     }
 
     public function test_oculta_especificaciones_mecanicas_vacias_y_ajusta_capacidad_y_contacto(): void
@@ -130,6 +135,9 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $datos['vehicle']->third_party->address = 'Calle 29 N° 14-38';
         $datos['vehicle']->third_party->municipality = (object) ['name' => 'Montería'];
         $datos['vehicle']->third_party->phone = '3117894521';
+
+        $html = view('pdf.fleet.technical-sheet-vehicles', $datos)->render();
+        $this->assertStringContainsString('class="txt-center" style="font-weight: bold;">Seguro Obligatorio (SOAT)</td>', $html);
 
         $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $datos)
             ->setPaper('letter', 'portrait');
