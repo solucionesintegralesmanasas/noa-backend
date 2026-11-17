@@ -47,6 +47,12 @@ class OwnCompany
             $normalizado = (string) preg_replace($patron, $reemplazo, $normalizado);
         }
 
+        $normalizado = (string) preg_replace_callback(
+            '/(?<![A-Z0-9])[A-Z](?: [A-Z](?![A-Z0-9]))+/',
+            fn (array $m) => str_replace(' ', '', $m[0]),
+            $normalizado
+        );
+
         return trim($normalizado);
     }
 

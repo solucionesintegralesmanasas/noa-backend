@@ -50,7 +50,8 @@ final class VehicleActivityReportService
      */
     private function consultaConsolidada(array $filtros): Builder
     {
-        $companyUuid = $filtros['company_uuid'] ?? $this->alcance->companyUuid();
+        $alcanceCompany = $this->alcance->companyUuid() ?? request()->attributes->get('current_company_uuid');
+        $companyUuid = $filtros['company_uuid'] ?? $alcanceCompany;
 
         // Fail-Closed: sin empresa, respuesta vacía garantizada.
         if (! $companyUuid && ! $this->alcance->esSuperadmin()) {
@@ -58,7 +59,7 @@ final class VehicleActivityReportService
         }
 
         // Blindaje cross-tenant: actor no SUPERADMIN no puede consultar otra empresa.
-        if (! empty($filtros['company_uuid']) && ! $this->alcance->esSuperadmin() && $filtros['company_uuid'] !== $this->alcance->companyUuid()) {
+        if (! empty($filtros['company_uuid']) && ! $this->alcance->esSuperadmin() && $filtros['company_uuid'] !== $alcanceCompany) {
             return DB::query()->fromRaw('(select 1 where 1 = 0) as actividad');
         }
 

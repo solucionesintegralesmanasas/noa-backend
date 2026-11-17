@@ -29,6 +29,7 @@ class SetCompanyContext
         }
 
         $companyUuid = $this->resolveCompanyUuid($request);
+        $request->attributes->set('company_context_resolved', true);
 
         if ($companyUuid) {
             $company = Company::withoutGlobalScopes()

@@ -143,6 +143,7 @@ class AlcanceDelActor
         $this->usuario = $targetUser;
 
         if (! $this->usuario) {
+            $this->companyUuid = $companyUuidExplicit ?? request()->attributes->get('current_company_uuid');
             $this->contextoResuelto = true;
 
             return $this;
@@ -175,7 +176,7 @@ class AlcanceDelActor
             ?? session('current_company_uuid');
 
         if ($this->esSuperadmin) {
-            $this->companyUuid = $solicitada ?? $this->usuario->companies()->first()?->uuid;
+            $this->companyUuid = $solicitada;
             $this->thirdPartyUuid = request()->attributes->get('current_third_party_uuid');
             $this->branchUuid = request()->attributes->get('current_branch_uuid');
             $this->affiliateUuid = null;
@@ -560,7 +561,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -640,7 +641,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -708,7 +709,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -895,7 +896,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
