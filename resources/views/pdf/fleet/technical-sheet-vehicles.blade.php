@@ -28,10 +28,10 @@
     <title>{{ $title ?? 'Ficha Técnica Vehículo' }}</title>
     @include('pdf.standard.styles', ['orientation' => $orientation, 'pdfMargen' => 'denso'])
     <style>
-        /* Ajustes compactos propios de la Ficha Técnica (JG-VEH-001) sobre la base estándar */
+        /* Escala legible de impresión Carta Vertical (1 hoja aprovechada ~90%) */
         body {
-            font-size: 7.1pt;
-            line-height: 1.2;
+            font-size: 7.8pt;
+            line-height: 1.3;
         }
 
         #watermark {
@@ -50,7 +50,7 @@
 
         #letterhead-banner {
             text-align: center;
-            margin-bottom: 4px;
+            margin-bottom: 6px;
         }
 
         #letterhead-banner img {
@@ -58,13 +58,17 @@
             max-height: 2.2cm;
         }
 
+        .header-table {
+            margin-bottom: 6px;
+        }
+
         .section-banner {
-            margin-top: 3px;
+            margin-top: 6px;
         }
 
         .section-banner td {
-            padding: 2px 6px;
-            font-size: 6.8pt;
+            padding: 3.2px 7px;
+            font-size: 7.4pt;
         }
 
         .info-table {
@@ -72,13 +76,13 @@
         }
 
         .info-table td {
-            padding: 2px 4.5px;
-            font-size: 6.9pt;
-            line-height: 1.18;
+            padding: 3.6px 6px;
+            font-size: 7.6pt;
+            line-height: 1.25;
         }
 
         .info-lbl {
-            font-size: 6.2pt;
+            font-size: 6.7pt;
         }
 
         /* Tablas de grillas (documentos, tarjetas) */
@@ -88,14 +92,14 @@
         }
 
         .main-table thead th {
-            padding: 2.4px 3px;
-            font-size: 6.2pt;
+            padding: 3.8px 4px;
+            font-size: 6.8pt;
         }
 
         .main-table tbody td {
-            padding: 2px 4px;
-            font-size: 6.7pt;
-            line-height: 1.15;
+            padding: 3.4px 5px;
+            font-size: 7.4pt;
+            line-height: 1.25;
         }
 
         .badge-active {
@@ -103,10 +107,10 @@
             background-color: #dcfce7;
             color: #166534;
             border: 0.6pt solid #86efac;
-            font-size: 5.8pt;
+            font-size: 6.3pt;
             font-weight: bold;
             text-transform: uppercase;
-            padding: 0.8px 4px;
+            padding: 1px 5px;
             border-radius: 2px;
         }
 
@@ -115,36 +119,36 @@
             background-color: #fee2e2;
             color: #991b1b;
             border: 0.6pt solid #fca5a5;
-            font-size: 5.8pt;
+            font-size: 6.3pt;
             font-weight: bold;
             text-transform: uppercase;
-            padding: 0.8px 4px;
+            padding: 1px 5px;
             border-radius: 2px;
         }
 
         .qr-footer-table {
             border: 1px solid var(--pdf-borde);
-            margin-top: 4px;
+            margin-top: 7px;
             background-color: #ffffff;
             page-break-inside: avoid;
         }
 
         .qr-footer-table td {
-            padding: 3.5px 6px;
+            padding: 5.5px 8px;
             vertical-align: middle;
         }
 
         .qr-box-cell {
-            width: 15%;
+            width: 16%;
             text-align: center;
             border-right: 0.8px solid var(--pdf-borde-interno);
             background-color: var(--pdf-tenue);
         }
 
         .qr-text-cell {
-            width: 85%;
-            font-size: 6.3pt;
-            line-height: 1.25;
+            width: 84%;
+            font-size: 7pt;
+            line-height: 1.32;
             color: #334155;
             text-align: justify;
         }
@@ -469,7 +473,7 @@
                     <tr>
                         <td class="qr-box-cell">
                             @if (!empty($qrBase64))
-                                <img src="data:{{ $qrMime }};base64,{{ $qrBase64 }}" alt="QR" style="width: 58px; height: 58px; display: block; margin: 0 auto;">
+                                <img src="data:{{ $qrMime }};base64,{{ $qrBase64 }}" alt="QR" style="width: 68px; height: 68px; display: block; margin: 0 auto;">
                             @else
                                 <div style="font-size: 6.2pt; font-weight: bold; color: #64748b; text-align: center;">
                                     VALIDACIÓN<br>PESV
