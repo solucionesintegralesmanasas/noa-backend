@@ -610,6 +610,57 @@ class PdfService
     }
 
     /**
+     * Identidad visual de la empresa para la base estándar de PDF.
+     *
+     * El logo es SIEMPRE el configurado por la empresa en Configuraciones → Identidad
+     * y Firmas (colección LOGO de `Company`). Si no tiene, no se toma el de otra
+     * empresa: la vista cae al monograma con las siglas de la razón social.
+     *
+     * @return array{logo_data_url: string|null, empresa_siglas: string}
+     */
+    public function identidadEmpresa(?object $company): array
+    {
+        $logoModel = self::logoParaMarca($company);
+        $dataUrl = null;
+
+        if ($logoModel) {
+            try {
+                $base64 = $this->getBase64Parallel(['logo' => $logoModel], ['logo' => 600])['logo'] ?? null;
+                if (! empty($base64)) {
+                    $mime = $this->detectLogoMime($logoModel) ?? 'image/png';
+                    $dataUrl = 'data:' . $mime . ';base64,' . $base64;
+                }
+            } catch (\Throwable $e) {
+                Logger::warning('No se pudo resolver el logo de la empresa para el PDF: ' . $e->getMessage());
+            }
+        }
+
+        return [
+            'logo_data_url' => $dataUrl,
+            'empresa_siglas' => self::siglasEmpresa((string) ($company->business_name ?? '')),
+        ];
+    }
+
+    /**
+     * Siglas (máx. 3 letras) para el monograma de respaldo del encabezado.
+     */
+    public static function siglasEmpresa(string $razonSocial): string
+    {
+        $palabras = preg_split('/[\s\.,]+/u', trim($razonSocial)) ?: [];
+        $siglas = '';
+        foreach ($palabras as $palabra) {
+            if (mb_strlen($palabra) > 2 && ! in_array(mb_strtoupper($palabra), ['SAS', 'LTDA', 'S.A.S'], true)) {
+                $siglas .= mb_strtoupper(mb_substr($palabra, 0, 1));
+            }
+            if (mb_strlen($siglas) === 3) {
+                break;
+            }
+        }
+
+        return $siglas !== '' ? $siglas : 'EMP';
+    }
+
+    /**
      * Inyecta las claves de presentación (`letterhead`, `logo_fondo`,
      * `ocultar_marca`) en los datos de cualquier vista PDF.
      *
