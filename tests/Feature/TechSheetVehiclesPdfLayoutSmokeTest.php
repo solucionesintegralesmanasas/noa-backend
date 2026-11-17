@@ -31,9 +31,45 @@ class TechSheetVehiclesPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('DISC', $html);
         // El encabezado default de 3 logos no se usa.
         $this->assertStringNotContainsString('class="logo-header"', $html);
-        // Usa la micro-tabla de placa de la base estándar y sin reset universal de margen.
-        $this->assertStringContainsString('class="placa-inline-tbl"', $html);
+        // Sin reset universal de margen ni badges en placa/estado; sin columna Estado en grillas.
         $this->assertDoesNotMatchRegularExpression('/\*\s*\{[^}]*margin\s*:/s', $html);
+        $this->assertStringContainsString('class="placa-txt">ABC123', $html);
+        $this->assertStringContainsString('class="estado-activo">ACTIVO', $html);
+        $this->assertStringNotContainsString('class="badge-active"', $html);
+        $this->assertStringNotContainsString('>Estado</th>', $html);
+    }
+
+    public function test_oculta_especificaciones_mecanicas_vacias_y_ajusta_capacidad_y_contacto(): void
+    {
+        $datos = $this->datosFicha();
+        $v = $datos['vehicle'];
+        foreach ([
+            'steering_type', 'transmission_type', 'number_of_speeds',
+            'bearing_type', 'rear_suspension', 'number_of_tires',
+            'rim_size', 'rim_material', 'front_brake_type',
+            'rear_brake_type', 'number_of_windows',
+        ] as $campo) {
+            $v->{$campo} = null;
+        }
+        $v->passenger_capacity = 0;
+        $v->seated_passenger_capacity = 19;
+        $v->third_party->address = 'Calle 29 N° 14-38';
+        $v->third_party->phone = '3117894521';
+
+        $html = view('pdf.fleet.technical-sheet-vehicles', $datos)->render();
+
+        $this->assertStringNotContainsString('Especificaciones Mecánicas', $html);
+        $this->assertStringContainsString('3. Información del Propietario', $html);
+        $this->assertStringContainsString('19 Sentados', $html);
+        $this->assertStringNotContainsString('0 Pasajeros', $html);
+        $this->assertStringContainsString('>Dirección:</td>', $html);
+        $this->assertStringContainsString('>Contacto:</td>', $html);
+        $this->assertStringContainsString('3117894521', $html);
+
+        $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $datos)->setPaper('letter', 'portrait');
+        app(PdfService::class)->sellarPaginado($pdf, PdfService::MARGEN_DERECHO_ESTANDAR_PT);
+        preg_match_all('~/Type\s*/Page([^s]|$)~', $pdf->output(), $c);
+        $this->assertSame(1, count($c[0]));
     }
 
     public function test_la_ficha_del_vehiculo_cabe_en_una_hoja_vertical(): void

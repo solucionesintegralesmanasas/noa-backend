@@ -17,9 +17,30 @@
     $tpCity = $tp->municipality->name ?? null;
     $tpPhone = $tp->phone ?? null;
 
+    // Especificaciones mecánicas: solo se muestran si existe al menos un campo registrado.
+    $camposMecanicos = [
+        $vehicle->steering_type ?? null,
+        $vehicle->transmission_type ?? null,
+        $vehicle->number_of_speeds ?? null,
+        $vehicle->bearing_type ?? null,
+        $vehicle->rear_suspension ?? null,
+        $vehicle->number_of_tires ?? null,
+        $vehicle->rim_size ?? null,
+        $vehicle->rim_material ?? null,
+        $vehicle->number_of_windows ?? null,
+        $vehicle->front_brake_type ?? null,
+        $vehicle->rear_brake_type ?? null,
+    ];
+    $tieneMecanicas = collect($camposMecanicos)->contains(fn ($v) => $v !== null && trim((string) $v) !== '');
+
+    // Capacidad de pasajeros: si la capacidad total es 0/vacía, mostrar sentados si existe.
+    $capTotal = (int) ($vehicle->passenger_capacity ?? 0);
+    $capSentados = (int) ($vehicle->seated_passenger_capacity ?? 0);
+
     $marcaFondo = $logo_fondo ?? $data['logo_fondo'] ?? null;
     $qrBase64 = $data['qrcode'] ?? null;
     $qrMime = $data['qrcode_mime'] ?? 'image/png';
+    $sec = 1;
 @endphp
 <!DOCTYPE html>
 <html lang="es">
@@ -28,9 +49,9 @@
     <title>{{ $title ?? 'Ficha Técnica Vehículo' }}</title>
     @include('pdf.standard.styles', ['orientation' => $orientation, 'pdfMargen' => 'denso'])
     <style>
-        /* Escala legible de impresión Carta Vertical (1 hoja aprovechada ~90%) */
+        /* Escala legible de impresión Carta Vertical; se expande ligeramente cuando no hay sección mecánica */
         body {
-            font-size: 7.8pt;
+            font-size: {{ $tieneMecanicas ? '7.8pt' : '8.1pt' }};
             line-height: 1.3;
         }
 
@@ -59,16 +80,16 @@
         }
 
         .header-table {
-            margin-bottom: 6px;
+            margin-bottom: {{ $tieneMecanicas ? '6px' : '9px' }};
         }
 
         .section-banner {
-            margin-top: 6px;
+            margin-top: {{ $tieneMecanicas ? '6px' : '9px' }};
         }
 
         .section-banner td {
-            padding: 3.2px 7px;
-            font-size: 7.4pt;
+            padding: {{ $tieneMecanicas ? '3.2px 7px' : '4px 7px' }};
+            font-size: {{ $tieneMecanicas ? '7.4pt' : '7.7pt' }};
         }
 
         .info-table {
@@ -76,13 +97,39 @@
         }
 
         .info-table td {
-            padding: 3.6px 6px;
-            font-size: 7.6pt;
+            padding: {{ $tieneMecanicas ? '3.6px 6px' : '4.8px 6px' }};
+            font-size: {{ $tieneMecanicas ? '7.6pt' : '7.9pt' }};
             line-height: 1.25;
         }
 
         .info-lbl {
-            font-size: 6.7pt;
+            font-size: {{ $tieneMecanicas ? '6.7pt' : '7pt' }};
+        }
+
+        .placa-txt {
+            font-family: 'Courier', monospace;
+            font-weight: bold;
+            font-size: 8.6pt;
+            color: #0f172a;
+        }
+
+        .interno-txt {
+            font-family: 'Courier', monospace;
+            font-weight: bold;
+            font-size: 7.8pt;
+            color: #1e3a8a;
+        }
+
+        .estado-activo {
+            font-weight: bold;
+            color: #166534;
+            text-transform: uppercase;
+        }
+
+        .estado-inactivo {
+            font-weight: bold;
+            color: #991b1b;
+            text-transform: uppercase;
         }
 
         /* Tablas de grillas (documentos, tarjetas) */
@@ -92,49 +139,25 @@
         }
 
         .main-table thead th {
-            padding: 3.8px 4px;
-            font-size: 6.8pt;
+            padding: {{ $tieneMecanicas ? '3.8px 4px' : '4.5px 5px' }};
+            font-size: {{ $tieneMecanicas ? '6.8pt' : '7.1pt' }};
         }
 
         .main-table tbody td {
-            padding: 3.4px 5px;
-            font-size: 7.4pt;
+            padding: {{ $tieneMecanicas ? '3.4px 5px' : '4.4px 5px' }};
+            font-size: {{ $tieneMecanicas ? '7.4pt' : '7.7pt' }};
             line-height: 1.25;
-        }
-
-        .badge-active {
-            display: inline-block;
-            background-color: #dcfce7;
-            color: #166534;
-            border: 0.6pt solid #86efac;
-            font-size: 6.3pt;
-            font-weight: bold;
-            text-transform: uppercase;
-            padding: 1px 5px;
-            border-radius: 2px;
-        }
-
-        .badge-inactive {
-            display: inline-block;
-            background-color: #fee2e2;
-            color: #991b1b;
-            border: 0.6pt solid #fca5a5;
-            font-size: 6.3pt;
-            font-weight: bold;
-            text-transform: uppercase;
-            padding: 1px 5px;
-            border-radius: 2px;
         }
 
         .qr-footer-table {
             border: 1px solid var(--pdf-borde);
-            margin-top: 7px;
+            margin-top: {{ $tieneMecanicas ? '7px' : '10px' }};
             background-color: #ffffff;
             page-break-inside: avoid;
         }
 
         .qr-footer-table td {
-            padding: 5.5px 8px;
+            padding: {{ $tieneMecanicas ? '5.5px 8px' : '7px 9px' }};
             vertical-align: middle;
         }
 
@@ -147,7 +170,7 @@
 
         .qr-text-cell {
             width: 84%;
-            font-size: 7pt;
+            font-size: {{ $tieneMecanicas ? '7pt' : '7.3pt' }};
             line-height: 1.32;
             color: #334155;
             text-align: justify;
@@ -188,25 +211,26 @@
 
     {{-- 1. IDENTIFICACIÓN Y ESTADO OPERATIVO --}}
     <table class="section-banner" cellpadding="0" cellspacing="0">
-        <tr><td>1. Identificación y Estado Operativo del Vehículo</td></tr>
+        <tr><td>{{ $sec++ }}. Identificación y Estado Operativo del Vehículo</td></tr>
     </table>
     <table class="info-table" cellpadding="0" cellspacing="0">
         <tr>
             <td class="info-lbl" style="width: 14%;">Vehículo:</td>
-            <td class="info-val" style="width: 24%; padding-top: 1.5px; padding-bottom: 1.5px;">
-                @include('pdf.standard.vehicle-line', [
-                    'placa' => $vehicle->vehicle_license_plate ?? 'N/A',
-                    'numero_interno' => !empty($vehicle->internal_number) ? 'INT-' . $vehicle->internal_number : null,
-                ])
+            <td class="info-val" style="width: 24%;">
+                <strong class="placa-txt">{{ $vehicle->vehicle_license_plate ?? 'N/A' }}</strong>
+                @if (!empty($vehicle->internal_number))
+                    <span style="color: #64748b; font-weight: bold;"> &middot; </span>
+                    <strong class="interno-txt">INT-{{ $vehicle->internal_number }}</strong>
+                @endif
             </td>
             <td class="info-lbl" style="width: 12%;">Modelo (Año):</td>
             <td class="info-val txt-center mono" style="width: 16%; font-weight: bold;">{{ $vehicle->model ?? 'N/A' }}</td>
             <td class="info-lbl" style="width: 12%;">Estado:</td>
             <td class="info-val txt-center" style="width: 22%;">
                 @if ($isActive)
-                    <span class="badge-active">&bull; ACTIVO</span>
+                    <span class="estado-activo">ACTIVO</span>
                 @else
-                    <span class="badge-inactive">&bull; INACTIVO</span>
+                    <span class="estado-inactivo">INACTIVO</span>
                 @endif
             </td>
         </tr>
@@ -244,7 +268,7 @@
 
     {{-- 2. ESPECIFICACIONES TÉCNICAS Y CAPACIDAD TRANSPORTADORA --}}
     <table class="section-banner" cellpadding="0" cellspacing="0">
-        <tr><td>2. Especificaciones Técnicas y Capacidad Transportadora</td></tr>
+        <tr><td>{{ $sec++ }}. Especificaciones Técnicas y Capacidad Transportadora</td></tr>
     </table>
     <table class="info-table" cellpadding="0" cellspacing="0">
         <tr>
@@ -273,9 +297,15 @@
         <tr>
             <td class="info-lbl">Cap. Pasajeros:</td>
             <td class="info-val">
-                <strong>{{ $vehicle->passenger_capacity ?? 'N/A' }} Pasajeros</strong>
-                @if (!empty($vehicle->seated_passenger_capacity))
-                    <span style="color: #64748b;">({{ $vehicle->seated_passenger_capacity }} Sentados)</span>
+                @if ($capTotal > 0 && $capSentados > 0)
+                    <strong>{{ $capTotal }} Pasajeros</strong>
+                    <span style="color: #64748b;">({{ $capSentados }} Sentados)</span>
+                @elseif ($capTotal > 0)
+                    <strong>{{ $capTotal }} Pasajeros</strong>
+                @elseif ($capSentados > 0)
+                    <strong>{{ $capSentados }} Sentados</strong>
+                @else
+                    N/A
                 @endif
             </td>
             <td class="info-lbl">Modalidad:</td>
@@ -291,46 +321,48 @@
         </tr>
     </table>
 
-    {{-- 3. ESPECIFICACIONES MECÁNICAS --}}
-    <table class="section-banner" cellpadding="0" cellspacing="0">
-        <tr><td>3. Especificaciones Mecánicas</td></tr>
-    </table>
-    <table class="info-table" cellpadding="0" cellspacing="0">
-        <tr>
-            <td class="info-lbl" style="width: 16%;">Dirección:</td>
-            <td class="info-val uppercase" style="width: 18%;">{{ $vehicle->steering_type ?? 'N/A' }}</td>
-            <td class="info-lbl" style="width: 16%;">Transmisión:</td>
-            <td class="info-val uppercase" style="width: 18%;">{{ $vehicle->transmission_type ?? 'N/A' }}</td>
-            <td class="info-lbl" style="width: 16%;">Velocidades:</td>
-            <td class="info-val txt-center mono" style="width: 16%;">{{ $vehicle->number_of_speeds ?? 'N/A' }}</td>
-        </tr>
-        <tr>
-            <td class="info-lbl">Rodamientos:</td>
-            <td class="info-val uppercase">{{ $vehicle->bearing_type ?? 'N/A' }}</td>
-            <td class="info-lbl">Susp. Trasera:</td>
-            <td class="info-val uppercase">{{ $vehicle->rear_suspension ?? 'N/A' }}</td>
-            <td class="info-lbl">N° Llantas:</td>
-            <td class="info-val txt-center mono">{{ $vehicle->number_of_tires ?? 'N/A' }}</td>
-        </tr>
-        <tr>
-            <td class="info-lbl">Dimensión Rines:</td>
-            <td class="info-val mono">{{ $vehicle->rim_size ?? 'N/A' }}</td>
-            <td class="info-lbl">Material Rines:</td>
-            <td class="info-val uppercase">{{ $vehicle->rim_material ?? 'N/A' }}</td>
-            <td class="info-lbl">N° Ventanas:</td>
-            <td class="info-val txt-center mono">{{ $vehicle->number_of_windows ?? 'N/A' }}</td>
-        </tr>
-        <tr>
-            <td class="info-lbl">Frenos Delanteros:</td>
-            <td class="info-val uppercase">{{ $vehicle->front_brake_type ?? 'N/A' }}</td>
-            <td class="info-lbl">Frenos Traseros:</td>
-            <td class="info-val uppercase" colspan="3">{{ $vehicle->rear_brake_type ?? 'N/A' }}</td>
-        </tr>
-    </table>
+    {{-- 3. ESPECIFICACIONES MECÁNICAS (solo si existe algún dato registrado) --}}
+    @if ($tieneMecanicas)
+        <table class="section-banner" cellpadding="0" cellspacing="0">
+            <tr><td>{{ $sec++ }}. Especificaciones Mecánicas</td></tr>
+        </table>
+        <table class="info-table" cellpadding="0" cellspacing="0">
+            <tr>
+                <td class="info-lbl" style="width: 16%;">Dirección:</td>
+                <td class="info-val uppercase" style="width: 18%;">{{ $vehicle->steering_type ?? 'N/A' }}</td>
+                <td class="info-lbl" style="width: 16%;">Transmisión:</td>
+                <td class="info-val uppercase" style="width: 18%;">{{ $vehicle->transmission_type ?? 'N/A' }}</td>
+                <td class="info-lbl" style="width: 16%;">Velocidades:</td>
+                <td class="info-val txt-center mono" style="width: 16%;">{{ $vehicle->number_of_speeds ?? 'N/A' }}</td>
+            </tr>
+            <tr>
+                <td class="info-lbl">Rodamientos:</td>
+                <td class="info-val uppercase">{{ $vehicle->bearing_type ?? 'N/A' }}</td>
+                <td class="info-lbl">Susp. Trasera:</td>
+                <td class="info-val uppercase">{{ $vehicle->rear_suspension ?? 'N/A' }}</td>
+                <td class="info-lbl">N° Llantas:</td>
+                <td class="info-val txt-center mono">{{ $vehicle->number_of_tires ?? 'N/A' }}</td>
+            </tr>
+            <tr>
+                <td class="info-lbl">Dimensión Rines:</td>
+                <td class="info-val mono">{{ $vehicle->rim_size ?? 'N/A' }}</td>
+                <td class="info-lbl">Material Rines:</td>
+                <td class="info-val uppercase">{{ $vehicle->rim_material ?? 'N/A' }}</td>
+                <td class="info-lbl">N° Ventanas:</td>
+                <td class="info-val txt-center mono">{{ $vehicle->number_of_windows ?? 'N/A' }}</td>
+            </tr>
+            <tr>
+                <td class="info-lbl">Frenos Delanteros:</td>
+                <td class="info-val uppercase">{{ $vehicle->front_brake_type ?? 'N/A' }}</td>
+                <td class="info-lbl">Frenos Traseros:</td>
+                <td class="info-val uppercase" colspan="3">{{ $vehicle->rear_brake_type ?? 'N/A' }}</td>
+            </tr>
+        </table>
+    @endif
 
-    {{-- 4. PROPIETARIO O TENEDOR --}}
+    {{-- PROPIETARIO O TENEDOR --}}
     <table class="section-banner" cellpadding="0" cellspacing="0">
-        <tr><td>4. Información del Propietario o Tenedor Registrado</td></tr>
+        <tr><td>{{ $sec++ }}. Información del Propietario o Tenedor Registrado</td></tr>
     </table>
     <table class="info-table" cellpadding="0" cellspacing="0">
         <tr>
@@ -340,33 +372,32 @@
             <td class="info-val mono" style="width: 20%;">{{ $tpDocType }} {{ $tpDocNum }}</td>
         </tr>
         <tr>
-            <td class="info-lbl">Dirección y Contacto:</td>
-            <td class="info-val" colspan="3">
+            <td class="info-lbl">Dirección:</td>
+            <td class="info-val">
                 {{ $tpAddress }}
                 @if ($tpCity), {{ $tpCity }}@endif
-                @if ($tpPhone) &middot; Tel/Cel: {{ $tpPhone }}@endif
             </td>
+            <td class="info-lbl">Contacto:</td>
+            <td class="info-val mono">{{ $tpPhone ?: 'N/A' }}</td>
         </tr>
     </table>
 
-    {{-- 5. DOCUMENTACIÓN REGLAMENTARIA Y PÓLIZAS OBLIGATORIAS --}}
+    {{-- DOCUMENTACIÓN REGLAMENTARIA Y PÓLIZAS OBLIGATORIAS --}}
     <table class="section-banner" cellpadding="0" cellspacing="0">
-        <tr><td>5. Documentación Reglamentaria y Pólizas Obligatorias (PESV)</td></tr>
+        <tr><td>{{ $sec++ }}. Documentación Reglamentaria y Pólizas Obligatorias (PESV)</td></tr>
     </table>
     <table class="main-table" cellpadding="0" cellspacing="0">
         <thead>
             <tr>
-                <th style="width: 31%;">Tipo de Documento</th>
-                <th style="width: 24%;">N° Póliza / Certificado</th>
-                <th style="width: 25%;">Entidad Aseguradora / CDA</th>
-                <th style="width: 11%;">Vencimiento</th>
-                <th style="width: 9%;">Estado</th>
+                <th style="width: 34%;">Tipo de Documento</th>
+                <th style="width: 26%;">N° Póliza / Certificado</th>
+                <th style="width: 27%;">Entidad Aseguradora / CDA</th>
+                <th style="width: 13%;">Vencimiento</th>
             </tr>
         </thead>
         <tbody>
             @forelse ($vehicle->vehicle_documents ?? [] as $doc)
                 @php
-                    $isDocExpired = !empty($doc->expiry_date) && \Carbon\Carbon::parse($doc->expiry_date)->isPast();
                     $expiryDocFormatted = !empty($doc->expiry_date) ? \Carbon\Carbon::parse($doc->expiry_date)->format('d/m/Y') : 'N/A';
                 @endphp
                 <tr>
@@ -374,17 +405,10 @@
                     <td class="txt-center mono">{{ $doc->policy_number ?? 'N/A' }}</td>
                     <td class="uppercase">{{ $doc->issuing_entity ?? 'N/A' }}</td>
                     <td class="txt-center mono" style="font-weight: bold;">{{ $expiryDocFormatted }}</td>
-                    <td class="txt-center">
-                        @if ($isDocExpired)
-                            <span class="badge-inactive">VENCIDO</span>
-                        @else
-                            <span class="badge-active">VIGENTE</span>
-                        @endif
-                    </td>
                 </tr>
             @empty
                 <tr>
-                    <td colspan="5" class="txt-center" style="color: #64748b; font-style: italic; padding: 3.5px;">
+                    <td colspan="4" class="txt-center" style="color: #64748b; font-style: italic; padding: 4px;">
                         Sin documentos reglamentarios registrados
                     </td>
                 </tr>
@@ -392,24 +416,22 @@
         </tbody>
     </table>
 
-    {{-- 6. TARJETA(S) DE OPERACIÓN --}}
+    {{-- TARJETA(S) DE OPERACIÓN --}}
     <table class="section-banner" cellpadding="0" cellspacing="0">
-        <tr><td>6. Tarjeta(s) de Operación — Ministerio de Transporte</td></tr>
+        <tr><td>{{ $sec++ }}. Tarjeta(s) de Operación — Ministerio de Transporte</td></tr>
     </table>
     <table class="main-table" cellpadding="0" cellspacing="0">
         <thead>
             <tr>
-                <th style="width: 22%;">N° Tarjeta de Operación</th>
-                <th style="width: 45%;">Empresa de Transporte Habilitada</th>
-                <th style="width: 12%;">Expedición</th>
-                <th style="width: 12%;">Vencimiento</th>
-                <th style="width: 9%;">Estado</th>
+                <th style="width: 24%;">N° Tarjeta de Operación</th>
+                <th style="width: 48%;">Empresa de Transporte Habilitada</th>
+                <th style="width: 14%;">Expedición</th>
+                <th style="width: 14%;">Vencimiento</th>
             </tr>
         </thead>
         <tbody>
             @forelse ($vehicle->operation_cards ?? [] as $card)
                 @php
-                    $isCardExpired = !empty($card->expiration_date) && \Carbon\Carbon::parse($card->expiration_date)->isPast();
                     $expFormatted = !empty($card->expiration_date) ? \Carbon\Carbon::parse($card->expiration_date)->format('d/m/Y') : 'N/A';
                     $issueFormatted = !empty($card->issue_date) ? \Carbon\Carbon::parse($card->issue_date)->format('d/m/Y') : 'N/A';
                     $affCompany = $card->affiliated_company ?? ($vehicle->company->business_name ?? 'N/A');
@@ -419,17 +441,10 @@
                     <td class="txt-left uppercase" style="font-weight: bold;">{{ $affCompany }}</td>
                     <td class="txt-center mono">{{ $issueFormatted }}</td>
                     <td class="txt-center mono" style="font-weight: bold;">{{ $expFormatted }}</td>
-                    <td class="txt-center">
-                        @if ($isCardExpired)
-                            <span class="badge-inactive">VENCIDA</span>
-                        @else
-                            <span class="badge-active">VIGENTE</span>
-                        @endif
-                    </td>
                 </tr>
             @empty
                 <tr>
-                    <td colspan="5" class="txt-center" style="color: #64748b; font-style: italic; padding: 3.5px;">
+                    <td colspan="4" class="txt-center" style="color: #64748b; font-style: italic; padding: 4px;">
                         Sin tarjetas de operación registradas
                     </td>
                 </tr>
@@ -437,9 +452,9 @@
         </tbody>
     </table>
 
-    {{-- 7. CONVENIO DE COLABORACIÓN EMPRESARIAL --}}
+    {{-- CONVENIO DE COLABORACIÓN EMPRESARIAL --}}
     <table class="section-banner" cellpadding="0" cellspacing="0">
-        <tr><td>7. Convenio de Colaboración Empresarial</td></tr>
+        <tr><td>{{ $sec++ }}. Convenio de Colaboración Empresarial</td></tr>
     </table>
     <table class="info-table" cellpadding="0" cellspacing="0">
         @forelse ($vehicle->business_collaboration_agreements ?? [] as $agreement)
@@ -458,14 +473,14 @@
             </tr>
         @empty
             <tr>
-                <td class="info-val txt-center" colspan="4" style="color: #64748b; font-style: italic; padding: 3px;">
+                <td class="info-val txt-center" colspan="4" style="color: #64748b; font-style: italic; padding: 3.5px;">
                     No registra convenio de colaboración empresarial activo
                 </td>
             </tr>
         @endforelse
     </table>
 
-    {{-- 8. VALIDACIÓN ELECTRÓNICA QR Y CERTIFICACIÓN PESV --}}
+    {{-- VALIDACIÓN ELECTRÓNICA QR Y CERTIFICACIÓN PESV --}}
     <table class="cierre" cellpadding="0" cellspacing="0">
         <tr>
             <td>
