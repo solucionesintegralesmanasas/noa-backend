@@ -64,8 +64,12 @@ class MaintenancePdfLayoutSmokeTest extends TestCase
         preg_match_all('/stream\r?\n(.*?)endstream/s', $contenido, $m);
         $texto = null;
         foreach ($m[1] as $raw) {
-            $data = @gzuncompress(trim($raw, "\r\n"));
-            if ($data && str_contains($data, 'Generado por NOA Transportes')) {
+            $descomprimido = @gzuncompress(trim($raw, "\r\n"));
+            if (! $descomprimido) {
+                continue;
+            }
+            $data = str_replace("\0", '', $descomprimido);
+            if (str_contains($data, 'Generado por NOA Transportes')) {
                 $texto = $data;
                 break;
             }

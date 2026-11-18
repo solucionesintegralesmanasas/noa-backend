@@ -1,5 +1,7 @@
 @php
     $__fontDir = str_replace('\\', '/', resource_path('fonts/inter'));
+    $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null, 'landscape');
+    $sinMarcaVisual = !empty($letterhead ?? null) || !empty($ocultar_marca ?? false);
 @endphp
 <!DOCTYPE html>
 <html lang="es">
@@ -53,7 +55,7 @@
 
         @page {
             size: letter landscape;
-            margin: 6mm 7mm 6mm 7mm;
+            margin: {{ $esHojaMembretadaCompleta ? '26mm 8mm 26mm 8mm' : '6mm 7mm 6mm 7mm' }};
         }
 
         /* El selector universal NO debe tocar `margin`: si resetea el margen de
@@ -71,7 +73,22 @@
             font-size: 7.4pt;
             line-height: 1.15;
             color: #111827;
-            background-color: #ffffff;
+            background-color: {{ $esHojaMembretadaCompleta ? 'transparent' : '#ffffff' }};
+        }
+
+        #letterhead-page-bg {
+            position: fixed;
+            top: -26mm;
+            left: -8mm;
+            width: 279.4mm;
+            height: 215.9mm;
+            z-index: -1000;
+        }
+
+        #letterhead-page-bg img {
+            width: 100%;
+            height: 100%;
+            display: block;
         }
 
         table {
@@ -671,7 +688,11 @@
         $logoMime = $logo_mime ?? 'image/png';
     @endphp
 
-    @if (!empty($letterhead ?? null))
+    @if (!empty($letterhead ?? null) && $esHojaMembretadaCompleta)
+        <div id="letterhead-page-bg">
+            <img src="{{ $letterhead }}" alt="Membrete">
+        </div>
+    @elseif (!empty($letterhead ?? null))
         <div class="letterhead-banner">
             <img src="{{ $letterhead }}" alt="Membrete">
         </div>
@@ -680,19 +701,21 @@
     <!-- 1. ENCABEZADO INSTITUCIONAL SGC / PESV -->
     <table class="header-table" cellpadding="0" cellspacing="0">
         <tr>
-            <!-- Logotipo -->
-            <td class="header-logo-cell">
-                @if (!empty($logo))
-                    <img src="data:{{ $logoMime }};base64,{{ $logo }}" alt="Logo empresa">
-                @else
-                    <div class="logo-monogram" style="font-weight: bold; font-size: 13pt; color: #111827; line-height: 1; letter-spacing: 0.5px;">
-                        {{ $empresa_siglas ?? \App\Services\Pdf\PdfService::siglasEmpresa((string) ($empresa_transportadora ?? '')) }}
-                    </div>
-                @endif
-            </td>
+            @if (! $sinMarcaVisual)
+                <!-- Logotipo -->
+                <td class="header-logo-cell">
+                    @if (!empty($logo))
+                        <img src="data:{{ $logoMime }};base64,{{ $logo }}" alt="Logo empresa">
+                    @else
+                        <div class="logo-monogram" style="font-weight: bold; font-size: 13pt; color: #111827; line-height: 1; letter-spacing: 0.5px;">
+                            {{ $empresa_siglas ?? \App\Services\Pdf\PdfService::siglasEmpresa((string) ($empresa_transportadora ?? '')) }}
+                        </div>
+                    @endif
+                </td>
+            @endif
 
             <!-- Título Central -->
-            <td class="header-title-cell">
+            <td class="header-title-cell" @if ($sinMarcaVisual) style="width: 74%;" @endif>
                 <div class="company-name">{{ $empresa_transportadora ?? 'EMPRESA DE TRANSPORTE ESPECIAL' }}
                 </div>
                 <div class="doc-main-title">PLANILLA DE CONTROL DE PRESTACIÓN DE SERVICIOS</div>

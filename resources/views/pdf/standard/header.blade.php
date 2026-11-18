@@ -8,16 +8,19 @@
        $titulo_documento       título principal
        $subtitulo_documento    (opcional) línea normativa o de proceso
        $meta_sgc               array etiqueta => valor (CÓDIGO, VERSIÓN, FECHA, PERÍODO...) --}}
+@php($__sinLogoCelda = ! empty($ocultar_celda_logo ?? false))
 <table class="header-table" cellpadding="0" cellspacing="0">
     <tr>
-        <td class="header-logo-cell">
-            @if (!empty($logo_data_url))
-                <img src="{{ $logo_data_url }}" class="header-logo-img" alt="Logo de la empresa">
-            @else
-                <div class="logo-monogram">{{ $empresa_siglas ?? 'EMP' }}</div>
-            @endif
-        </td>
-        <td class="header-title-cell">
+        @if (! $__sinLogoCelda)
+            <td class="header-logo-cell">
+                @if (!empty($logo_data_url))
+                    <img src="{{ $logo_data_url }}" class="header-logo-img" alt="Logo de la empresa">
+                @else
+                    <div class="logo-monogram">{{ $empresa_siglas ?? 'EMP' }}</div>
+                @endif
+            </td>
+        @endif
+        <td class="header-title-cell" @if ($__sinLogoCelda) style="width: 74%;" @endif>
             <div class="company-name">{{ $empresa_transportadora ?? '' }}</div>
             @if (!empty($empresa_detalle))
                 <div class="company-sub">{{ $empresa_detalle }}</div>

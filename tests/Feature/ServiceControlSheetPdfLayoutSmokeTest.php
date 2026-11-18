@@ -207,4 +207,29 @@ class ServiceControlSheetPdfLayoutSmokeTest extends TestCase
 
         $this->assertSame(['logo' => null, 'mime' => 'image/png'], $resultado);
     }
+
+    public function test_planilla_oculta_celda_logo_en_modos_membrete_y_limpio_y_soporta_hoja_horizontal(): void
+    {
+        $pngTiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $imgHorizontal = imagecreatetruecolor(140, 100);
+        ob_start();
+        imagepng($imgHorizontal);
+        $hojaHorizontal = 'data:image/png;base64,' . base64_encode((string) ob_get_clean());
+        imagedestroy($imgHorizontal);
+
+        $datos = $this->datos();
+        $datos['logo'] = $pngTiny;
+
+        $conLogo = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['ocultar_marca' => false]))->render();
+        $this->assertStringContainsString('class="header-logo-cell"', $conLogo);
+        $this->assertStringContainsString('alt="Logo empresa"', $conLogo);
+
+        $limpio = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['ocultar_marca' => true]))->render();
+        $this->assertStringNotContainsString('class="header-logo-cell"', $limpio);
+        $this->assertStringNotContainsString('alt="Logo empresa"', $limpio);
+
+        $conHoja = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['letterhead' => $hojaHorizontal]))->render();
+        $this->assertStringContainsString('id="letterhead-page-bg"', $conHoja);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $conHoja);
+    }
 }

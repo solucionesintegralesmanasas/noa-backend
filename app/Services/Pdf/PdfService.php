@@ -662,6 +662,29 @@ class PdfService
         return $siglas !== '' ? $siglas : 'EMP';
     }
 
+    public static function esHojaMembretadaCompleta(?string $letterhead, string $orientation = 'portrait'): bool
+    {
+        if (empty($letterhead) || ! is_string($letterhead) || ! str_contains($letterhead, 'base64,')) {
+            return false;
+        }
+
+        $rawImg = @base64_decode((string) \Illuminate\Support\Str::after($letterhead, 'base64,'), true);
+        if ($rawImg === false) {
+            return false;
+        }
+
+        $dims = @getimagesizefromstring($rawImg);
+        if (! is_array($dims) || ($dims[0] ?? 0) <= 0 || ($dims[1] ?? 0) <= 0) {
+            return false;
+        }
+
+        if ($orientation === 'landscape') {
+            return $dims[0] > $dims[1] && ($dims[1] / $dims[0]) >= 0.55;
+        }
+
+        return $dims[1] > $dims[0];
+    }
+
     /**
      * Inyecta las claves de presentación (`letterhead`, `logo_fondo`,
      * `ocultar_marca`) en los datos de cualquier vista PDF.
@@ -2079,11 +2102,15 @@ class PdfService
         // solo se usa la empresa si ya viene cargada en los filtros, nunca se consulta aquí.
         $reportCompany = ($filtros['company'] ?? null) instanceof object ? $filtros['company'] : null;
         $reportLogoModel = self::logoParaMarca($reportCompany);
+        $identidad = $reportCompany ? $this->identidadEmpresa($reportCompany, $reportLogoModel) : ['logo_data_url' => null, 'empresa_siglas' => null];
 
         $pdf = Pdf::loadView('pdf.fleet.vehicle-report', $this->conMarca([
             'filas' => $filas,
             'filtros' => $filtros,
             'filtroDescripcion' => $etiquetas[$tipo] ?? strtoupper((string) $tipo),
+            'company' => $reportCompany,
+            'logo_data_url' => $identidad['logo_data_url'],
+            'empresa_siglas' => $identidad['empresa_siglas'],
         ], $reportCompany, 'reporte_vehiculos', $reportLogoModel));
         $pdf->setPaper('letter', 'portrait');
         $this->sellarPaginado($pdf);
@@ -2105,10 +2132,14 @@ class PdfService
     {
         $reportCompany = ($filtros['company'] ?? null) instanceof object ? $filtros['company'] : null;
         $reportLogoModel = self::logoParaMarca($reportCompany);
+        $identidad = $reportCompany ? $this->identidadEmpresa($reportCompany, $reportLogoModel) : ['logo_data_url' => null, 'empresa_siglas' => null];
 
         $pdf = Pdf::loadView('pdf.fleet.vehicle-activity-report', $this->conMarca([
             'filas' => $filas,
             'filtros' => $filtros,
+            'company' => $reportCompany,
+            'logo_data_url' => $identidad['logo_data_url'],
+            'empresa_siglas' => $identidad['empresa_siglas'],
         ], $reportCompany, 'reporte_actividad_vehicular', $reportLogoModel));
         $pdf->setPaper('letter', 'portrait');
         $this->sellarPaginado($pdf);

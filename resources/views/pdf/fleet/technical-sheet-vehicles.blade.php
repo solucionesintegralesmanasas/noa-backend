@@ -49,6 +49,8 @@
     $qrBase64 = $data['qrcode'] ?? null;
     $qrMime = $data['qrcode_mime'] ?? 'image/png';
     $sec = 1;
+    $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null);
+    $sinMarcaVisual = !empty($letterhead ?? null) || !empty($ocultar_marca ?? false);
 @endphp
 <!DOCTYPE html>
 <html lang="es">
@@ -57,10 +59,33 @@
     <title>{{ $title ?? 'Ficha Técnica Vehículo' }}</title>
     @include('pdf.standard.styles', ['orientation' => $orientation, 'pdfMargen' => 'denso'])
     <style>
+        @if ($esHojaMembretadaCompleta)
+        @page {
+            size: letter {{ $orientation }};
+            margin: 32.5mm 10mm 28mm 10mm;
+        }
+        @endif
+
         /* Escala legible de impresión Carta Vertical; se expande ligeramente cuando no hay sección mecánica */
         body {
             font-size: {{ $tieneMecanicas ? '7.3pt' : '7.7pt' }};
             line-height: {{ $tieneMecanicas ? '1.16' : '1.22' }};
+            background-color: {{ $esHojaMembretadaCompleta ? 'transparent' : '#ffffff' }};
+        }
+
+        #letterhead-page-bg {
+            position: fixed;
+            top: -32.5mm;
+            left: -10mm;
+            width: 215.9mm;
+            height: 279.4mm;
+            z-index: -1000;
+        }
+
+        #letterhead-page-bg img {
+            width: 100%;
+            height: 100%;
+            display: block;
         }
 
         #watermark {
@@ -185,6 +210,20 @@
         .txt-left { text-align: left !important; }
         .txt-center { text-align: center !important; }
         .uppercase { text-transform: uppercase; }
+
+        @if ($esHojaMembretadaCompleta)
+        .meta-table td { padding: 3px 6px !important; }
+        .header-table { margin-bottom: 3px; }
+        .section-banner { margin-top: 2.5px; }
+        .section-banner td { padding: 1.8px 6px; font-size: 6.7pt; }
+        .info-table td { padding: 1.7px 5px; font-size: 6.8pt; line-height: 1.12; }
+        .info-lbl { font-size: 6.1pt; }
+        .main-table thead th { padding: 2px 4px; font-size: 6.2pt; }
+        .main-table tbody td { padding: 1.7px 4.5px; font-size: 6.7pt; line-height: 1.12; }
+        .qr-footer-table { margin-top: 3px; }
+        .qr-footer-table td { padding: 3px 7px; }
+        .qr-box-cell img { width: 48px !important; height: 48px !important; }
+        @endif
     </style>
 </head>
 <body>
@@ -195,14 +234,19 @@
         </div>
     @endif
 
-    @if (!empty($letterhead ?? null))
+    @if (!empty($letterhead ?? null) && $esHojaMembretadaCompleta)
+        <div id="letterhead-page-bg">
+            <img src="{{ $letterhead }}" alt="Membrete" />
+        </div>
+    @elseif (!empty($letterhead ?? null))
         <div id="letterhead-banner">
             <img src="{{ $letterhead }}" alt="Membrete" />
         </div>
     @endif
 
     @include('pdf.standard.header', [
-        'logo_data_url' => $logoResuelto,
+        'logo_data_url' => $sinMarcaVisual ? null : $logoResuelto,
+        'ocultar_celda_logo' => $sinMarcaVisual,
         'empresa_siglas' => $siglasResueltas,
         'empresa_transportadora' => $companyName,
         'empresa_detalle' => $companyDetalle,

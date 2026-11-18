@@ -1,30 +1,28 @@
 <!DOCTYPE html>
 <html lang="es">
 
+@php
+    $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null);
+@endphp
+
 <head>
     <meta charset="UTF-8">
     <title>Hoja de Vida Vehicular - {{ $data['vehicle']['vehicle_license_plate'] ?? 'N/A' }}</title>
+    @include('pdf.standard.styles', ['orientation' => 'portrait'])
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-        }
-
         @page {
             size: letter;
-            margin: 0cm 0cm;
+            margin: {{ $esHojaMembretadaCompleta ? '3.4cm 1.4cm 3.6cm 1.4cm' : '12mm 14mm 12mm 14mm' }};
         }
 
         body {
-            margin-top: 1.5cm;
-            margin-bottom: 1.0cm;
-            margin-left: 1.5cm;
-            margin-right: 1.5cm;
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 9pt;
-            line-height: 1.0;
-            color: #000;
-            background: #fff;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 8.5pt;
+            line-height: 1.15;
+            color: #111827;
+            background: {{ $esHojaMembretadaCompleta ? 'transparent' : '#fff' }};
         }
 
         #watermark {
@@ -42,66 +40,58 @@
             opacity: 0.15;
         }
 
+        #letterhead-page-bg {
+            position: fixed;
+            top: -3.4cm;
+            left: -1.4cm;
+            width: 21.59cm;
+            height: 27.94cm;
+            z-index: -1000;
+        }
+
+        #letterhead-page-bg img {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #letterhead-banner {
+            text-align: center;
+            margin-bottom: 6px;
+        }
+
+        #letterhead-banner img {
+            width: 100%;
+            height: auto;
+            max-height: 2.2cm;
+            display: block;
+        }
+
         .page {
             /* La leyenda la estampa el canvas de DomPDF (sellarPaginado). */
-        }
-
-        .page {
             width: 100%;
-        }
-
-        /* HEADER */
-        .header-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 4px;
-        }
-
-        .header-table td {
-            border: none;
-            padding: 3px 5px;
-            vertical-align: middle;
-        }
-
-        .title-cell {
-            text-align: center;
-        }
-
-        .title-cell .doc-title {
-            font-size: 14pt;
-            font-weight: bold;
-        }
-
-        .title-cell .responsible {
-            font-size: 9pt;
-            margin-top: 2px;
-        }
-
-        .meta-cell {
-            width: 120px;
-            font-size: 9pt;
-        }
-
-        .meta-cell div {
-            margin-bottom: 2px;
         }
 
         /* SECTION LABEL */
         .section-header {
             width: 100%;
             border-collapse: collapse;
+            margin-top: 4px;
             margin-bottom: 0;
+            page-break-after: avoid;
         }
 
         .section-header td {
-            border: 0.5px solid #000;
-            font-weight: bold;
-            font-size: 9pt;
-            text-align: center;
-            padding: 3px;
+            border: 1px solid var(--pdf-borde);
+            border-left: 3.5px solid #111827;
+            font-weight: 700;
+            font-size: 7.5pt;
+            text-align: left;
+            padding: 3px 7px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            background-color: #f5f5f5;
+            letter-spacing: 0.25px;
+            background-color: var(--pdf-banda);
+            color: var(--pdf-banda-texto);
         }
 
         /* DATA TABLE */
@@ -119,7 +109,8 @@
         }
 
         .data-table .label {
-            font-weight: bold;
+            font-weight: 700;
+            background-color: var(--pdf-tenue);
             width: 120px;
             white-space: nowrap;
         }
@@ -136,13 +127,14 @@
         }
 
         .docs-table th {
-            border: 0.5px solid #000;
+            border: 0.5px solid #1f2937;
             padding: 3px 5px;
-            font-size: 9pt;
-            font-weight: bold;
+            font-size: 8pt;
+            font-weight: 700;
             text-align: center;
             text-transform: uppercase;
-            background-color: #f9f9f9;
+            background-color: var(--pdf-encabezado);
+            color: var(--pdf-banda-texto);
         }
 
         .docs-table td {
@@ -227,7 +219,7 @@
     </style>
 </head>
 
-<body>
+<body class="{{ !empty($letterhead ?? null) ? 'with-letterhead' : '' }}">
     @php
         $v = $data['vehicle'] ?? [];
         $brand = $data['brand'] ?? null;
@@ -308,34 +300,43 @@
             ($businessAgreements->isNotEmpty() ? 1 : 0);
     @endphp
 
-    @if (!empty($letterhead ?? null))
-        <div style="text-align:center;margin-bottom:6px;">
-            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+    @if (!empty($letterhead ?? null) && $esHojaMembretadaCompleta)
+        <div id="letterhead-page-bg">
+            <img src="{{ $letterhead }}" alt="Membrete" />
+        </div>
+    @elseif (!empty($letterhead ?? null))
+        <div id="letterhead-banner">
+            <img src="{{ $letterhead }}" alt="Membrete" />
         </div>
     @endif
     @php
         $fondo_hv = (!empty($ocultar_marca ?? false) || !empty($letterhead ?? null)) ? null : ($logo_fondo ?? $images['logo'] ?? null);
+        $logoCabecera = (empty($letterhead ?? null) && empty($ocultar_marca ?? false) && !empty($images['logo'] ?? null))
+            ? 'data:image/png;base64,' . $images['logo']
+            : null;
+        $siglasCabecera = \App\Services\Pdf\PdfService::siglasEmpresa((string) $companyName);
+        $nitEmpresaHv = $company->document_number ?? null;
     @endphp
     @if (!empty($fondo_hv))
         <div id="watermark">
-            <img src="data:image/png;base64,{{ $fondo_hv }}" />
+            <img src="data:image/png;base64,{{ $fondo_hv }}" alt="Marca de agua" />
         </div>
     @endif
 
-    <!-- MEMBRETE -->
-    <table class="header-table">
-        <tr>
-            <td style="width: 140px; text-align: left; vertical-align: middle; padding: 5px;">
-                @if (!empty($images['logo']))
-                    <img class="logo-header" src="data:image/png;base64,{{ $images['logo'] }}" alt="Logo">
-                @endif
-            </td>
-            <td class="title-cell" style="text-align: center; vertical-align: middle;">
-                <div class="doc-title">HOJA DE VIDA VEHICULAR</div>
-            </td>
-            <td style="width: 140px;"></td>
-        </tr>
-    </table>
+    @include('pdf.standard.header', [
+        'ocultar_celda_logo' => !empty($letterhead ?? null) || !empty($ocultar_marca ?? false),
+        'logo_data_url' => $logoCabecera,
+        'empresa_siglas' => $siglasCabecera,
+        'empresa_transportadora' => $companyName,
+        'empresa_detalle' => !empty($nitEmpresaHv) ? 'NIT ' . $nitEmpresaHv : null,
+        'titulo_documento' => 'HOJA DE VIDA VEHICULAR',
+        'subtitulo_documento' => 'HISTORIAL TÉCNICO, DOCUMENTAL Y OPERATIVO DE FLOTA',
+        'meta_sgc' => [
+            'CÓDIGO' => 'HVV-' . now()->format('Y'),
+            'PLACA' => $plate,
+            'FECHA' => $generationDate,
+        ],
+    ])
 
     <table class="section-header">
         <tr>
@@ -370,14 +371,14 @@
         </tr>
     </table>
 
-    <table class="section-header no-border-table">
+    <table class="section-header">
         <tr>
             <td>I. Naturaleza y Alcance del Registro</td>
         </tr>
     </table>
     <table class="data-table">
         <tr>
-            <td style="padding: 10px; text-align: justify; line-height: 1.0;">
+            <td style="padding: 8px 10px; text-align: justify; line-height: 1.25;">
                 <p style="margin-bottom: 8px;">La presente Hoja de Vida Vehicular constituye el instrumento oficial de
                     registro técnico y administrativo del vehículo identificado con placa
                     <strong>{{ $plate }}</strong>, propiedad de <strong>{{ $previousOwner }}</strong>.
@@ -392,14 +393,14 @@
         </tr>
     </table>
 
-    <table class="section-header no-border-table">
+    <table class="section-header">
         <tr>
             <td>II. Historial Previo a la Vinculación</td>
         </tr>
     </table>
     <table class="data-table">
         <tr>
-            <td style="padding: 10px; text-align: justify; line-height: 1.0;">
+            <td style="padding: 8px 10px; text-align: justify; line-height: 1.25;">
                 <p style="margin-bottom: 8px;">El vehículo ingresó a la flota el <strong>{{ $linkageDate }}</strong>
                     bajo la titularidad de <strong>{{ $previousOwner }}</strong>. Al momento de su alta en el sistema,
                     la documentación aportada no reporta novedades que comprometan la integridad estructural del chasis
@@ -471,12 +472,12 @@
         @endforeach
     </table>
 
-    <table class="section-header no-border-table">
+    <table class="section-header">
         <tr>
             <td>IV. Registro de Inspecciones Técnicas</td>
         </tr>
     </table>
-    <table class="docs-table no-border-table">
+    <table class="docs-table">
         @if ($inspections->isNotEmpty())
             <tr>
                 <th>Fecha</th>
@@ -505,12 +506,12 @@
         @endif
     </table>
 
-    <table class="section-header no-border-table">
+    <table class="section-header">
         <tr>
             <td>V. Programa de Mantenimientos Recientes</td>
         </tr>
     </table>
-    <table class="docs-table no-border-table">
+    <table class="docs-table">
         @if ($maintenances->isNotEmpty())
             <tr>
                 <th>Tipo de Intervención</th>
@@ -541,12 +542,12 @@
     </table>
 
     @if ($affiliateCharges->isNotEmpty())
-        <table class="section-header no-border-table">
+        <table class="section-header">
             <tr>
                 <td>VI. Cargos de Administración y Afiliación</td>
             </tr>
         </table>
-        <table class="docs-table no-border-table">
+        <table class="docs-table">
             <tr>
                 <th>Concepto / Referencia</th>
                 <th>Último Pago</th>
@@ -566,7 +567,7 @@
         </table>
     @endif
 
-    <table class="section-header no-border-table">
+    <table class="section-header">
         <tr>
             <td>EVALUACIÓN TÉCNICA GENERAL DEL VEHÍCULO</td>
         </tr>

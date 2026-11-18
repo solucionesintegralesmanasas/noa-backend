@@ -155,4 +155,28 @@ class PdfBaseEstandarTest extends TestCase
         $this->assertStringNotContainsString('#1e3a8a', $html);
         $this->assertStringNotContainsString("'Courier'", $html);
     }
+
+    public function test_deteccion_hoja_membretada_completa_distingue_orientacion_y_banner(): void
+    {
+        $aBase64 = function (int $w, int $h): string {
+            $img = imagecreatetruecolor($w, $h);
+            ob_start();
+            imagepng($img);
+            $b64 = base64_encode((string) ob_get_clean());
+            imagedestroy($img);
+
+            return 'data:image/png;base64,' . $b64;
+        };
+
+        $vertical = $aBase64(100, 140);
+        $banner = $aBase64(300, 60);
+        $hojaHorizontal = $aBase64(140, 100);
+
+        $this->assertTrue(PdfService::esHojaMembretadaCompleta($vertical, 'portrait'));
+        $this->assertFalse(PdfService::esHojaMembretadaCompleta($banner, 'portrait'));
+        $this->assertTrue(PdfService::esHojaMembretadaCompleta($hojaHorizontal, 'landscape'));
+        $this->assertFalse(PdfService::esHojaMembretadaCompleta($banner, 'landscape'));
+        $this->assertFalse(PdfService::esHojaMembretadaCompleta($vertical, 'landscape'));
+        $this->assertFalse(PdfService::esHojaMembretadaCompleta(null));
+    }
 }
