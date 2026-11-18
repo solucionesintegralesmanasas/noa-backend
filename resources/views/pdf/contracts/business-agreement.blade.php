@@ -1,30 +1,27 @@
+@php
+    $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null);
+@endphp
 <!DOCTYPE html>
 <html lang="es">
 
 <head>
     <meta charset="UTF-8">
     <title>Convenio de Colaboración Empresarial - {{ $data['agreement_internal_id'] }}</title>
+    @include('pdf.standard.styles', ['orientation' => 'portrait', 'pdfMargen' => 'cartas'])
     <style>
         @page {
-            size: letter;
-            margin: 0cm 0cm;
+            size: letter portrait;
+            margin: {{ $esHojaMembretadaCompleta ? '34mm 20mm 32mm 20mm' : '18mm 20mm 18mm 20mm' }};
         }
 
-        /**
-        * Define los márgenes reales del contenido de tu PDF
-        * Aquí arreglarás los márgenes del encabezado y pie de página
-        * De tu imagen de fondo.
-        **/
         body {
-            margin-top: 2.54cm;
-            margin-bottom: 2.54cm;
-            margin-left: 2.54cm;
-            margin-right: 2.54cm;
-            font-family: Arial, sans-serif;
-            font-size: 10px;
+            margin: 0;
             padding: 0;
-            color: #000;
-            background-color: #fff;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 9.5pt;
+            line-height: 1.35;
+            color: #111827;
+            background-color: {{ $esHojaMembretadaCompleta ? 'transparent' : '#ffffff' }};
         }
 
         #watermark {
@@ -39,16 +36,40 @@
         #watermark img {
             width: 100%;
             height: auto;
-            opacity: 0.15;
+            opacity: 0.12;
+        }
+
+        #letterhead-page-bg {
+            position: fixed;
+            top: -34mm;
+            left: -20mm;
+            width: 215.9mm;
+            height: 279.4mm;
+            z-index: -1000;
+        }
+
+        #letterhead-page-bg img {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #letterhead-banner {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        #letterhead-banner img {
+            width: 100%;
+            height: auto;
+            max-height: 2.2cm;
+            display: block;
         }
 
         .main-container {
             width: 100%;
-            border: 1.2px solid #000;
-            border-radius: 8px;
-            overflow: hidden;
-            border-collapse: separate;
-            margin-bottom: 4px;
+            border: 1px solid #1f2937;
+            margin-bottom: 8px;
         }
 
         table {
@@ -58,16 +79,19 @@
         }
 
         td {
-            border: 0.5px solid #000;
-            padding: 2px 4px;
+            border: 0.6px solid #9ca3af;
+            padding: 3.5px 6px;
             vertical-align: middle;
             word-wrap: break-word;
+            font-size: 8.5pt;
         }
 
         .label {
-            font-weight: bold;
-            font-size: 10px;
+            font-weight: 700;
+            font-size: 7.8pt;
             text-transform: uppercase;
+            background-color: var(--pdf-tenue);
+            color: #111827;
         }
 
         .text-center {
@@ -82,19 +106,14 @@
             text-align: justify;
         }
 
-        h3 {
-            font-size: 13px;
-            margin: 2px 0;
-        }
-
-        .header-table {
+        .agreement-header-table {
             width: 100%;
             border-collapse: collapse;
             table-layout: fixed;
-            margin-bottom: 4px;
+            margin-bottom: 8px;
         }
 
-        .header-table td {
+        .agreement-header-table td {
             width: 33.33%;
             vertical-align: middle;
             text-align: center;
@@ -108,22 +127,34 @@
             max-height: 45px;
             display: inline-block;
         }
+
+        .agreement-clause-text {
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 9.5pt;
+            line-height: 1.38;
+            margin-bottom: 8px;
+            color: #111827;
+        }
     </style>
 </head>
 
 <body>
-    @if (!empty($letterhead ?? null))
-        <div style="text-align:center;margin-bottom:6px;">
-            <img src="{{ $letterhead }}" alt="Membrete" style="max-width:100%;height:auto;" />
+    @if (!empty($letterhead ?? null) && $esHojaMembretadaCompleta)
+        <div id="letterhead-page-bg">
+            <img src="{{ $letterhead }}" alt="Membrete" />
+        </div>
+    @elseif (!empty($letterhead ?? null))
+        <div id="letterhead-banner">
+            <img src="{{ $letterhead }}" alt="Membrete" />
         </div>
     @endif
     @if (empty($ocultar_marca ?? false) && empty($letterhead ?? null) && !empty($logo_fondo ?? $data['logo'] ?? null))
         <div id="watermark">
-            <img src="data:image/png;base64,{{ $logo_fondo ?? $data['logo'] }}" />
+            <img src="data:image/png;base64,{{ $logo_fondo ?? $data['logo'] }}" alt="Marca de agua" />
         </div>
     @endif
 
-    <table class="header-table">
+    <table class="agreement-header-table">
         <tr>
             <td>
                 @if (!empty($data['transpor']))
@@ -136,18 +167,18 @@
                 @endif
             </td>
             <td>
-                @if (!empty($data['logo']))
+                @if (empty($letterhead ?? null) && empty($ocultar_marca ?? false) && !empty($data['logo']))
                     <img class="logo-header" src="data:image/png;base64,{{ $data['logo'] }}" alt="Logo">
                 @endif
             </td>
         </tr>
     </table>
 
-    <div style="text-align: center; margin-bottom: 8px; background-color: #f5f5f5; padding: 5px; border: 1.2px solid #000; border-radius: 6px;">
-        <h3 style="font-size: 14pt; margin: 2px 0;">CONVENIO DE COLABORACIÓN EMPRESARIAL</h3>
+    <div style="text-align: center; margin-bottom: 10px; background-color: var(--pdf-banda); padding: 5px 8px; border: 1px solid #1f2937; border-left: 3.5px solid #111827;">
+        <div style="font-size: 11pt; font-weight: 700; color: #000000; text-transform: uppercase; letter-spacing: 0.3px;">CONVENIO DE COLABORACIÓN EMPRESARIAL</div>
     </div>
 
-    <div class="text-justify" style="font-family: Arial, sans-serif; font-size: 12pt; line-height: 1.0; margin-bottom: 8px;">
+    <div class="text-justify agreement-clause-text">
         Entre los suscritos <strong>{{ $data['legal_representative_name'] }}</strong>, mayor de edad,
         identificado con la
         cédula de ciudadanía número {{ $data['document_number'] }} expedida en
@@ -186,36 +217,36 @@
         <table>
             <tr>
                 <td class="label text-center" colspan="4"
-                    style="background-color: #e9e9e9;">DATOS DEL VEHÍCULO</td>
+                    style="background-color: var(--pdf-encabezado); border-bottom: 1.2px solid #1f2937;">DATOS DEL VEHÍCULO</td>
             </tr>
             <tr class="text-center">
                 <td class="label">PLACA</td>
-                <td style="font-size: 11px;"><strong>{{ $data['vehicle']['vehicle_license_plate'] ?? 'N/A' }}</strong></td>
+                <td style="font-size: 8.5pt;"><strong>{{ $data['vehicle']['vehicle_license_plate'] ?? 'N/A' }}</strong></td>
                 <td class="label">MODELO</td>
-                <td style="font-size: 11px;">{{ $data['vehicle']['vehicle_model'] ?? 'N/A' }}</td>
+                <td style="font-size: 8.5pt;">{{ $data['vehicle']['vehicle_model'] ?? 'N/A' }}</td>
             </tr>
             <tr class="text-center">
                 <td class="label">MARCA</td>
-                <td style="font-size: 11px;">{{ $data['vehicle']['vehicle_brand'] ?? 'N/A' }}</td>
+                <td style="font-size: 8.5pt;">{{ $data['vehicle']['vehicle_brand'] ?? 'N/A' }}</td>
                 <td class="label">LÍNEA</td>
-                <td style="font-size: 11px;">{{ $data['vehicle']['vehicle_line'] ?? 'N/A' }}</td>
+                <td style="font-size: 8.5pt;">{{ $data['vehicle']['vehicle_line'] ?? 'N/A' }}</td>
             </tr>
             <tr class="text-center">
                 <td class="label">CAPACIDAD</td>
-                <td style="font-size: 11px;">{{ $data['vehicle']['vehicle_capacity'] ?? 'N/A' }}</td>
+                <td style="font-size: 8.5pt;">{{ $data['vehicle']['vehicle_capacity'] ?? 'N/A' }}</td>
                 <td class="label">TARJETA OPERACIÓN</td>
-                <td style="font-size: 11px;">{{ $data['vehicle']['operational_card_number'] ?? 'N/A' }}</td>
+                <td style="font-size: 8.5pt;">{{ $data['vehicle']['operational_card_number'] ?? 'N/A' }}</td>
             </tr>
             <tr class="text-center">
                 <td class="label" colspan="2">VIGENCIA TARJETA DE OPERACIÓN</td>
-                <td colspan="2" style="font-size: 11px;">
+                <td colspan="2" style="font-size: 8.5pt;">
                     {{ $data['vehicle']['expiration_date'] ? \Carbon\Carbon::parse($data['vehicle']['expiration_date'])->format('d/m/Y') : 'N/A' }}
                 </td>
             </tr>
         </table>
     </div>
 
-    <div class="text-justify" style="font-family: Arial, sans-serif; font-size: 12pt; line-height: 1.0; margin-bottom: 8px;">
+    <div class="text-justify agreement-clause-text">
         <strong>SEGUNDA - DURACIÓN:</strong> El presente convenio de colaboración empresarial tendrá una
         duración
         de 5 (cinco) meses contados a partir de la fecha de firma el mismo pero limitado a los demás
@@ -280,24 +311,24 @@
         <strong>{{ \Carbon\Carbon::parse($data['signing_date'])->year }}</strong>.
     </div>
 
-    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+    <table style="width: 100%; border-collapse: collapse; margin-top: 16px; page-break-inside: avoid;">
         <tr>
-            <td style="border: none; width: 50%; padding: 5px;" class="text-center">
-                <div style="height: 45px; display: flex; align-items: center; justify-content: center;">
+            <td style="border: none; width: 50%; padding: 5px; vertical-align: bottom;" class="text-center">
+                <div style="height: 45px; text-align: center;">
                     @if (!empty($data['firma']))
                         <img src="data:image/png;base64,{{ $data['firma'] }}"
                             style="max-height: 40px; max-width: 150px; display: block; margin: 0 auto;">
                     @endif
                 </div>
-                <div style="border-top: 1px solid #000; margin: 0 40px; padding-top: 5px; font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.0;">
+                <div style="border-top: 1px solid #1f2937; margin: 0 30px; padding-top: 4px; font-family: 'Inter', 'Helvetica', 'Arial', sans-serif; font-size: 9pt; line-height: 1.25;">
                     <strong>{{ $data['legal_representative_name'] }}</strong><br>
                     C.C. {{ $data['document_number'] }}<br>
                     TRANSPORTADOR CONTRACTUAL
                 </div>
             </td>
-            <td style="border: none; width: 50%; padding: 5px;" class="text-center">
+            <td style="border: none; width: 50%; padding: 5px; vertical-align: bottom;" class="text-center">
                 <div style="height: 45px;"></div>
-                <div style="border-top: 1px solid #000; margin: 0 40px; padding-top: 5px; font-family: Arial, sans-serif; font-size: 11pt; line-height: 1.0;">
+                <div style="border-top: 1px solid #1f2937; margin: 0 30px; padding-top: 4px; font-family: 'Inter', 'Helvetica', 'Arial', sans-serif; font-size: 9pt; line-height: 1.25;">
                     <strong>{{ $data['rep_name'] }}</strong><br>
                     C.C. {{ $data['rep_document_id'] }}<br>
                     TRANSPORTADOR DE HECHO

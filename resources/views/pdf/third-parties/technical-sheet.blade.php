@@ -1,3 +1,7 @@
+@php
+    $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null);
+    $__fontDir = str_replace('\\', '/', resource_path('fonts/inter'));
+@endphp
 <!DOCTYPE html>
 <html lang="es">
 
@@ -6,6 +10,31 @@
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>Ficha Técnica del Conductor - PDF NOA</title>
     <style>
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 400;
+            src: url('{{ $__fontDir }}/Inter-Regular.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 500;
+            src: url('{{ $__fontDir }}/Inter-Medium.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 600;
+            src: url('{{ $__fontDir }}/Inter-SemiBold.ttf') format('truetype');
+        }
+        @font-face {
+            font-family: 'Inter';
+            font-style: normal;
+            font-weight: 700;
+            src: url('{{ $__fontDir }}/Inter-Bold.ttf') format('truetype');
+        }
+
         /* Configuración de página Carta (Letter Portrait: 8.5in x 11in).
            La hoja completa es la página: el padding del "sheet" hace de margen. */
         @page {
@@ -14,10 +43,10 @@
         }
 
         body {
-            font-family: Arial, Helvetica, sans-serif;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-size: 8pt;
             line-height: 1.35;
-            color: #000000;
+            color: #111827;
             margin: 0;
             padding: 0;
             background: #ffffff;
@@ -27,15 +56,41 @@
             word-wrap: break-word;
         }
 
+        #letterhead-page-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 21.59cm;
+            height: 27.94cm;
+            z-index: -1000;
+        }
+
+        #letterhead-page-bg img {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #letterhead-banner {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        #letterhead-banner img {
+            width: 100%;
+            height: auto;
+            max-height: 2.2cm;
+            display: block;
+        }
+
         /* Contenedor de hoja física Letter: ocupa el alto completo de la página.
            `width: auto` (no 100%) para que el padding no desborde el ancho carta:
            DomPDF no soporta box-sizing y 100% + 28mm se salía de la hoja. */
         .sheet-preview {
             width: auto;
-            min-height: 10in;
             margin: 0;
-            background: #ffffff;
-            padding: 12mm 14mm 12mm 14mm;
+            background: {{ $esHojaMembretadaCompleta ? 'transparent' : '#ffffff' }};
+            padding: {{ $esHojaMembretadaCompleta ? '34mm 12mm 32mm 12mm' : '9mm 12mm 9mm 12mm' }};
             position: relative;
         }
 
@@ -60,14 +115,14 @@
         .header-box {
             width: 100%;
             border: 1.5px solid #0f172a;
-            margin-bottom: 14px;
+            margin-bottom: 8px;
             border-collapse: collapse;
         }
 
         .header-logo-cell {
             width: 22%;
             text-align: center;
-            padding: 11px 6px;
+            padding: 6px 6px;
             border-right: 1.5px solid #0f172a;
             background-color: #ffffff;
             vertical-align: middle;
@@ -76,7 +131,7 @@
         .header-title-cell {
             width: 54%;
             text-align: center;
-            padding: 11px 10px;
+            padding: 6px 10px;
             border-right: 1.5px solid #0f172a;
             vertical-align: middle;
         }
@@ -124,9 +179,9 @@
         }
 
         .meta-table td {
-            padding: 12px 6px;
+            padding: 6px 6px;
             font-size: 7.2pt;
-            border-bottom: 1px solid #cbd5e1;
+            border-bottom: 1px solid #9ca3af;
         }
 
         .meta-table tr:last-child td {
@@ -135,69 +190,69 @@
 
         .meta-label {
             font-weight: bold;
-            color: #000000;
+            color: #111827;
             width: 50%;
-            background-color: #f8fafc;
-            border-right: 1px solid #94a3b8;
+            background-color: #f0f0f0;
+            border-right: 1px solid #9ca3af;
             text-transform: uppercase;
         }
 
         .meta-val {
             color: #000000;
             text-align: center;
-            font-family: Arial, Helvetica, sans-serif;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-weight: bold;
         }
 
         /* Títulos de Sección */
         .section-banner {
-            background-color: #f8fafc;
+            background-color: #d8d8d8;
             color: #000000;
-            font-size: 8pt;
+            font-size: 7.8pt;
             font-weight: bold;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 7px 8px;
-            margin-top: 11px;
-            margin-bottom: 8px;
-            border: 1px solid #94a3b8;
-            border-left: 4px solid #475569;
-            border-radius: 2px;
+            letter-spacing: 0.4px;
+            padding: 4.5px 8px;
+            margin-top: 7px;
+            margin-bottom: 5px;
+            border: 1px solid #1f2937;
+            border-left: 3.5px solid #111827;
         }
 
         .section-banner-alt {
-            background-color: #f8fafc;
+            background-color: #d8d8d8;
         }
 
         /* Grilla de Datos Personales con Foto */
         .personal-table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 12px;
+            margin-bottom: 7px;
         }
 
         .data-grid-table {
             width: 100%;
             border-collapse: collapse;
-            border: 1px solid #94a3b8;
+            border: 1px solid #1f2937;
         }
 
         .data-grid-table td {
-            padding: 11px 6px;
-            line-height: 15px;
-            font-size: 7.8pt;
-            border: 1px solid #cbd5e1;
+            padding: 5.5px 6px;
+            line-height: 12.5px;
+            font-size: 7.5pt;
+            border: 1px solid #9ca3af;
         }
 
         .field-label {
-            background-color: #f8fafc;
+            background-color: #f7f7f7;
             font-weight: bold;
-            color: #000000;
+            color: #111827;
             text-transform: uppercase;
             font-size: 7.2pt;
         }
 
         .data-grid-table td.field-label {
-            border-right: 1px solid #94a3b8;
+            border-right: 1px solid #9ca3af;
         }
 
         .field-value {
@@ -205,8 +260,8 @@
         }
 
         .mono-value {
-            font-family: Arial, Helvetica, sans-serif;
-            font-size: 8.5pt;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 8.3pt;
             color: #000000;
         }
 
@@ -218,12 +273,11 @@
         }
 
         .photo-box {
-            border: 1.5px solid #0f172a;
+            border: 1.5px solid #1f2937;
             height: 150px;
-            background-color: #f8fafc;
+            background-color: #f7f7f7;
             text-align: center;
             vertical-align: middle;
-            border-radius: 2px;
             overflow: hidden;
             display: table;
             width: 100%;
@@ -245,28 +299,28 @@
         .table-data {
             width: 100%;
             border-collapse: collapse;
-            border: 1px solid #94a3b8;
-            margin-bottom: 9px;
-            font-size: 7.5pt;
+            border: 1px solid #1f2937;
+            margin-bottom: 6px;
+            font-size: 7.3pt;
         }
 
         .table-data th {
-            background-color: #f8fafc;
+            background-color: #f0f0f0;
             color: #000000;
             font-weight: bold;
             text-transform: uppercase;
-            padding: 13px 5px;
-            border: 1px solid #94a3b8;
-            border-bottom: 2px solid #475569;
-            font-size: 7.2pt;
-            line-height: 15px;
+            padding: 6px 5px;
+            border: 1px solid #9ca3af;
+            border-bottom: 1.5px solid #1f2937;
+            font-size: 7pt;
+            line-height: 12px;
             text-align: center;
         }
 
         .table-data td {
-            padding: 11px 5px;
-            line-height: 15px;
-            border: 1px solid #cbd5e1;
+            padding: 6px 5px;
+            line-height: 12px;
+            border: 1px solid #9ca3af;
             color: #000000;
             text-align: center;
         }
@@ -277,7 +331,6 @@
             color: #000000;
             font-weight: bold;
             padding: 1px 5px;
-            border-radius: 3px;
             display: inline-block;
             font-size: 6.8pt;
             border: 1px solid #86efac;
@@ -289,7 +342,6 @@
             color: #000000;
             font-weight: bold;
             padding: 1px 5px;
-            border-radius: 3px;
             display: inline-block;
             font-size: 6.8pt;
             border: 1px solid #fca5a5;
@@ -297,55 +349,54 @@
         }
 
         .badge-highlight {
-            background-color: #e5e7eb;
+            background-color: #f0f0f0;
             color: #000000;
             font-weight: bold;
             padding: 1px 5px;
-            border-radius: 3px;
             display: inline-block;
             font-size: 6.8pt;
-            border: 1px solid #93c5fd;
+            border: 1px solid #9ca3af;
         }
 
         /* Fila de Seguridad Social Combinada 2x2 */
         .ss-table {
             width: 100%;
             border-collapse: collapse;
-            border: 1px solid #94a3b8;
-            margin-bottom: 8px;
+            border: 1px solid #1f2937;
+            margin-bottom: 5px;
         }
 
         .ss-table th {
-            background-color: #f8fafc;
-            border: 1px solid #94a3b8;
-            border-bottom: 2px solid #475569;
-            padding: 10px 5px;
-            font-size: 7pt;
-            line-height: 15px;
+            background-color: #f0f0f0;
+            border: 1px solid #9ca3af;
+            border-bottom: 1.5px solid #1f2937;
+            padding: 6px 5px;
+            font-size: 6.9pt;
+            line-height: 12px;
             font-weight: bold;
             text-transform: uppercase;
             color: #000000;
         }
 
         .ss-table td {
-            border: 1px solid #cbd5e1;
-            padding: 11px 5px;
-            line-height: 15px;
-            font-size: 7.3pt;
+            border: 1px solid #9ca3af;
+            padding: 5.5px 5px;
+            line-height: 12px;
+            font-size: 7.1pt;
             text-align: center;
         }
 
         .ss-entity-title {
             font-weight: bold;
-            color: #000000;
+            color: #111827;
             font-size: 7.2pt;
             text-align: left !important;
             padding-left: 6px !important;
-            background-color: #f8fafc;
+            background-color: #f7f7f7;
         }
 
         .ss-table td.ss-entity-title {
-            border-right: 1px solid #94a3b8;
+            border-right: 1px solid #9ca3af;
         }
 
         /* Firmas y Controles */
@@ -417,7 +468,19 @@
 
 <body>
 
+    @if (!empty($letterhead ?? null) && $esHojaMembretadaCompleta)
+        <div id="letterhead-page-bg">
+            <img src="{{ $letterhead }}" alt="Membrete" />
+        </div>
+    @endif
+
     <div class="sheet-preview">
+
+        @if (!empty($letterhead ?? null) && ! $esHojaMembretadaCompleta)
+            <div id="letterhead-banner">
+                <img src="{{ $letterhead }}" alt="Membrete" />
+            </div>
+        @endif
 
         @php
             $fmtFecha = fn($fecha) => $fecha ? \Carbon\Carbon::parse($fecha)->format('d/m/Y') : '';
@@ -515,23 +578,21 @@
             <tbody>
                 <tr>
                     <!-- Logo Corporativo -->
-                    <td class="header-logo-cell">
-                        @if (!empty($data['logo']))
-                            <img class="logo-empresa" src="data:image/png;base64,{{ $data['logo'] }}" alt="Logo">
-                        @else
-                            <div
-                                style="font-weight: bold; font-size: 16pt; color: #000000; letter-spacing: -0.5px; line-height: 1;">
-                                SB
-                            </div>
-                            <div
-                                style="font-size: 6.8pt; font-weight: bold; color: #000000; text-transform: uppercase; margin-top: 2px; line-height: 1.1;">
-                                Transportes Especiales<br><span style="color: #000000;">Sin Barreras S.A.S.</span>
-                            </div>
-                        @endif
-                    </td>
+                    @if (empty($letterhead ?? null) && empty($ocultar_marca ?? false))
+                        <td class="header-logo-cell">
+                            @if (!empty($data['logo']))
+                                <img class="logo-empresa" src="data:image/png;base64,{{ $data['logo'] }}" alt="Logo">
+                            @else
+                                @php($__siglasCond = \App\Services\Pdf\PdfService::siglasEmpresa((string) ($driver->company->business_name ?? '')))
+                                <div style="font-weight: bold; font-size: 14pt; color: #262626; letter-spacing: 0.4px; line-height: 1;">
+                                    {{ $__siglasCond }}
+                                </div>
+                            @endif
+                        </td>
+                    @endif
 
                     <!-- Título Central -->
-                    <td class="header-title-cell">
+                    <td class="header-title-cell" @if (!empty($letterhead ?? null) || !empty($ocultar_marca ?? false)) style="width: 76%;" @endif>
                         <div class="company-title">{{ $driver->company->business_name ?? '' }}</div>
                         <div class="doc-main-title">FICHA TÉCNICA DEL CONDUCTOR</div>
                         <div class="doc-sub-title">PLAN ESTRATÉGICO DE SEGURIDAD VIAL (PESV) · JEFE OPERATIVO</div>
