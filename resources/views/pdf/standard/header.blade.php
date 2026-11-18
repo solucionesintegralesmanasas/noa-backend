@@ -9,10 +9,13 @@
        $subtitulo_documento    (opcional) línea normativa o de proceso
        $meta_sgc               array etiqueta => valor (CÓDIGO, VERSIÓN, FECHA, PERÍODO...) --}}
 @php($__sinLogoCelda = ! empty($ocultar_celda_logo ?? false))
+@php($__anchoMeta = isset($ancho_meta) ? (int) $ancho_meta : 26)
+@php($__anchoLogo = $__sinLogoCelda ? 0 : (isset($ancho_logo) ? (int) $ancho_logo : 19))
+@php($__anchoTitulo = 100 - $__anchoMeta - $__anchoLogo)
 <table class="header-table" cellpadding="0" cellspacing="0">
     <tr>
         @if (! $__sinLogoCelda)
-            <td class="header-logo-cell">
+            <td class="header-logo-cell" style="width: {{ $__anchoLogo }}%;">
                 @if (!empty($logo_data_url))
                     <img src="{{ $logo_data_url }}" class="header-logo-img" alt="Logo de la empresa">
                 @else
@@ -20,7 +23,7 @@
                 @endif
             </td>
         @endif
-        <td class="header-title-cell" @if ($__sinLogoCelda) style="width: 74%;" @endif>
+        <td class="header-title-cell" style="width: {{ $__anchoTitulo }}%;">
             <div class="company-name">{{ $empresa_transportadora ?? '' }}</div>
             @if (!empty($empresa_detalle))
                 <div class="company-sub">{{ $empresa_detalle }}</div>
@@ -30,7 +33,7 @@
                 <div class="doc-sub-title">{{ $subtitulo_documento }}</div>
             @endif
         </td>
-        <td class="header-meta-cell">
+        <td class="header-meta-cell" style="width: {{ $__anchoMeta }}%;">
             <table class="meta-table" cellpadding="0" cellspacing="0">
                 @foreach (($meta_sgc ?? []) as $etiqueta => $valor)
                     <tr>
