@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\CommercialInvoice;
+use App\Models\CreditNote;
+use App\Models\DebitNote;
 use App\Services\Billing\ContratoFacturacionElectronica;
+use App\Services\Billing\ContratoNotasElectronica;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
@@ -125,6 +128,11 @@ class ApidianFacturacionTest extends TestCase
     private function puerto(): ContratoFacturacionElectronica
     {
         return app(ContratoFacturacionElectronica::class);
+    }
+
+    private function puertoNotas(): ContratoNotasElectronica
+    {
+        return app(ContratoNotasElectronica::class);
     }
 
     /** Fake del rango de numeración de FACTW: dos rangos solapados, se elige el de menor id. */
@@ -384,5 +392,218 @@ class ApidianFacturacionTest extends TestCase
             return ($totales['tax_inclusive_amount'] ?? null) === '119000.00'
                 && ($totales['payable_amount'] ?? null) === '119000.00';
         });
+    }
+
+    public function test_emite_nota_credito_con_referencia_y_rango_apidian(): void
+    {
+        $this->proveedor(['send_to_dian' => 1]);
+        $factura = $this->factura([
+            'cufe' => 'cufe-factura-origen',
+            'provider_document_id' => '507',
+            'dian_response' => json_encode(['number' => 'SETP980000006']),
+        ]);
+
+        $uuidNota = $this->insertar('credit_notes', [
+            'company_uuid' => $this->empresa,
+            'invoice_uuid' => $factura->uuid,
+            'third_party_uuid' => $this->cliente,
+            'note_number' => 'NC-0001',
+            'correction_concept_code' => '2',
+            'observation' => 'Anulación de factura',
+            'issue_date' => '2026-10-06',
+            'status' => 'EMITIDA_INTERNA',
+            'electronic_status' => 'PENDIENTE_DIAN',
+            'subtotal' => 20000,
+            'total_discount' => 0,
+            'total_tax' => 3800,
+            'total_withholding' => 0,
+            'total' => 23800,
+        ]);
+        $this->insertar('credit_note_items', [
+            'note_uuid' => $uuidNota,
+            'order_index' => 1,
+            'description' => 'Devolución parcial',
+            'quantity' => 1,
+            'unit_price' => 20000,
+            'tax_rate' => 19,
+            'tax_amount' => 3800,
+            'line_total' => 23800,
+        ]);
+        $nota = CreditNote::where('uuid', $uuidNota)->firstOrFail();
+
+        Http::fake([
+            self::BASE.'/api/ubl2.1/numbering-ranges' => Http::response([
+                'success' => true,
+                'data' => [
+                    ['id' => 20, 'type_document_id' => 4, 'active' => true, 'prefix' => 'NC', 'resolution' => '0', 'next' => 15, 'next_consecutive' => 'NC15'],
+                ],
+            ], 200),
+            self::BASE.'/api/ubl2.1/credit-note' => Http::response([
+                'is_valid' => true,
+                'cufe' => 'cude-apidian-nc-15',
+                'number' => 'NC15',
+                'document_id' => 610,
+            ], 200),
+        ]);
+
+        $respuesta = $this->puertoNotas()->emitirNota($nota);
+
+        $this->assertSame('ACEPTADA_DIAN', $respuesta['estado']);
+        $this->assertSame('cude-apidian-nc-15', $nota->refresh()->cude);
+        $this->assertSame('ACEPTADA_DIAN', $nota->electronic_status);
+
+        Http::assertSent(function ($peticion) {
+            if (! str_ends_with($peticion->url(), '/api/ubl2.1/credit-note')) {
+                return false;
+            }
+            $p = $peticion->data();
+
+            return ($p['type_document_id'] ?? null) === 4
+                && ($p['number'] ?? null) === 15
+                && ($p['send'] ?? null) === true
+                && ($p['billing_reference']['number'] ?? null) === 'SETP980000006'
+                && ($p['billing_reference']['uuid'] ?? null) === 'cufe-factura-origen'
+                && ($p['discrepancy']['response_code'] ?? null) === 2
+                && count($p['credit_note_lines'] ?? []) === 1
+                && ! array_key_exists('debit_note_lines', $p);
+        });
+    }
+
+    public function test_emite_nota_debito_en_su_endpoint_y_con_debit_note_lines(): void
+    {
+        $this->proveedor();
+        $factura = $this->factura([
+            'cufe' => 'cufe-factura-origen',
+            'provider_document_id' => '507',
+            'dian_response' => json_encode(['number' => 'SETP980000006']),
+        ]);
+
+        $uuidNota = $this->insertar('debit_notes', [
+            'company_uuid' => $this->empresa,
+            'invoice_uuid' => $factura->uuid,
+            'third_party_uuid' => $this->cliente,
+            'note_number' => 'ND-0001',
+            'correction_concept_code' => '1',
+            'observation' => 'Cobro adicional',
+            'issue_date' => '2026-10-06',
+            'status' => 'EMITIDA_INTERNA',
+            'electronic_status' => 'PENDIENTE_DIAN',
+            'subtotal' => 50000,
+            'total_discount' => 0,
+            'total_tax' => 9500,
+            'total_withholding' => 0,
+            'total' => 59500,
+        ]);
+        $this->insertar('debit_note_items', [
+            'note_uuid' => $uuidNota,
+            'order_index' => 1,
+            'description' => 'Recargo nocturno',
+            'quantity' => 1,
+            'unit_price' => 50000,
+            'tax_rate' => 19,
+            'tax_amount' => 9500,
+            'line_total' => 59500,
+        ]);
+        $nota = DebitNote::where('uuid', $uuidNota)->firstOrFail();
+
+        Http::fake([
+            self::BASE.'/api/ubl2.1/numbering-ranges' => Http::response([
+                'success' => true,
+                'data' => [
+                    ['id' => 21, 'type_document_id' => 5, 'active' => true, 'prefix' => 'ND', 'resolution' => '0', 'next' => 8, 'next_consecutive' => 'ND8'],
+                ],
+            ], 200),
+            self::BASE.'/api/ubl2.1/debit-note' => Http::response([
+                'is_valid' => true,
+                'cufe' => 'cude-apidian-nd-8',
+                'number' => 'ND8',
+                'document_id' => 611,
+            ], 200),
+        ]);
+
+        $respuesta = $this->puertoNotas()->emitirNota($nota);
+
+        $this->assertSame('VALIDADA_SIN_ENVIO', $respuesta['estado']);
+        $this->assertSame('cude-apidian-nd-8', $nota->refresh()->cude);
+
+        Http::assertSent(function ($peticion) {
+            if (! str_ends_with($peticion->url(), '/api/ubl2.1/debit-note')) {
+                return false;
+            }
+            $p = $peticion->data();
+
+            return ($p['type_document_id'] ?? null) === 5
+                && ($p['number'] ?? null) === 8
+                && ($p['send'] ?? null) === false
+                && ($p['discrepancy']['response_code'] ?? null) === 1
+                && count($p['debit_note_lines'] ?? []) === 1
+                && ! array_key_exists('credit_note_lines', $p);
+        });
+    }
+
+    public function test_nota_sin_cufe_en_factura_lanza_error_claro(): void
+    {
+        $this->proveedor();
+        $factura = $this->factura(['cufe' => null]);
+
+        $uuidNota = $this->insertar('credit_notes', [
+            'company_uuid' => $this->empresa,
+            'invoice_uuid' => $factura->uuid,
+            'third_party_uuid' => $this->cliente,
+            'note_number' => 'NC-0002',
+            'correction_concept_code' => '2',
+            'issue_date' => '2026-10-06',
+            'status' => 'EMITIDA_INTERNA',
+            'electronic_status' => 'PENDIENTE_DIAN',
+            'subtotal' => 10000,
+            'total_discount' => 0,
+            'total_tax' => 0,
+            'total_withholding' => 0,
+            'total' => 10000,
+        ]);
+        $nota = CreditNote::where('uuid', $uuidNota)->firstOrFail();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('CUFE');
+
+        $this->puertoNotas()->emitirNota($nota);
+    }
+
+    public function test_consulta_estado_de_nota_en_apidian(): void
+    {
+        $this->proveedor(['send_to_dian' => 1]);
+        $factura = $this->factura(['cufe' => 'cufe-factura-origen']);
+
+        $uuidNota = $this->insertar('credit_notes', [
+            'company_uuid' => $this->empresa,
+            'invoice_uuid' => $factura->uuid,
+            'third_party_uuid' => $this->cliente,
+            'note_number' => 'NC-0003',
+            'correction_concept_code' => '2',
+            'issue_date' => '2026-10-06',
+            'status' => 'EMITIDA_INTERNA',
+            'electronic_status' => 'PENDIENTE_DIAN',
+            'cude' => 'cude-nc-3',
+            'dian_response' => json_encode(['number' => 'NC16']),
+            'subtotal' => 10000,
+            'total_discount' => 0,
+            'total_tax' => 0,
+            'total_withholding' => 0,
+            'total' => 10000,
+        ]);
+        $nota = CreditNote::where('uuid', $uuidNota)->firstOrFail();
+
+        Http::fake([
+            self::BASE.'/api/ubl2.1/documents*' => Http::response([
+                'success' => true,
+                'data' => ['number' => 'NC16', 'state_document_id' => 1],
+            ], 200),
+        ]);
+
+        $estado = $this->puertoNotas()->consultarEstadoNota($nota);
+
+        $this->assertSame('ACEPTADA_DIAN', $estado['estado']);
+        $this->assertSame('NC16', $estado['numero']);
+        $this->assertSame('cude-nc-3', $estado['cude']);
     }
 }

@@ -42,6 +42,11 @@ trait InsertaFilas
         DB::table($tabla)->insert($datos + ['created_at' => now(), 'updated_at' => now()]);
         Schema::enableForeignKeyConstraints();
 
+        $companyCtx = $tabla === 'companies' ? $uuid : ($datos['company_uuid'] ?? null);
+        if (is_string($companyCtx) && $companyCtx !== '' && ! request()->attributes->get('current_company_uuid')) {
+            request()->attributes->set('current_company_uuid', $companyCtx);
+        }
+
         return $uuid;
     }
 }

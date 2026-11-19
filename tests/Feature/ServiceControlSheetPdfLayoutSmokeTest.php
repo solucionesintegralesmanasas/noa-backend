@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\ServiceDeliveryControlSheet;
+use App\Services\Pdf\PdfService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Tests\TestCase;
 
@@ -50,6 +52,70 @@ class ServiceControlSheetPdfLayoutSmokeTest extends TestCase
 
         preg_match_all('~/Type\s*/Page([^s]|$)~', $contenido, $paginas);
         $this->assertSame(1, count($paginas[0]));
+    }
+
+    public function test_la_placa_y_el_interno_usan_la_micro_tabla_alineada_de_la_base_estandar(): void
+    {
+        $html = view('pdf.maintenance.service-control-sheet', $this->datos())->render();
+
+        $this->assertStringContainsString('class="placa-inline-tbl"', $html);
+        $this->assertStringContainsString('class="placa-badge">ABC123', $html);
+        $this->assertStringContainsString('class="vehiculo-sep"', $html);
+        $this->assertStringContainsString('class="vehiculo-interno">M-001', $html);
+        // El inline-block con borde desalineaba la etiqueta respecto al interno en DomPDF.
+        $this->assertStringNotContainsString('display: inline-block;
+        }
+
+        .highlight-client', $html);
+    }
+
+    public function test_la_clase_del_vehiculo_sale_de_la_descripcion_y_no_de_un_name_inexistente(): void
+    {
+        $servicio = app(PdfService::class);
+        $claseDeHoja = new \ReflectionMethod($servicio, 'claseDeHoja');
+        $claseDeHoja->setAccessible(true);
+
+        $vehiculo = (object) ['vehicleClass' => (object) ['description' => 'MICROBÚS']];
+        $directa = new ServiceDeliveryControlSheet(['type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA']);
+        $directa->setRelation('internalControl', (object) ['vehicle' => $vehiculo]);
+        $this->assertSame('MICROBÚS', $claseDeHoja->invoke($servicio, $directa));
+
+        $subcontratada = new ServiceDeliveryControlSheet(['type_of_control_sheet' => 'SUBCONTRATADO']);
+        $subcontratada->setRelation('subcontractedControl', (object) ['vehicleClass' => (object) ['description' => 'BUSETA']]);
+        $this->assertSame('BUSETA', $claseDeHoja->invoke($servicio, $subcontratada));
+
+        $sinClase = new ServiceDeliveryControlSheet(['type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA']);
+        $this->assertSame('N/A', $claseDeHoja->invoke($servicio, $sinClase));
+    }
+
+    public function test_la_leyenda_lateral_queda_centrada_entre_la_tabla_y_el_borde_de_la_hoja(): void
+    {
+        $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $this->datos())->setPaper('letter', 'landscape');
+        app(PdfService::class)->sellarPaginado($pdf, PdfService::MARGEN_DERECHO_PLANILLA_PT);
+        $contenido = $pdf->output();
+
+        $x = null;
+        preg_match_all('/stream\r?\n(.*?)endstream/s', $contenido, $streams);
+        foreach ($streams[1] as $crudo) {
+            $datos = @gzuncompress(trim($crudo, "\r\n"));
+            if ($datos && preg_match('/0\.000 1\.000 -1\.000 0\.000 ([\d.]+) [\d.]+ Tm/', $datos, $m)) {
+                $x = (float) $m[1];
+                break;
+            }
+        }
+        $this->assertNotNull($x, 'No se encontró la leyenda rotada en el PDF.');
+
+        $ancho = 792.0;
+        $tamano = 7.5;
+        $bordeTabla = $ancho - PdfService::MARGEN_DERECHO_PLANILLA_PT;
+        $izquierdaGlifo = $x - $tamano * 0.72;
+        $derechaGlifo = $x + $tamano * 0.22;
+
+        $holguraConTabla = $izquierdaGlifo - $bordeTabla;
+        $holguraConBorde = $ancho - $derechaGlifo;
+
+        $this->assertGreaterThan(5.0, $holguraConTabla, 'La leyenda no debe pegarse a la tabla.');
+        $this->assertEqualsWithDelta($holguraConTabla, $holguraConBorde, 0.5, 'La leyenda debe quedar centrada en la franja.');
     }
 
     /** @return array<string, mixed> */
@@ -110,5 +176,63 @@ class ServiceControlSheetPdfLayoutSmokeTest extends TestCase
             'certificaciones_pendientes' => [],
             'dias_con_excepcion' => [],
         ];
+    }
+
+    public function test_adversarial_planilla_sin_logo_usa_siglas_dinamicas_y_esquema_neutro_sin_quemar_otra_empresa(): void
+    {
+        $datos = $this->datos();
+        $datos['logo'] = null;
+        $datos['empresa_transportadora'] = 'LOGÍSTICA DEL CARIBE S.A.S.';
+        $datos['empresa_siglas'] = PdfService::siglasEmpresa($datos['empresa_transportadora']);
+
+        $html = view('pdf.maintenance.service-control-sheet', $datos)->render();
+
+        $this->assertStringContainsString('>LDC<', preg_replace('/\s+/', '', $html) ?? '');
+        $this->assertStringContainsString("font-family: 'Inter'", $html);
+        $this->assertStringContainsString('#d8d8d8', $html);
+        $this->assertStringContainsString('#f0f0f0', $html);
+        $this->assertStringNotContainsString('Transportes Sin Barreras', $html);
+        $this->assertStringNotContainsString('>SB<', $html);
+        $this->assertStringNotContainsString('#1e3a8a', $html);
+        $this->assertStringNotContainsString("'Courier'", $html);
+    }
+
+    public function test_adversarial_resolve_logo_with_mime_nulo_no_filtra_logos_de_disco(): void
+    {
+        $servicio = app(PdfService::class);
+        $metodo = new \ReflectionMethod($servicio, 'resolveLogoWithMime');
+        $metodo->setAccessible(true);
+
+        $resultado = $metodo->invoke($servicio, null, null);
+
+        $this->assertSame(['logo' => null, 'mime' => 'image/png'], $resultado);
+    }
+
+    public function test_planilla_oculta_celda_logo_en_modos_membrete_y_limpio_y_soporta_hoja_horizontal(): void
+    {
+        $pngTiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $imgHorizontal = imagecreatetruecolor(140, 100);
+        ob_start();
+        imagepng($imgHorizontal);
+        $hojaHorizontal = 'data:image/png;base64,' . base64_encode((string) ob_get_clean());
+        imagedestroy($imgHorizontal);
+
+        $datos = $this->datos();
+        $datos['logo'] = $pngTiny;
+
+        $conLogo = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['ocultar_marca' => false]))->render();
+        $this->assertStringContainsString('class="header-logo-cell"', $conLogo);
+        $this->assertStringContainsString('alt="Logo empresa"', $conLogo);
+        foreach (['#dcfce7', '#fef3c7', '#fef08a', '#fffbeb', '#fef2f2', '#f0f9ff'] as $colorLegado) {
+            $this->assertStringNotContainsString($colorLegado, $conLogo);
+        }
+
+        $limpio = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['ocultar_marca' => true]))->render();
+        $this->assertStringNotContainsString('class="header-logo-cell"', $limpio);
+        $this->assertStringNotContainsString('alt="Logo empresa"', $limpio);
+
+        $conHoja = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['letterhead' => $hojaHorizontal]))->render();
+        $this->assertStringContainsString('id="letterhead-page-bg"', $conHoja);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $conHoja);
     }
 }

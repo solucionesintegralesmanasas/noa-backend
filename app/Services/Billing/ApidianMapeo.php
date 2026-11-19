@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace App\Services\Billing;
 
 use App\Models\CommercialInvoice;
+use App\Models\CreditNote;
+use App\Models\DebitNote;
 use App\Models\ThirdParty;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -84,6 +87,69 @@ class ApidianMapeo
         ];
     }
 
+    /** Convierte CreditNote (type 4) o DebitNote (type 5) al payload de ApiDian. */
+    public function mapNota(Model $nota): array
+    {
+        $esCredito = $nota instanceof CreditNote;
+        if (! $esCredito && ! $nota instanceof DebitNote) {
+            throw new \InvalidArgumentException('El documento no es una nota crédito ni débito.');
+        }
+
+        $nota->loadMissing([
+            'invoice.customer.documentType',
+            'invoice.customer.municipality',
+            'invoice.customer.taxResponsibility',
+            'paymentMethod',
+            'items.measurementUnit',
+        ]);
+
+        $factura = $nota->invoice;
+        if (! $factura) {
+            throw new \RuntimeException('La nota no está asociada a una factura.');
+        }
+
+        $cufeFactura = trim((string) ($factura->cufe ?? ''));
+        if ($cufeFactura === '') {
+            throw new \RuntimeException('La factura afectada no tiene CUFE; debe emitirse electrónicamente antes de generar una nota.');
+        }
+
+        $concepto = (int) ($nota->correction_concept_code ?? 0);
+        if ($concepto <= 0) {
+            throw new \RuntimeException('La nota no tiene concepto de corrección (correction_concept_code), obligatorio para ApiDian.');
+        }
+
+        // FACTW referencia la factura por el número que ÉL asignó (p. ej. "SETP980000006").
+        $numeroFactura = (string) (
+            $factura->dian_response['number']
+            ?? $factura->dian_response['data']['number']
+            ?? $factura->provider_document_id
+            ?? $factura->invoice_number
+        );
+
+        $claveLineas = $esCredito ? 'credit_note_lines' : 'debit_note_lines';
+
+        return [
+            'number' => $this->consecutivo($nota),
+            'type_document_id' => $esCredito ? 4 : 5,
+            'date' => $nota->issue_date?->format('Y-m-d') ?? now()->format('Y-m-d'),
+            'time' => $nota->issue_date?->format('H:i:s') ?? now()->format('H:i:s'),
+            'billing_reference' => [
+                'number' => $numeroFactura,
+                'uuid' => $cufeFactura,
+                'issue_date' => $factura->issue_date?->format('Y-m-d') ?? now()->format('Y-m-d'),
+            ],
+            'discrepancy' => [
+                'response_code' => $concepto,
+                'description' => Str::limit(trim((string) ($nota->observation ?: 'Ajuste a factura electrónica')), 200),
+            ],
+            'customer' => $this->mapearCliente($factura->customer),
+            'payment_form' => $this->mapearFormaPago($nota),
+            'legal_monetary_totals' => $this->mapearTotales($nota),
+            'tax_totals' => $this->mapearImpuestos($nota),
+            $claveLineas => $this->mapearLineas($nota->items),
+        ];
+    }
+
     // ─── Cliente / Comprador ──────────────────────────────────────────────
 
     private function mapearCliente(?ThirdParty $cliente): array
@@ -140,18 +206,19 @@ class ApidianMapeo
 
     // ─── Forma de pago ────────────────────────────────────────────────────
 
-    private function mapearFormaPago(CommercialInvoice $documento): array
+    private function mapearFormaPago(CommercialInvoice|CreditNote|DebitNote $documento): array
     {
         $codigoMedio = (string) ($documento->paymentMethod?->dian_code ?? '');
         $medioId = $codigoMedio === 'ZZZ' ? 75 : ((int) $codigoMedio ?: 10);
+        $vence = $documento instanceof CommercialInvoice ? $documento->due_date : null;
 
         $forma = [
-            'payment_form' => $documento->due_date !== null ? 2 : 1,
+            'payment_form' => $vence !== null ? 2 : 1,
             'payment_method_id' => $medioId,
         ];
 
-        if ($documento->due_date !== null) {
-            $forma['payment_due_date'] = $documento->due_date->format('Y-m-d');
+        if ($vence !== null) {
+            $forma['payment_due_date'] = $vence->format('Y-m-d');
         }
 
         return $forma;
@@ -159,7 +226,7 @@ class ApidianMapeo
 
     // ─── Totales legales ──────────────────────────────────────────────────
 
-    private function mapearTotales(CommercialInvoice $documento): array
+    private function mapearTotales(CommercialInvoice|CreditNote|DebitNote $documento): array
     {
         // NOA: subtotal ya es neto de descuentos de línea.
         $base = (float) ($documento->subtotal ?? 0);
@@ -182,7 +249,7 @@ class ApidianMapeo
 
     // ─── Impuestos ────────────────────────────────────────────────────────
 
-    private function mapearImpuestos(CommercialInvoice $documento): array
+    private function mapearImpuestos(CommercialInvoice|CreditNote|DebitNote $documento): array
     {
         $impuesto = (float) ($documento->total_tax ?? 0);
         if ($impuesto <= 0) {
@@ -246,12 +313,13 @@ class ApidianMapeo
     // ─── helpers ──────────────────────────────────────────────────────────
 
     /** Consecutivo numérico sin el prefijo de la resolución ("SETP980000006" → 980000006). */
-    private function consecutivo(CommercialInvoice $factura): int
+    private function consecutivo(CommercialInvoice|CreditNote|DebitNote $documento): int
     {
-        $numero = preg_replace('/\D/', '', (string) ($factura->invoice_number ?? ''));
+        $raw = $documento instanceof CommercialInvoice ? $documento->invoice_number : $documento->note_number;
+        $numero = preg_replace('/\D/', '', (string) ($raw ?? ''));
 
         if ($numero === '' || $numero === null) {
-            Log::warning('Factura sin número consecutivo para ApiDian.', ['invoice_uuid' => $factura->uuid]);
+            Log::warning('Documento sin número consecutivo para ApiDian.', ['uuid' => $documento->uuid]);
 
             return 0;
         }

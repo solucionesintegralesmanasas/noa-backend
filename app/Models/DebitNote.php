@@ -48,4 +48,14 @@ class DebitNote extends Model
     {
         return $this->belongsTo(CommercialInvoice::class, 'invoice_uuid', 'uuid');
     }
+
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class, 'payment_method_uuid', 'uuid');
+    }
+
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(ThirdParty::class, 'third_party_uuid', 'uuid');
+    }
 }

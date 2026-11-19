@@ -114,6 +114,53 @@ class FichaTecnicaConductorPdfLayoutSmokeTest extends TestCase
         $this->assertSame(1, count($paginas[0]), 'La ficha debe caber en una hoja vertical');
     }
 
+    public function test_la_ficha_del_conductor_usa_esquema_neutro_y_soporta_los_tres_modos_de_marca(): void
+    {
+        $pngTiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $imgVertical = imagecreatetruecolor(100, 140);
+        ob_start();
+        imagepng($imgVertical);
+        $hojaVertical = 'data:image/png;base64,' . base64_encode((string) ob_get_clean());
+        imagedestroy($imgVertical);
+
+        $base = $this->datosFicha();
+        $base['data']['logo'] = $pngTiny;
+
+        // 1. Modo fondo: logo + marca de agua + Inter (incluida itálica) + sin badges de color
+        $htmlFondo = view('pdf.third-parties.technical-sheet', array_merge($base, [
+            'letterhead' => null,
+            'logo_fondo' => $pngTiny,
+            'ocultar_marca' => false,
+        ]))->render();
+        $this->assertStringContainsString('Inter-Regular.ttf', $htmlFondo);
+        $this->assertStringContainsString('Inter-Italic.ttf', $htmlFondo);
+        $this->assertStringContainsString('id="watermark"', $htmlFondo);
+        $this->assertStringContainsString('class="header-logo-cell"', $htmlFondo);
+        $this->assertStringNotContainsString('id="letterhead-page-bg"', $htmlFondo);
+        $this->assertStringNotContainsString('#dcfce7', $htmlFondo);
+        $this->assertStringNotContainsString('#fee2e2', $htmlFondo);
+
+        // 2. Modo membrete completo: fondo de página, sin logo ni marca de agua
+        $htmlMembrete = view('pdf.third-parties.technical-sheet', array_merge($base, [
+            'letterhead' => $hojaVertical,
+            'logo_fondo' => null,
+            'ocultar_marca' => false,
+        ]))->render();
+        $this->assertStringContainsString('id="letterhead-page-bg"', $htmlMembrete);
+        $this->assertStringNotContainsString('id="watermark"', $htmlMembrete);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $htmlMembrete);
+
+        // 3. Modo limpio: sin logo, sin membrete ni marca de agua
+        $htmlLimpio = view('pdf.third-parties.technical-sheet', array_merge($base, [
+            'letterhead' => null,
+            'logo_fondo' => $pngTiny,
+            'ocultar_marca' => true,
+        ]))->render();
+        $this->assertStringNotContainsString('id="letterhead-page-bg"', $htmlLimpio);
+        $this->assertStringNotContainsString('id="watermark"', $htmlLimpio);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $htmlLimpio);
+    }
+
     /** @return array<string, mixed> */
     private function datosFicha(): array
     {

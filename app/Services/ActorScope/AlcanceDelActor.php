@@ -44,6 +44,10 @@ class AlcanceDelActor
         'contractors',
         'fuec',
         'procedures',
+        'rental_contracts',
+        'commercial_invoices',
+        'credit_notes',
+        'debit_notes',
     ];
 
     private bool $contextoResuelto = false;
@@ -140,6 +144,7 @@ class AlcanceDelActor
         $this->usuario = $targetUser;
 
         if (! $this->usuario) {
+            $this->companyUuid = $companyUuidExplicit ?? request()->attributes->get('current_company_uuid');
             $this->contextoResuelto = true;
 
             return $this;
@@ -172,7 +177,7 @@ class AlcanceDelActor
             ?? session('current_company_uuid');
 
         if ($this->esSuperadmin) {
-            $this->companyUuid = $solicitada ?? $this->usuario->companies()->first()?->uuid;
+            $this->companyUuid = $solicitada;
             $this->thirdPartyUuid = request()->attributes->get('current_third_party_uuid');
             $this->branchUuid = request()->attributes->get('current_branch_uuid');
             $this->affiliateUuid = null;
@@ -557,7 +562,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -637,7 +642,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -705,7 +710,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 
@@ -784,7 +789,7 @@ class AlcanceDelActor
             $conductores = array_unique(array_merge([$affiliateUuid], $this->obtenerConductoresDeAfiliado()));
             $licenciasPropias = $this->obtenerLicenciasDeOwnersDrivers($affiliateUuid);
 
-            $query->where(function (Builder $q) use ($vehiculos, $conductores, $licenciasPropias, $affiliateUuid) {
+            $query->where(function (Builder $q) use ($vehiculos, $conductores, $licenciasPropias) {
                 // 1. Vehículos
                 $q->orWhere(function (Builder $sub) use ($vehiculos) {
                     $sub->where('entity_type', Vehicle::class)
@@ -820,15 +825,11 @@ class AlcanceDelActor
                                 $sq->select('uuid')->from('business_collaboration_agreements')->whereIn('vehicle_uuid', $vehiculos);
                             });
                     })
-                    // 6. Cobros de administración de afiliado
-                    ->orWhere(function (Builder $sub) use ($affiliateUuid, $vehiculos) {
+                    // 6. Cobros de administración de afiliado (el afiliado se deriva del vehículo)
+                    ->orWhere(function (Builder $sub) use ($vehiculos) {
                         $sub->where('entity_type', AffiliateAdminCharge::class)
-                            ->where(function (Builder $cq) use ($affiliateUuid, $vehiculos) {
-                                $cq->whereIn('entity_uuid', function ($sq) use ($affiliateUuid) {
-                                    $sq->select('uuid')->from('affiliate_admin_charges')->where('third_party_uuid', $affiliateUuid);
-                                })->orWhereIn('entity_uuid', function ($sq) use ($vehiculos) {
-                                    $sq->select('uuid')->from('affiliate_admin_charges')->whereIn('vehicle_uuid', $vehiculos);
-                                });
+                            ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
+                                $sq->select('uuid')->from('affiliate_admin_charges')->whereIn('vehicle_uuid', $vehiculos);
                             });
                     });
             });
@@ -892,7 +893,7 @@ class AlcanceDelActor
     {
         $this->asegurarContexto();
 
-        if (! $this->usuario) {
+        if (! $this->usuario && ! $this->companyUuid) {
             return $query->whereRaw('1 = 0');
         }
 

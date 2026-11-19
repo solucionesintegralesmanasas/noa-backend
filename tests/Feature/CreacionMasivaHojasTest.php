@@ -6,11 +6,13 @@ namespace Tests\Feature;
 
 use App\Models\ServiceDeliveryControlSheet;
 use App\Models\User;
+use App\Services\ServiceDeliveryControlSheet\PcpEvidence;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use PHPUnit\Framework\Attributes\Group;
 use Spatie\Permission\Models\Permission;
@@ -59,8 +61,8 @@ class CreacionMasivaHojasTest extends TestCase
 
         // Tres pares conductor↔vehículo asignados al proyecto A1.
         for ($i = 1; $i <= 3; $i++) {
-            $this->conductores[$i] = $this->crearTercero($this->empresaA, '9100001' . $i, 'T' . $i, $this->sedeA1);
-            $this->vehiculos[$i] = $this->crearVehiculo($this->empresaA, $this->conductores[$i], 'MASA0' . $i, $this->sedeA1);
+            $this->conductores[$i] = $this->crearTercero($this->empresaA, '9100001'.$i, 'T'.$i, $this->sedeA1);
+            $this->vehiculos[$i] = $this->crearVehiculo($this->empresaA, $this->conductores[$i], 'MASA0'.$i, $this->sedeA1);
         }
         $this->proyectoA1 = $this->crearProyecto($this->empresaA, 'Proyecto Masivo A1', [
             ['conductor' => $this->conductores[1], 'vehicle' => $this->vehiculos[1]],
@@ -83,10 +85,10 @@ class CreacionMasivaHojasTest extends TestCase
             'type_of_company' => 'PRIVADO',
             'document_type_uuid' => $relleno,
             'document_number' => (string) random_int(100000000, 999999999),
-            'business_name' => 'Empresa ' . Str::random(5),
+            'business_name' => 'Empresa '.Str::random(5),
             'municipality_uuid' => $relleno,
             'address' => 'Calle 1',
-            'email' => Str::random(6) . '@empresa.test',
+            'email' => Str::random(6).'@empresa.test',
             'tax_regime_uuid' => $relleno,
             'web_page' => 'https://e.test',
             'legal_representative_name' => 'Rep',
@@ -104,12 +106,12 @@ class CreacionMasivaHojasTest extends TestCase
 
     private function crearSede(string $empresa, string $nombre): string
     {
-        $ciudad = $this->insertar('cities', ['name' => 'Ciudad ' . $nombre]);
+        $ciudad = $this->insertar('cities', ['name' => 'Ciudad '.$nombre]);
 
         return $this->insertar('branches', [
             'company_uuid' => $empresa,
             'name' => $nombre,
-            'address' => 'Calle ' . $nombre,
+            'address' => 'Calle '.$nombre,
             'municipality_uuid' => $ciudad,
             'status' => 1,
         ]);
@@ -123,7 +125,7 @@ class CreacionMasivaHojasTest extends TestCase
             'document_number' => $documento,
             'first_name' => 'CONDUCTOR',
             'last_name' => $sufijo,
-            'email' => 'conductor.' . Str::lower($sufijo) . Str::random(3) . '@test.local',
+            'email' => 'conductor.'.Str::lower($sufijo).Str::random(3).'@test.local',
             'branch_uuid' => $sede,
             'is_driver' => $conductor ? 1 : 0,
         ]);
@@ -180,7 +182,7 @@ class CreacionMasivaHojasTest extends TestCase
         Schema::disableForeignKeyConstraints();
         $user = User::create([
             'uuid' => (string) Str::uuid(),
-            'name' => 'Usuario ' . $rol,
+            'name' => 'Usuario '.$rol,
             'email' => $email,
             'password' => Hash::make('secreto123'),
             'is_active' => true,
@@ -232,7 +234,7 @@ class CreacionMasivaHojasTest extends TestCase
         ];
     }
 
-    /** @param \Illuminate\Testing\TestResponse $respuesta */
+    /** @param TestResponse $respuesta */
     private function camposDeError($respuesta): array
     {
         return collect($respuesta->json('error.details'))->pluck('field')->all();
@@ -268,7 +270,7 @@ class CreacionMasivaHojasTest extends TestCase
             $padre = DB::table('service_delivery_control_sheet')
                 ->where('uuid', $controlPadre->service_delivery_control_sheet_uuid)->first();
             $this->assertSame('DIRECTO_CON_LA_EMPRESA', $padre->type_of_control_sheet);
-            $this->assertSame('CONDUCTOR T' . $i, $padre->official_name_and_surname);
+            $this->assertSame('CONDUCTOR T'.$i, $padre->official_name_and_surname);
             $this->assertSame('2026-10-10', $padre->start_date);
             $this->assertSame('2026-10-11', $padre->end_date);
 
@@ -282,7 +284,7 @@ class CreacionMasivaHojasTest extends TestCase
                 $hoja = DB::table('service_delivery_control_sheet')
                     ->where('uuid', $hijo->service_delivery_control_sheet_uuid)->first();
                 $this->assertSame($controlPadre->service_delivery_control_sheet_uuid, $hoja->parent_uuid);
-                $this->assertSame('CONDUCTOR T' . $i, $hoja->official_name_and_surname);
+                $this->assertSame('CONDUCTOR T'.$i, $hoja->official_name_and_surname);
                 $this->assertContains($hoja->service_date, ['2026-10-10', '2026-10-11']);
             }
         }
@@ -466,7 +468,7 @@ class CreacionMasivaHojasTest extends TestCase
         // Un día del coche 2 ya se cerró (congelamiento, SPEC-002 §7.2).
         DB::table('service_delivery_control_sheet')
             ->whereNotNull('parent_uuid')
-            ->whereIn('uuid', fn($q) => $q->select('service_delivery_control_sheet_uuid')
+            ->whereIn('uuid', fn ($q) => $q->select('service_delivery_control_sheet_uuid')
                 ->from('service_internal_controls')
                 ->where('vehicle_uuid', $this->vehiculos[2]))
             ->limit(1)
@@ -537,6 +539,70 @@ class CreacionMasivaHojasTest extends TestCase
     }
 
     /**
+     * Relevo (2026-11-18): un coche puede tener dos conductores activos. La
+     * alta pendiente se evalúa por turno (conductor+vehículo), no por coche:
+     * el turno del entrante aparece aunque el coche ya tenga hojas del saliente
+     * y el bulk debe crear la hoja de ESE conductor.
+     */
+    public function test_dos_conductores_en_el_mismo_coche_crean_su_propia_hoja(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1))
+            ->assertCreated();
+
+        // Relevo: el conductor 4 se suma al coche 1 sin retirar al conductor 1.
+        $conductor4 = $this->crearTercero($this->empresaA, '91000014', 'T4', $this->sedeA1);
+        $this->insertar('project_driver_vehicles', [
+            'project_uuid' => $this->proyectoA1,
+            'third_party_uuid' => $conductor4,
+            'vehicle_uuid' => $this->vehiculos[1],
+            'is_active' => 1,
+        ]);
+
+        $ruta = '/api/v1/control-sheets/service-delivery-control-sheets/assigned-without-sheets?project_uuid='.$this->proyectoA1;
+        $pendientes = $this->comoAdminA()->getJson($ruta)->assertOk()->json('data');
+
+        $this->assertCount(1, $pendientes);
+        $this->assertSame($this->vehiculos[1], $pendientes[0]['vehicle_uuid']);
+        $this->assertSame($conductor4, $pendientes[0]['third_party_uuid']);
+
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1, [$this->vehiculos[1]]) + [
+                'assignments' => [
+                    ['vehicle_uuid' => $this->vehiculos[1], 'third_party_uuid' => $conductor4],
+                ],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.created', 1);
+
+        $this->comoAdminA()->getJson($ruta)->assertOk()->assertJsonCount(0, 'data');
+
+        // Cada conductor tiene su hoja en el mismo coche.
+        foreach ([$this->conductores[1], $conductor4] as $conductor) {
+            $this->assertSame(1, DB::table('service_internal_controls')
+                ->where('vehicle_uuid', $this->vehiculos[1])
+                ->where('third_party_uuid', $conductor)
+                ->where('is_active', 1)
+                ->whereNull('fuec_uuid')
+                ->count());
+        }
+    }
+
+    public function test_un_par_sin_asignacion_activa_responde_422(): void
+    {
+        $this->comoAdminA()
+            ->postJson('/api/v1/control-sheets/service-delivery-control-sheets/bulk', $this->datos($this->proyectoA1) + [
+                'assignments' => [
+                    ['vehicle_uuid' => $this->vehiculos[1], 'third_party_uuid' => $this->conductores[2]],
+                ],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.details.0.field', 'assignments');
+
+        $this->assertSame(0, DB::table('service_delivery_control_sheet')->count());
+    }
+
+    /**
      * Cambio de coche (SPEC-009): si un conductor pasa a otro vehículo del
      * mismo proyecto (sigue activo), la hoja del coche anterior NO se retira.
      */
@@ -567,7 +633,7 @@ class CreacionMasivaHojasTest extends TestCase
     private function hojasDe(int $i)
     {
         return DB::table('service_delivery_control_sheet')
-            ->whereIn('uuid', fn($q) => $q->select('service_delivery_control_sheet_uuid')
+            ->whereIn('uuid', fn ($q) => $q->select('service_delivery_control_sheet_uuid')
                 ->from('service_internal_controls')
                 ->where('vehicle_uuid', $this->vehiculos[$i]));
     }
@@ -601,8 +667,8 @@ class CreacionMasivaHojasTest extends TestCase
     public function test_presupuesto_de_tiempo_del_bulk_de_14_coches_por_30_dias(): void
     {        // Amplía el proyecto de 3 a 14 asignaciones activas.
         for ($i = 4; $i <= 14; $i++) {
-            $conductor = $this->crearTercero($this->empresaA, '9100002' . $i, 'T' . $i, $this->sedeA1);
-            $vehiculo = $this->crearVehiculo($this->empresaA, $conductor, 'MASA' . str_pad((string) $i, 2, '0', STR_PAD_LEFT), $this->sedeA1);
+            $conductor = $this->crearTercero($this->empresaA, '9100002'.$i, 'T'.$i, $this->sedeA1);
+            $vehiculo = $this->crearVehiculo($this->empresaA, $conductor, 'MASA'.str_pad((string) $i, 2, '0', STR_PAD_LEFT), $this->sedeA1);
             $this->insertar('project_driver_vehicles', [
                 'project_uuid' => $this->proyectoA1,
                 'third_party_uuid' => $conductor,
@@ -640,7 +706,7 @@ class CreacionMasivaHojasTest extends TestCase
             return; // medición solo en local
         }
 
-        fwrite(STDERR, 'bulk 14x30: ' . round($segundos, 2) . " s ({$totalQueries} queries)");
+        fwrite(STDERR, 'bulk 14x30: '.round($segundos, 2)." s ({$totalQueries} queries)");
         $this->assertLessThan(33.0, $segundos, 'El bulk de 14 coches × 30 días superó el presupuesto de tiempo del worker.');
     }
 
@@ -656,13 +722,13 @@ class CreacionMasivaHojasTest extends TestCase
         DB::enableQueryLog();
         DB::flushQueryLog();
 
-        $conteo = \App\Models\ServiceDeliveryControlSheet::where('is_active', true)->count();
+        $conteo = ServiceDeliveryControlSheet::where('is_active', true)->count();
         $queriesConteo = DB::getQueryLog();
         $this->assertSame(1, count($queriesConteo), 'Una consulta de conteo no debe cargar relaciones adicionales ni ejecutar subconsultas.');
         $this->assertGreaterThan(0, $conteo);
 
         DB::flushQueryLog();
-        $hoja = \App\Models\ServiceDeliveryControlSheet::whereNull('parent_uuid')->first();
+        $hoja = ServiceDeliveryControlSheet::whereNull('parent_uuid')->first();
         $queriesFirst = DB::getQueryLog();
         $this->assertSame(1, count($queriesFirst), 'Una consulta de primer registro sin with() explícito debe ejecutar exactamente una sentencia SQL.');
         $this->assertFalse($hoja->relationLoaded('routes'), 'La relación routes no debe cargarse forzosamente por defecto.');
@@ -721,7 +787,7 @@ class CreacionMasivaHojasTest extends TestCase
             'retirada_de_proyecto' => false,
         ]);
 
-        $evidence = app(\App\Services\ServiceDeliveryControlSheet\PcpEvidence::class);
+        $evidence = app(PcpEvidence::class);
         $resumen = $evidence->resumenProyectosEnLote([$this->proyectoA1]);
 
         $this->assertArrayHasKey($this->proyectoA1, $resumen);

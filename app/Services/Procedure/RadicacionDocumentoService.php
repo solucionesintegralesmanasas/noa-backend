@@ -246,7 +246,12 @@ class RadicacionDocumentoService
             'imagenes' => $this->datosImagenes($config, $empresa['logo']['imagen'] ?? null),
         ];
 
-        return $datos;
+        return app(\App\Services\Pdf\PdfService::class)->conMarca(
+            $datos,
+            $padre->company,
+            'radicacion_'.strtolower($clave),
+            \App\Services\Pdf\PdfService::logoParaMarca($padre->company)
+        );
     }
 
     /**
@@ -297,7 +302,7 @@ class RadicacionDocumentoService
             // Ciudad, firma y logo siguen siendo la identidad real de la empresa.
             'ciudad' => $empresa?->municipality?->name,
             'firma' => $this->imagenDeMedia($empresa?->signature, 480),
-            'logo' => $this->imagenDeMedia($empresa?->logo, 420),
+            'logo' => $this->imagenDeMedia(\App\Services\Pdf\PdfService::logoParaMarca($empresa), 420),
         ];
     }
 
@@ -664,7 +669,9 @@ class RadicacionDocumentoService
                 ?? $this->imagenDeMedia($this->archivoComoMedia(public_path('img/transporte.png')), 420)['imagen'],
             'superintendencia' => $deConfig('SUPER_LOGO', 300)
                 ?? $this->imagenDeMedia($this->archivoComoMedia(public_path('img/super2.png')), 300)['imagen'],
-            'empresa' => $deConfig('LETTERHEAD', 420) ?? $logoEmpresa,
+            // El membrete completo (LETTERHEAD) lo gestiona PdfService::conMarca(); la cabecera
+            // derecha en modo fondo debe mostrar únicamente el logo corporativo de la empresa.
+            'empresa' => $logoEmpresa,
         ];
     }
 

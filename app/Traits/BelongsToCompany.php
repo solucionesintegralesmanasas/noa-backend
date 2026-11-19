@@ -173,11 +173,15 @@ trait BelongsToCompany
 
     protected static function resolveCurrentCompanyUuid(): ?string
     {
-        return Request::instance()->attributes->get('current_company_uuid')
-            ?? Request::instance()->header('X-Company-UUID')
-            ?? Request::instance()->input('company_uuid')
+        $request = Request::instance();
+
+        return $request->attributes->get('current_company_uuid')
+            ?? $request->header('X-Company-UUID')
+            ?? $request->input('company_uuid')
             ?? session('current_company_uuid')
-            ?? Auth::user()?->companies()->first()?->uuid;
+            ?? ($request->attributes->get('company_context_resolved', false)
+                ? null
+                : Auth::user()?->companies()->first()?->uuid);
     }
 
     /**

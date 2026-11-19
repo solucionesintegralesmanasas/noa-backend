@@ -1,21 +1,27 @@
+@php
+    $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null, 'landscape');
+    $sinMarcaVisual = !empty($letterhead ?? null) || !empty($ocultar_marca ?? false);
+@endphp
 <!DOCTYPE html>
 <html lang="es">
 
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <title>OPE-F-006 Planilla de Control de Prestación de Servicios</title>
+    @include('pdf.standard.fonts')
     <style>
         /* ============================================================
-       DOMPDF COMPATIBLE - Transporte Sin Barreras S.A.S.
+       DOMPDF COMPATIBLE - Planilla Oficial NOA Transportes
        Formato Oficial: OPE-F-006 Planilla de Control de Prestación de Servicios
        Normativa: PESV / Decreto 1079 de 2015 / SGC ISO 9001
        Formato: Carta Horizontal (Letter Landscape: 11in x 8.5in)
        CSS 100% Nativo para Laravel DomPDF (Tablas estrictas)
+       Tipografía: pdf.standard.fonts (Inter local, única fuente de las @font-face).
        ============================================================ */
 
         @page {
             size: letter landscape;
-            margin: 6mm 7mm 6mm 7mm;
+            margin: {{ $esHojaMembretadaCompleta ? '26mm 8mm 26mm 8mm' : '6mm 7mm 6mm 7mm' }};
         }
 
         /* El selector universal NO debe tocar `margin`: si resetea el margen de
@@ -28,11 +34,27 @@
         body {
             margin: 0;
             padding: 0;
-            font-family: 'Helvetica', 'Arial', sans-serif;
-            font-size: 8pt;
-            line-height: 1.2;
-            color: #0f172a;
-            background-color: #ffffff;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-weight: 400;
+            font-size: 7.4pt;
+            line-height: 1.15;
+            color: #111827;
+            background-color: {{ $esHojaMembretadaCompleta ? 'transparent' : '#ffffff' }};
+        }
+
+        #letterhead-page-bg {
+            position: fixed;
+            top: -26mm;
+            left: -8mm;
+            width: 279.4mm;
+            height: 215.9mm;
+            z-index: -1000;
+        }
+
+        #letterhead-page-bg img {
+            width: 100%;
+            height: 100%;
+            display: block;
         }
 
         table {
@@ -76,12 +98,14 @@
             width: 16%;
             text-align: center;
             background: #ffffff;
-            padding: 3px;
+            padding: 2px 4px;
         }
 
         .header-logo-cell img {
-            max-height: 38px;
-            max-width: 92px;
+            max-height: 46px;
+            max-width: 112px;
+            width: auto;
+            height: auto;
         }
 
         .header-title-cell {
@@ -96,32 +120,32 @@
         }
 
         .company-name {
-            font-size: 8.6pt;
-            font-weight: 800;
-            color: #0f172a;
+            font-size: 8.4pt;
+            font-weight: bold;
+            color: #000000;
             text-transform: uppercase;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.25px;
             line-height: 1.1;
             white-space: nowrap;
         }
 
         .doc-main-title {
-            font-size: 9pt;
-            font-weight: 800;
-            color: #1e3a8a;
+            font-size: 8.8pt;
+            font-weight: bold;
+            color: #000000;
             text-transform: uppercase;
-            letter-spacing: 0.35px;
+            letter-spacing: 0.3px;
             margin-top: 1px;
             line-height: 1.15;
             white-space: nowrap;
         }
 
         .doc-sub-title {
-            font-size: 6.3pt;
-            font-weight: bold;
-            color: #64748b;
+            font-size: 6.2pt;
+            font-weight: 600;
+            color: #262626;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.4px;
             margin-top: 1px;
             white-space: nowrap;
         }
@@ -135,7 +159,7 @@
             border: none !important;
             border-bottom: 1px solid #0f172a !important;
             padding: 1.8px 4px !important;
-            font-size: 6.8pt;
+            font-size: 6.6pt;
         }
 
         .meta-table tr:last-child td {
@@ -144,69 +168,100 @@
 
         .meta-label {
             font-weight: bold;
-            color: #334155;
+            color: #111827;
             width: 48%;
-            background-color: #f8fafc;
+            background-color: #f7f7f7;
             border-right: 1px solid #0f172a !important;
             text-transform: uppercase;
-            font-size: 6.4pt;
+            font-size: 6.3pt;
         }
 
         .meta-val {
             font-weight: bold;
-            color: #0f172a;
+            color: #000000;
             text-align: center;
-            font-family: 'Courier', monospace;
-            font-size: 7pt;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 6.8pt;
             text-transform: uppercase;
         }
 
         /* ── 2. DATOS DEL VEHÍCULO, CLIENTE Y PROYECTO ── */
         .info-table {
             width: 100%;
-            border: 1px solid #0f172a;
+            border: 1px solid #1f2937;
             border-collapse: collapse;
             margin-bottom: 3.5px;
         }
 
         .info-table td {
-            border: 1px solid #cbd5e1;
-            padding: 2.6px 6px;
-            font-size: 7.5pt;
-            line-height: 1.2;
+            border: 1px solid #9ca3af;
+            padding: 2.4px 6px;
+            font-size: 7.2pt;
+            line-height: 1.15;
         }
 
         .info-lbl {
-            background-color: #f8fafc;
+            background-color: #f7f7f7;
             font-weight: bold;
-            color: #334155;
+            color: #111827;
             text-transform: uppercase;
-            font-size: 6.8pt;
+            font-size: 6.5pt;
             line-height: 1.05;
-            border-right: 1px solid #cbd5e1;
+            border-right: 1px solid #9ca3af;
         }
 
         .info-val {
-            font-weight: 600;
-            color: #0f172a;
+            font-weight: 500;
+            color: #000000;
         }
 
-        .placa-badge {
-            background-color: #fef08a;
-            color: #854d0e;
-            font-family: 'Courier', monospace;
-            font-size: 8.5pt;
-            font-weight: 800;
-            padding: 0.5px 5px;
-            border-radius: 2px;
-            border: 1px solid #facc15;
-            letter-spacing: 0.6px;
-            display: inline-block;
+        /* Placa · interno: micro-tabla alineada (base estándar pdf.standard.vehicle-line). */
+        .placa-inline-tbl {
+            width: auto;
+            table-layout: auto;
+            border-collapse: collapse;
+            margin: 0;
+        }
+
+        .placa-inline-tbl td {
+            border: none;
+            padding: 0;
+            vertical-align: middle;
+            line-height: 1.1;
+        }
+
+        .placa-inline-tbl td.placa-badge {
+            background-color: #f0f0f0;
+            color: #000000;
+            border: 0.6pt solid #1f2937;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-weight: bold;
+            font-size: 7.3pt;
+            padding: 1.2px 5px;
+            white-space: nowrap;
+        }
+
+        .placa-inline-tbl td.vehiculo-sep {
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-weight: bold;
+            font-size: 8pt;
+            color: #4b5563;
+            padding: 0 4px;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .placa-inline-tbl td.vehiculo-interno {
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-weight: bold;
+            font-size: 7.2pt;
+            color: #111827;
+            white-space: nowrap;
         }
 
         .highlight-client {
             font-weight: bold;
-            color: #1e3a8a;
+            color: #000000;
             text-transform: uppercase;
         }
 
@@ -230,40 +285,43 @@
         }
 
         .main-table thead th {
-            background-color: #1e3a8a;
-            color: #ffffff;
-            font-size: 7pt;
+            background-color: #f0f0f0;
+            color: #000000;
+            font-size: 6.7pt;
             font-weight: bold;
             text-transform: uppercase;
             padding: 3px 2px;
-            border: 1px solid #0f172a;
+            border: 1px solid #1f2937;
             text-align: center;
-            letter-spacing: 0.2px;
+            letter-spacing: 0.15px;
             vertical-align: middle;
         }
 
         .main-table thead th.sub-th {
-            background-color: #2563eb;
-            font-size: 6.2pt;
+            background-color: #e5e5e5;
+            color: #000000;
+            font-size: 6pt;
             padding: 2px 1px;
         }
 
         .main-table tbody td {
-            border: 1px solid #cbd5e1;
-            padding: 2.6px 3px;
-            font-size: 7.2pt;
+            border: 1px solid #9ca3af;
+            padding: 2.4px 3px;
+            font-size: 7pt;
+            color: #000000;
+            font-weight: 500;
             text-align: center;
             vertical-align: middle;
         }
 
         .main-table tbody tr:nth-child(even) td {
-            background-color: #f8fafc;
+            background-color: #fafafa;
         }
 
         .main-table .sin-registros {
             padding: 10px 6px;
             font-size: 7.5pt;
-            color: #64748b;
+            color: #374151;
             text-align: center;
         }
 
@@ -280,33 +338,33 @@
 
         .col-hora {
             width: 5.5%;
-            font-family: 'Courier', monospace;
-            font-size: 7pt;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 6.8pt;
         }
 
         .col-descanso {
             width: 4.5%;
-            font-family: 'Courier', monospace;
-            font-size: 6.8pt;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 6.6pt;
         }
 
         .col-total {
             width: 5%;
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
         }
 
         .col-km {
             width: 5.5%;
-            font-family: 'Courier', monospace;
-            font-size: 7pt;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
+            font-size: 6.8pt;
         }
 
         .col-km-tot {
             width: 5.5%;
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
-            color: #1e3a8a;
+            color: #000000;
         }
 
         .col-firma {
@@ -341,31 +399,31 @@
         .conductor-nombre {
             font-size: 5.7pt;
             line-height: 1.1;
-            color: #334155;
+            color: #111827;
         }
 
         .fecha-num {
-            font-weight: 800;
-            font-size: 8.5pt;
-            color: #0f172a;
+            font-weight: bold;
+            font-size: 8.2pt;
+            color: #000000;
             line-height: 1;
         }
 
         .fecha-txt {
             font-size: 5.8pt;
-            color: #475569;
+            color: #262626;
             text-transform: uppercase;
             white-space: nowrap;
         }
 
+        /* Estado del día sin color: cerrada = recuadro lleno gris; en ruta = recuadro blanco. */
         .tag-finalizada {
             display: inline-block;
             font-size: 5.3pt;
             font-weight: bold;
-            background-color: #dcfce7;
-            color: #15803d;
-            border: 0.5px solid #86efac;
-            border-radius: 1.5px;
+            background-color: #d8d8d8;
+            color: #000000;
+            border: 0.5px solid #1f2937;
             padding: 0 2px;
             text-transform: uppercase;
             margin-top: 1px;
@@ -375,10 +433,9 @@
             display: inline-block;
             font-size: 5.3pt;
             font-weight: bold;
-            background-color: #fef3c7;
-            color: #b45309;
-            border: 0.5px solid #fde68a;
-            border-radius: 1.5px;
+            background-color: #ffffff;
+            color: #000000;
+            border: 0.5px solid #9ca3af;
             padding: 0 2px;
             text-transform: uppercase;
             margin-top: 1px;
@@ -386,14 +443,14 @@
 
         .ruta-tit {
             font-weight: bold;
-            color: #0f172a;
+            color: #000000;
             line-height: 1.15;
-            font-size: 7.3pt;
+            font-size: 7.2pt;
         }
 
         .ruta-sub {
             font-size: 6pt;
-            color: #64748b;
+            color: #374151;
             margin-top: 1px;
             line-height: 1.2;
         }
@@ -413,7 +470,7 @@
 
         .firma-placeholder {
             font-size: 5.8pt;
-            color: #94a3b8;
+            color: #4b5563;
             font-style: italic;
         }
 
@@ -432,10 +489,12 @@
         }
 
         /* ── 4. BANDAS DE EVIDENCIA (SPEC-002) ── */
+        /* Bandas sin color: se distinguen por el grosor y trazo del marco, no por el tono. */
         .banda-evidencia {
-            border: 0.75pt solid #b45309;
-            background: #fffbeb;
-            color: #78350f;
+            border: 0.75pt solid #9ca3af;
+            border-left: 3pt solid #1f2937;
+            background: #f7f7f7;
+            color: #000000;
             padding: 3px 7px;
             margin-bottom: 3.5px;
             font-size: 6.5pt;
@@ -444,15 +503,17 @@
         }
 
         .banda-evidencia.banda-excepcion {
-            border-color: #991b1b;
-            background: #fef2f2;
-            color: #7f1d1d;
+            border: 1.2pt solid #1f2937;
+            border-left: 3pt solid #1f2937;
+            background: #f0f0f0;
+            color: #000000;
         }
 
         .banda-evidencia.banda-certificacion {
-            border-color: #0369a1;
-            background: #f0f9ff;
-            color: #0c4a6e;
+            border: 0.75pt dashed #1f2937;
+            border-left: 3pt solid #9ca3af;
+            background: #ffffff;
+            color: #000000;
         }
 
         .banda-evidencia-detalle {
@@ -463,45 +524,46 @@
         /* ── 5. RESUMEN DE TOTALES Y AUDITORÍA ── */
         .totals-table {
             width: 100%;
-            border: 1px solid #0f172a;
-            background-color: #f1f5f9;
+            border: 1px solid #1f2937;
+            background-color: #f0f0f0;
             margin-bottom: 3.5px;
             page-break-inside: avoid;
         }
 
         .totals-table td {
             padding: 3px 7px;
-            font-size: 7.3pt;
-            border: 1px solid #cbd5e1;
+            font-size: 7.1pt;
+            color: #000000;
+            border: 1px solid #9ca3af;
         }
 
         /* ── 6. BANDA DE EVIDENCIA OPERATIVA Y OBSERVACIONES ── */
         .obs-section {
             width: 100%;
-            border: 1px solid #0f172a;
+            border: 1px solid #1f2937;
             border-collapse: collapse;
             margin-bottom: 3.5px;
             page-break-inside: avoid;
         }
 
         .obs-header {
-            background-color: #e2e8f0;
-            border-left: 4px solid #1e3a8a;
+            background-color: #d8d8d8;
+            border-left: 3.5px solid #111827;
             padding: 2.5px 7px;
             font-size: 7pt;
             font-weight: bold;
-            color: #0f172a;
+            color: #000000;
             text-transform: uppercase;
             letter-spacing: 0.2px;
         }
 
         .obs-body {
             padding: 3.5px 7px;
-            font-size: 6.9pt;
-            color: #334155;
+            font-size: 6.8pt;
+            color: #111827;
             min-height: 18px;
             background-color: #ffffff;
-            line-height: 1.25;
+            line-height: 1.2;
         }
 
         /* ── 7. SECCIÓN DE FIRMAS DE RESPONSABILIDAD ── */
@@ -537,10 +599,10 @@
         }
 
         .sig-placeholder {
-            font-family: 'Courier', monospace;
+            font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-size: 6.5pt;
             font-weight: bold;
-            color: #94a3b8;
+            color: #4b5563;
             padding-top: 12px;
         }
 
@@ -550,24 +612,24 @@
         }
 
         .sig-title-txt {
-            font-size: 7.2pt;
+            font-size: 7pt;
             font-weight: bold;
             text-transform: uppercase;
-            color: #0f172a;
+            color: #000000;
         }
 
         .sig-sub-txt {
-            font-size: 6.3pt;
-            color: #475569;
+            font-size: 6.2pt;
+            color: #262626;
         }
 
         /* ── 8. PIE LEGAL Y CONTROL SGC ── */
         .legal-notice {
-            border: 1px solid #0f172a;
-            background-color: #f8fafc;
+            border: 1px solid #1f2937;
+            background-color: #f7f7f7;
             padding: 3.5px 7px;
             font-size: 6pt;
-            color: #475569;
+            color: #1f2937;
             text-align: justify;
             line-height: 1.25;
             page-break-inside: avoid;
@@ -576,7 +638,7 @@
         .footer-bar-sub {
             margin-top: 3px;
             font-size: 6.2pt;
-            color: #64748b;
+            color: #262626;
         }
     </style>
 </head>
@@ -595,7 +657,11 @@
         $logoMime = $logo_mime ?? 'image/png';
     @endphp
 
-    @if (!empty($letterhead ?? null))
+    @if (!empty($letterhead ?? null) && $esHojaMembretadaCompleta)
+        <div id="letterhead-page-bg">
+            <img src="{{ $letterhead }}" alt="Membrete">
+        </div>
+    @elseif (!empty($letterhead ?? null))
         <div class="letterhead-banner">
             <img src="{{ $letterhead }}" alt="Membrete">
         </div>
@@ -604,22 +670,22 @@
     <!-- 1. ENCABEZADO INSTITUCIONAL SGC / PESV -->
     <table class="header-table" cellpadding="0" cellspacing="0">
         <tr>
-            <!-- Logotipo -->
-            <td class="header-logo-cell">
-                @if (!empty($logo))
-                    <img src="data:{{ $logoMime }};base64,{{ $logo }}" alt="Logo empresa">
-                @else
-                    <div style="font-weight: 900; font-size: 13pt; color: #1e3a8a; line-height: 1;">SB</div>
-                    <div
-                        style="font-size: 5.2pt; font-weight: bold; color: #0f172a; text-transform: uppercase; margin-top: 1px;">
-                        Transportes Sin Barreras
-                    </div>
-                @endif
-            </td>
+            @if (! $sinMarcaVisual)
+                <!-- Logotipo -->
+                <td class="header-logo-cell">
+                    @if (!empty($logo))
+                        <img src="data:{{ $logoMime }};base64,{{ $logo }}" alt="Logo empresa">
+                    @else
+                        <div class="logo-monogram" style="font-weight: bold; font-size: 13pt; color: #111827; line-height: 1; letter-spacing: 0.5px;">
+                            {{ $empresa_siglas ?? \App\Services\Pdf\PdfService::siglasEmpresa((string) ($empresa_transportadora ?? '')) }}
+                        </div>
+                    @endif
+                </td>
+            @endif
 
             <!-- Título Central -->
-            <td class="header-title-cell">
-                <div class="company-name">{{ $empresa_transportadora ?? 'TRANSPORTES ESPECIALES SIN BARRERAS S.A.S.' }}
+            <td class="header-title-cell" @if ($sinMarcaVisual) style="width: 74%;" @endif>
+                <div class="company-name">{{ $empresa_transportadora ?? 'EMPRESA DE TRANSPORTE ESPECIAL' }}
                 </div>
                 <div class="doc-main-title">PLANILLA DE CONTROL DE PRESTACIÓN DE SERVICIOS</div>
                 <div class="doc-sub-title">PLAN ESTRATÉGICO DE SEGURIDAD VIAL (PESV) · CONTROL OPERACIONAL DIARIO
@@ -643,12 +709,12 @@
                     </tr>
                     <tr>
                         <td class="meta-label">PERÍODO</td>
-                        <td class="meta-val" style="color: #1e3a8a;">{{ $periodo ?? 'N/A' }}</td>
+                        <td class="meta-val" style="color: #000000;">{{ $periodo ?? 'N/A' }}</td>
                     </tr>
                     @if (!empty($es_historial))
                         <tr>
                             <td class="meta-label">TIPO</td>
-                            <td class="meta-val" style="color: #b45309;">HISTORIAL</td>
+                            <td class="meta-val">HISTORIAL</td>
                         </tr>
                     @endif
                 </table>
@@ -661,10 +727,10 @@
         <tr>
             <td class="info-lbl" style="width: 12%;">Placa Vehículo:</td>
             <td class="info-val" style="width: 20%;">
-                <span class="placa-badge">{{ $placa ?? 'N/A' }}</span>
-                @if (!empty($numero_interno))
-                    &nbsp;<strong style="font-size: 7.5pt; color: #1e3a8a;">{{ $numero_interno }}</strong>
-                @endif
+                @include('pdf.standard.vehicle-line', [
+                    'placa' => $placa ?? 'N/A',
+                    'numero_interno' => $numero_interno ?? null,
+                ])
             </td>
             <td class="info-lbl" style="width: 14%;">Clase de Vehículo:</td>
             <td class="info-val uppercase" style="width: 20%;">{{ $clase ?? 'N/A' }}</td>
@@ -677,14 +743,14 @@
                 {{ $empresa ?? 'N/A' }}
             </td>
             <td class="info-lbl">NIT Cliente:</td>
-            <td class="info-val" style="font-family: 'Courier', monospace; font-weight: bold;">
+            <td class="info-val" style="font-weight: bold;">
                 {{ $nit ?? 'N/A' }}
             </td>
         </tr>
         <tr>
             <td class="info-lbl">Proyecto / Contrato:</td>
             <td class="info-val" colspan="5">
-                <strong style="color: #0f172a;">{{ $proyecto ?? 'N/A' }}</strong>
+                <strong style="color: #000000;">{{ $proyecto ?? 'N/A' }}</strong>
                 @if (!empty($proyecto_vigencia))
                     &nbsp;·&nbsp; Vigencia: {{ $proyecto_vigencia }}
                 @endif
@@ -699,7 +765,7 @@
                 <th rowspan="2" class="col-fecha">FECHA</th>
                 <th rowspan="2" class="col-ruta">RUTA OPERATIVA DIARIA</th>
                 <th rowspan="2" class="col-hora">HORA<br>INICIO</th>
-                <th colspan="2" style="width: 9%; background-color: #1e40af;">HORAS DESCANSO</th>
+                <th colspan="2" style="width: 9%; background-color: #d8d8d8; color: #000000;">HORAS DESCANSO</th>
                 <th rowspan="2" class="col-hora">HORA<br>FINAL</th>
                 <th rowspan="2" class="col-total">TOTAL<br>HORAS</th>
                 <th rowspan="2" class="col-km">KM<br>INICIAL</th>
@@ -787,7 +853,7 @@
                 Total Horas Servicio: <strong>{{ $totalHoras }}</strong>
             </td>
             <td
-                style="width: 25%; text-align: center; color: #1e3a8a; font-weight: bold; font-family: 'Courier', monospace; font-size: 7.5pt;">
+                style="width: 25%; text-align: center; color: #000000; font-weight: bold; font-size: 7.3pt;">
                 Total Kilómetros: {{ number_format((float) $totalKm, 0, ',', '.') }} Km
             </td>
         </tr>
@@ -853,10 +919,10 @@
     <table class="footer-bar-sub" cellpadding="0" cellspacing="0" style="width: 100%;">
         <tr>
             <td style="text-align: left; width: 70%;">
-                {{ $empresa_transportadora ?? 'Transportes Especiales Sin Barreras S.A.S.' }} · Sistema de Gestión de
+                {{ $empresa_transportadora ?? 'Empresa de Transporte Especial' }} · Sistema de Gestión de
                 Operaciones
             </td>
-                    <td style="text-align: right; width: 30%; font-family: 'Courier', monospace;">
+                    <td style="text-align: right; width: 30%; font-weight: 600;">
                         OPE-F-006 · Versión 002
                     </td>
                 </tr>

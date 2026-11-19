@@ -7,8 +7,10 @@ namespace App\Http\Controllers\Api\V1\Billing;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Billing\StoreNoteRequest;
 use App\Services\Billing\DebitNoteService;
+use App\Services\Billing\NotaPdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use OpenApi\Attributes as OA;
 
 /** Notas débito internas (sin transmisión DIAN por ahora). */
@@ -23,11 +25,20 @@ class DebitNoteController extends Controller
     {
         try {
             $filtros = array_filter([
-                'company_uuid' => $request->query('company_uuid'),
+                'company_uuid' => $request->attributes->get('current_company_uuid') ?? $request->query('company_uuid'),
                 'status' => $request->query('status'),
+                'electronic_status' => $request->query('electronic_status'),
+                'invoice_uuid' => $request->query('invoice_uuid'),
+                'third_party_uuid' => $request->query('third_party_uuid'),
             ]);
 
-            $pagina = $this->notas->search($filtros, ['*'], (int) $request->query('per_page', 15), ['invoice']);
+            $pagina = $this->notas->listar(
+                $filtros,
+                (int) $request->query('per_page', 15),
+                $request->query('search'),
+                $request->query('sort_by'),
+                $request->query('sort_order', 'desc')
+            );
 
             return $this->successResponse($pagina, 'Notas débito recuperadas con éxito.');
         } catch (\Throwable $e) {
@@ -69,6 +80,21 @@ class DebitNoteController extends Controller
             $registro = $this->notas->emitirNota($uuid);
 
             return $this->successResponse($registro, 'Nota débito emitida con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(path: '/api/v1/billing/debit-notes/{uuid}/pdf', summary: 'Descargar PDF de nota débito', operationId: 'pdfDebitNote', tags: ['Facturación'], security: [['bearerAuth' => []]])]
+    public function pdf(string $uuid, NotaPdfService $notaPdf): Response|JsonResponse
+    {
+        try {
+            $registro = $this->notas->detalle($uuid);
+            if (! $registro) {
+                return $this->errorResponse('La nota solicitada no existe.', 404);
+            }
+
+            return $notaPdf->descargar($registro, NotaPdfService::TIPO_DEBITO);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

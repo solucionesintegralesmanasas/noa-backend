@@ -32,17 +32,19 @@ class CommercialInvoiceController extends Controller
     {
         try {
             $filtros = array_filter([
-                'company_uuid' => $request->query('company_uuid'),
+                'company_uuid' => $request->attributes->get('current_company_uuid') ?? $request->query('company_uuid'),
                 'invoice_type' => $request->query('invoice_type'),
                 'status' => $request->query('status'),
+                'electronic_status' => $request->query('electronic_status'),
                 'third_party_uuid' => $request->query('third_party_uuid'),
             ]);
 
-            $pagina = $this->documentos->search(
+            $pagina = $this->documentos->listar(
                 $filtros,
-                ['*'],
                 (int) $request->query('per_page', 15),
-                ['customer', 'project']
+                $request->query('search'),
+                $request->query('sort_by'),
+                $request->query('sort_order', 'desc')
             );
 
             return $this->successResponse($pagina, 'Documentos recuperados con éxito.');
@@ -172,6 +174,33 @@ class CommercialInvoiceController extends Controller
             $registro = $this->documentos->emitirFactura($uuid);
 
             return $this->successResponse($registro, 'Factura enviada a la DIAN con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(path: '/api/v1/billing/commercial-invoices/{uuid}/estado-dian', summary: 'Consultar estado electrónico ante DIAN', operationId: 'statusDianCommercialInvoice', tags: ['Facturación'], security: [['bearerAuth' => []]])]
+    public function estadoDian(string $uuid): JsonResponse
+    {
+        try {
+            $resultado = $this->documentos->consultarEstadoDian($uuid);
+
+            return $this->successResponse($resultado, 'Estado DIAN consultado con éxito.');
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Post(path: '/api/v1/billing/commercial-invoices/{uuid}/enviar-correo', summary: 'Enviar documento electrónico por correo', operationId: 'sendEmailCommercialInvoice', tags: ['Facturación'], security: [['bearerAuth' => []]])]
+    public function enviarCorreo(Request $request, string $uuid): JsonResponse
+    {
+        try {
+            $datos = $request->validate([
+                'email' => ['nullable', 'email', 'max:255'],
+            ]);
+            $resultado = $this->documentos->enviarPorCorreo($uuid, $datos['email'] ?? null);
+
+            return $this->successResponse($resultado, $resultado['message']);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

@@ -82,6 +82,9 @@ class NotificationsService extends BaseService
      */
     private ?Collection $vehiculosPrecargados = null;
 
+    /** @var array<string, array<int, string>> */
+    private array $nombresPropiosPorEmpresa = [];
+
     /**
      * Precarga de una vez los vehículos referenciados por las alertas.
      */
@@ -126,7 +129,14 @@ class NotificationsService extends BaseService
             return 'NORMAL';
         }
 
-        return OwnCompany::esVehiculoPropio($vehicle, $companyUuid ?? $vehicle->company_uuid)
+        $targetCompany = $companyUuid ?? $vehicle->company_uuid;
+        $nombresPropios = null;
+        if ($targetCompany) {
+            $this->nombresPropiosPorEmpresa[$targetCompany] ??= OwnCompany::nombresPropios($targetCompany);
+            $nombresPropios = $this->nombresPropiosPorEmpresa[$targetCompany];
+        }
+
+        return OwnCompany::esVehiculoPropio($vehicle, $targetCompany, $nombresPropios)
             ? 'PRIORITARIA'
             : 'NORMAL';
     }
@@ -373,6 +383,7 @@ class NotificationsService extends BaseService
      */
     public function syncNotifications(?string $companyUuid = null, ?string $thirdPartyUuid = null): void
     {
+        $this->nombresPropiosPorEmpresa = [];
         BelongsToCompany::withoutCompanyScope(function () use ($companyUuid, $thirdPartyUuid) {
             $this->transaction(function () use ($companyUuid, $thirdPartyUuid) {
             $vehicleDocs = $this->notificationsForVehicleDocuments($companyUuid, $thirdPartyUuid);
@@ -952,6 +963,7 @@ class NotificationsService extends BaseService
      */
     public function syncForVehicle(Vehicle|string $vehicleOrUuid): void
     {
+        $this->nombresPropiosPorEmpresa = [];
         BelongsToCompany::withoutCompanyScope(function () use ($vehicleOrUuid) {
             $this->transaction(function () use ($vehicleOrUuid) {
                 if ($vehicleOrUuid instanceof Vehicle) {

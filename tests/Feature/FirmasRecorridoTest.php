@@ -37,11 +37,14 @@ class FirmasRecorridoTest extends TestCase
         // para poder usar un company_uuid sintético sin reconstruir municipios,
         // regímenes y tipos de documento.
         Schema::disableForeignKeyConstraints();
+        \Carbon\Carbon::setTestNow('2026-09-20 10:00:00');
         $this->companyUuid = (string) Str::uuid();
+        request()->attributes->set('current_company_uuid', $this->companyUuid);
     }
 
     protected function tearDown(): void
     {
+        \Carbon\Carbon::setTestNow();
         Schema::enableForeignKeyConstraints();
 
         parent::tearDown();

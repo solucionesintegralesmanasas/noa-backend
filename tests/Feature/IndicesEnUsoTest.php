@@ -59,6 +59,7 @@ class IndicesEnUsoTest extends TestCase
         $this->sembrarPuntos(2500);
         $this->sembrarAlertas(500);
         $this->sembrarPlanillas();
+        request()->attributes->set('current_company_uuid', $this->empresa);
         DB::statement('ANALYZE TABLE driver_locations, driver_location_alerts, service_delivery_control_sheet');
     }
 
@@ -275,11 +276,11 @@ class IndicesEnUsoTest extends TestCase
 
         // Respaldo ("última conocida"): hoy recorre la tabla porque el rango más
         // los EXISTS no compensan el índice con este volumen; lo que se fija es
-        // que sigue acotado (LIMIT 500) para que no crezca sin límite.
+        // que sigue acotado al tope proporcional (SPEC-015: 3 ubicaciones = LIMIT 150).
         $respaldo = array_values(array_filter($planes, fn ($p) => str_contains($p['sql'], '`service_date` <=')));
         $this->assertNotEmpty($respaldo, 'El monitor ejecuta el respaldo de planillas');
         foreach ($respaldo as $plano) {
-            $this->assertMatchesRegularExpression('/limit 500$/i', trim($plano['sql']), 'El respaldo de planillas perdió su tope');
+            $this->assertMatchesRegularExpression('/limit 150$/i', trim($plano['sql']), 'El respaldo de planillas perdió su tope');
         }
     }
 }

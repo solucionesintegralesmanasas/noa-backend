@@ -87,6 +87,8 @@ class SolicitudTanqueoAislamientoTest extends TestCase
         $this->adminA = $this->crearUsuario($this->empresaA, 'ADMIN_EMPRESA', 'admin.solicitud.a@test.local');
         $this->adminB = $this->crearUsuario($this->empresaB, 'ADMIN_EMPRESA', 'admin.solicitud.b@test.local');
         $this->superadmin = $this->crearSuperadmin('super.solicitud@test.local');
+
+        request()->attributes->remove('current_company_uuid');
     }
 
     public function test_no_crea_solicitud_con_un_vehiculo_de_otra_empresa(): void

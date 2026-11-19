@@ -6,6 +6,8 @@ namespace App\Services\Billing;
 
 use App\Models\BillingProvider;
 use App\Models\CommercialInvoice;
+use App\Models\CreditNote;
+use App\Models\DebitNote;
 use App\Models\ElectronicInvoice;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Client\Response;
@@ -38,7 +40,7 @@ class ApidianFacturacion implements ContratoFacturacionElectronica, ContratoNota
         $payload = (new ApidianMapeo($this->proveedor->settings ?? []))->map($factura);
         // FACTW valida número Y resolución contra SU rango (FAB12): usamos su rango activo,
         // no el consecutivo ni la resolución internos de NOA.
-        $rango = $this->rangoDeFacturacion();
+        $rango = $this->rangoParaDocumento(1);
         $payload['number'] = $rango['number'];
         $payload['resolution_number'] = $rango['resolution'];
         $payload['send'] = (bool) $this->proveedor->send_to_dian;
@@ -96,12 +98,52 @@ class ApidianFacturacion implements ContratoFacturacionElectronica, ContratoNota
 
     public function emitirNota(Model $nota): array
     {
-        throw new \RuntimeException('ApiDian aún no soporta notas crédito/débito en NOA. Usa el driver Factus o emite la nota manualmente.');
+        $esCredito = $nota instanceof CreditNote;
+        if (! $esCredito && ! $nota instanceof DebitNote) {
+            throw new \InvalidArgumentException('El documento no es una nota crédito ni débito.');
+        }
+
+        $tipoDocumentoId = $esCredito ? 4 : 5;
+        $endpoint = $esCredito ? '/api/ubl2.1/credit-note' : '/api/ubl2.1/debit-note';
+
+        $payload = (new ApidianMapeo($this->proveedor->settings ?? []))->mapNota($nota);
+        $rango = $this->rangoParaDocumento($tipoDocumentoId);
+        $payload['number'] = $rango['number'];
+        $payload['send'] = (bool) $this->proveedor->send_to_dian;
+
+        $respuesta = $this->transmite($endpoint, $payload);
+
+        $nota->withoutLogging(fn () => $nota->update([
+            'electronic_status' => $respuesta['estado'],
+            'cude' => $respuesta['cufe'],
+            'dian_response' => $respuesta['crudo'],
+        ]));
+
+        return $respuesta;
     }
 
     public function consultarEstadoNota(Model $nota): array
     {
-        return ['estado' => $nota->electronic_status, 'detalle' => 'ApiDian no soporta notas en NOA.'];
+        $numero = $nota->dian_response['number'] ?? $nota->dian_response['data']['number'] ?? null;
+        if (! $numero) {
+            return [
+                'estado' => $nota->electronic_status,
+                'transmitido' => $this->proveedor->send_to_dian,
+                'detalle' => 'Nota sin número de ApiDian: nunca se validó.',
+            ];
+        }
+
+        $cliente = new ApidianCliente($this->proveedor);
+        $respuesta = $cliente->enviar('get', $cliente->baseUrl().'/api/ubl2.1/documents', ['number' => (string) $numero]);
+        $crudo = $respuesta->json() ?? [];
+
+        return [
+            'estado' => $this->estadoDeConsulta($crudo),
+            'transmitido' => $this->proveedor->send_to_dian,
+            'cude' => $nota->cude,
+            'numero' => $numero,
+            'crudo' => $crudo,
+        ];
     }
 
     /** Login con email + contraseña (lo usa el guardado del proveedor). */
@@ -121,12 +163,13 @@ class ApidianFacturacion implements ContratoFacturacionElectronica, ContratoNota
     // ─── transporte ────────────────────────────────────────────────────────
 
     /**
-     * Rango activo de factura (type_document_id 1) de FACTW. FACTW valida número y
-     * resolución contra SU rango (regla FAB12), no contra los internos de NOA.
+     * Rango activo del tipo de documento (1=factura, 4=nota crédito, 5=nota débito)
+     * en FACTW. FACTW valida número y resolución contra SU rango (regla FAB12), no
+     * contra los consecutivos internos de NOA.
      *
      * @return array{number:int, resolution:string}
      */
-    private function rangoDeFacturacion(): array
+    private function rangoParaDocumento(int $tipoDocumentoId): array
     {
         $cliente = new ApidianCliente($this->proveedor);
         $respuesta = $cliente->enviar('get', $cliente->baseUrl().'/api/ubl2.1/numbering-ranges');
@@ -134,15 +177,21 @@ class ApidianFacturacion implements ContratoFacturacionElectronica, ContratoNota
 
         $rangos = collect(is_array($data['data'] ?? null) ? $data['data'] : (is_array($data) ? $data : []));
 
-        // Primer rango activo de factura por id, para ser determinista ante rangos solapados.
+        // Primer rango activo del tipo de documento por id, para ser determinista ante rangos solapados.
         $rango = $rangos
-            ->where('type_document_id', 1)
+            ->where('type_document_id', $tipoDocumentoId)
             ->filter(fn ($r) => ($r['active'] ?? true))
             ->sortBy(fn ($r) => $r['id'] ?? 0)
             ->first();
 
+        $nombreDoc = match ($tipoDocumentoId) {
+            4 => 'nota crédito',
+            5 => 'nota débito',
+            default => 'factura',
+        };
+
         if ($rango === null) {
-            throw new \RuntimeException('No se pudo obtener el rango de factura de ApiDian. Verifica la numeración en FACTW.');
+            throw new \RuntimeException("No se pudo obtener el rango de {$nombreDoc} de ApiDian. Verifica la numeración en FACTW.");
         }
 
         $next = $rango['next'] ?? null;
@@ -151,7 +200,7 @@ class ApidianFacturacion implements ContratoFacturacionElectronica, ContratoNota
         }
 
         if ($next === null || $next === '' || (int) $next <= 0) {
-            throw new \RuntimeException('No se pudo obtener el consecutivo de ApiDian. Verifica el rango de numeración en FACTW.');
+            throw new \RuntimeException("No se pudo obtener el consecutivo de {$nombreDoc} de ApiDian. Verifica el rango de numeración en FACTW.");
         }
 
         return [

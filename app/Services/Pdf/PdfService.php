@@ -14,6 +14,7 @@ use App\Services\Fleet\AffiliateAdminChargeService;
 use App\Services\Fleet\BusinessCollaborationAgreementService;
 use App\Services\Fleet\VehicleService;
 use App\Services\ThirdParties\ThirdPartyService;
+use App\Support\Billing\QrDian;
 use App\Utils\Logger;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
@@ -21,6 +22,7 @@ use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
@@ -68,12 +70,12 @@ class PdfService
     private function claseDeHoja(ServiceDeliveryControlSheet $sheet): string
     {
         if ($sheet->type_of_control_sheet === 'DIRECTO_CON_LA_EMPRESA') {
-            return $sheet->internalControl?->vehicle?->vehicleClass?->name ?: 'N/A';
+            return $sheet->internalControl?->vehicle?->vehicleClass?->description ?: 'N/A';
         }
 
         if (in_array($sheet->type_of_control_sheet, ['SUBCONTRATADO', 'CON_VEHICULO_CONTRATADO', 'EXTERNO_PLATAFORMA'], true)) {
-            return $sheet->subcontractedControl?->vehicleClass?->name
-                ?? $sheet->internalControl?->vehicle?->vehicleClass?->name
+            return $sheet->subcontractedControl?->vehicleClass?->description
+                ?? $sheet->internalControl?->vehicle?->vehicleClass?->description
                 ?? 'N/A';
         }
 
@@ -460,14 +462,39 @@ class PdfService
      */
     public function letterheadDataUrl(?object $company = null): ?string
     {
-        try {
-            $media = null;
+        return $this->letterheadDesdeConfiguracion($company, $this->configuracionPdfDe($company));
+    }
 
-            $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
-            if ($companyUuid) {
-                $config = SystemConfiguration::where('company_uuid', $companyUuid)->first();
-                $media = $config?->getFirstMedia('LETTERHEAD');
+    /**
+     * Configuración del sistema de la empresa, resuelta UNA sola vez por documento.
+     *
+     * Si la empresa llega con la relación `systemConfiguration` precargada (reportes,
+     * con presupuesto de consultas) no se consulta la base: el render cuesta 0 consultas.
+     */
+    private function configuracionPdfDe(?object $company): ?SystemConfiguration
+    {
+        $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
+        if (! $companyUuid) {
+            return null;
+        }
+
+        try {
+            if ($company instanceof \Illuminate\Database\Eloquent\Model && $company->relationLoaded('systemConfiguration')) {
+                return $company->getRelation('systemConfiguration');
             }
+
+            return SystemConfiguration::withoutGlobalScopes()->where('company_uuid', $companyUuid)->first();
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudo leer la configuración de PDF: ' . $e->getMessage());
+
+            return null;
+        }
+    }
+
+    private function letterheadDesdeConfiguracion(?object $company, ?SystemConfiguration $config): ?string
+    {
+        try {
+            $media = $config?->getFirstMedia('LETTERHEAD');
 
             if (! $media) {
                 $media = self::logoParaMarca($company);
@@ -515,6 +542,8 @@ class PdfService
         'fuec',
         'cotizacion',
         'factura_comercial',
+        'nota_credito',
+        'nota_debito',
         'hoja_vida_vehicular',
         'ficha_tecnica_vehiculo',
         'acta_entrega',
@@ -528,6 +557,8 @@ class PdfService
         'reporte_actividad_vehicular',
         'ficha_tecnica_tercero',
         'inspeccion_preoperacional',
+        'contrato_laboral',
+        'contrato_alquiler',
     ];
 
     /**
@@ -537,13 +568,9 @@ class PdfService
     {
         try {
             if ($companyUuid) {
-                $config = SystemConfiguration::where('company_uuid', $companyUuid)->first();
-                $modo = is_array($config?->pdf_branding ?? null)
-                    ? ($config->pdf_branding[$clave] ?? null)
-                    : null;
-                if (in_array($modo, [self::PDF_MODO_MEMBRETE, self::PDF_MODO_FONDO, self::PDF_MODO_LIMPIO], true)) {
-                    return $modo;
-                }
+                $config = SystemConfiguration::withoutGlobalScopes()->where('company_uuid', $companyUuid)->first();
+
+                return $this->modoDesdeConfiguracion($config, $clave);
             }
         } catch (\Throwable $e) {
             Logger::warning('No se pudo leer pdf_branding: ' . $e->getMessage());
@@ -552,21 +579,36 @@ class PdfService
         return self::PDF_MODO_DEFECTO;
     }
 
+    private function modoDesdeConfiguracion(?SystemConfiguration $config, string $clave): string
+    {
+        $modo = is_array($config?->pdf_branding ?? null)
+            ? ($config->pdf_branding[$clave] ?? null)
+            : null;
+
+        return in_array($modo, [self::PDF_MODO_MEMBRETE, self::PDF_MODO_FONDO, self::PDF_MODO_LIMPIO], true)
+            ? $modo
+            : self::PDF_MODO_DEFECTO;
+    }
+
     /**
      * Resuelve membrete y logo de fondo según el modo configurado.
+     *
+     * La configuración de la empresa se resuelve una sola vez (o 0 veces si llega
+     * precargada en `$company->systemConfiguration`) y se reutiliza para el modo y
+     * para el membrete.
      *
      * @param  mixed  $logoModel  Modelo de MediaLibrary, ruta o nulo.
      * @return array{modo: string, letterhead: string|null, logo_fondo: string|null}
      */
     public function marcaPdfPara(?object $company, string $clave, mixed $logoModel): array
     {
-        $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
-        $modo = $this->modoPdfPara($companyUuid, $clave);
+        $config = $this->configuracionPdfDe($company);
+        $modo = $this->modoDesdeConfiguracion($config, $clave);
 
         if ($modo === self::PDF_MODO_MEMBRETE) {
             return [
                 'modo' => $modo,
-                'letterhead' => $this->letterheadDataUrl($company),
+                'letterhead' => $this->letterheadDesdeConfiguracion($company, $config),
                 'logo_fondo' => null,
             ];
         }
@@ -608,6 +650,81 @@ class PdfService
     }
 
     /**
+     * Identidad visual de la empresa para la base estándar de PDF.
+     *
+     * El logo es SIEMPRE el configurado por la empresa en Configuraciones → Identidad
+     * y Firmas (colección LOGO de `Company`). Si no tiene, no se toma el de otra
+     * empresa: la vista cae al monograma con las siglas de la razón social.
+     *
+     * @param  mixed  $logoModel  Modelo pre-resuelto (opcional) para evitar buscarlo dos veces.
+     * @return array{logo_data_url: string|null, empresa_siglas: string}
+     */
+    public function identidadEmpresa(?object $company, mixed $logoModel = null): array
+    {
+        $logoModel ??= self::logoParaMarca($company);
+        $dataUrl = null;
+
+        if ($logoModel) {
+            try {
+                $base64 = $this->getBase64Parallel(['logo' => $logoModel], ['logo' => 600])['logo'] ?? null;
+                if (! empty($base64)) {
+                    $mime = $this->detectLogoMime($logoModel) ?? 'image/png';
+                    $dataUrl = 'data:' . $mime . ';base64,' . $base64;
+                }
+            } catch (\Throwable $e) {
+                Logger::warning('No se pudo resolver el logo de la empresa para el PDF: ' . $e->getMessage());
+            }
+        }
+
+        return [
+            'logo_data_url' => $dataUrl,
+            'empresa_siglas' => self::siglasEmpresa((string) ($company->business_name ?? '')),
+        ];
+    }
+
+    /**
+     * Siglas (máx. 3 letras) para el monograma de respaldo del encabezado.
+     */
+    public static function siglasEmpresa(string $razonSocial): string
+    {
+        $palabras = preg_split('/[\s\.,]+/u', trim($razonSocial)) ?: [];
+        $siglas = '';
+        foreach ($palabras as $palabra) {
+            if (mb_strlen($palabra) > 2 && ! in_array(mb_strtoupper($palabra), ['SAS', 'LTDA', 'S.A.S'], true)) {
+                $siglas .= mb_strtoupper(mb_substr($palabra, 0, 1));
+            }
+            if (mb_strlen($siglas) === 3) {
+                break;
+            }
+        }
+
+        return $siglas !== '' ? $siglas : 'EMP';
+    }
+
+    public static function esHojaMembretadaCompleta(?string $letterhead, string $orientation = 'portrait'): bool
+    {
+        if (empty($letterhead) || ! is_string($letterhead) || ! str_contains($letterhead, 'base64,')) {
+            return false;
+        }
+
+        $rawImg = @base64_decode((string) \Illuminate\Support\Str::after($letterhead, 'base64,'), true);
+        if ($rawImg === false) {
+            return false;
+        }
+
+        $dims = @getimagesizefromstring($rawImg);
+        if (! is_array($dims) || ($dims[0] ?? 0) <= 0 || ($dims[1] ?? 0) <= 0) {
+            return false;
+        }
+
+        if ($orientation === 'landscape') {
+            return $dims[0] > $dims[1] && ($dims[1] / $dims[0]) >= 0.55;
+        }
+
+        return $dims[1] > $dims[0];
+    }
+
+    /**
      * Inyecta las claves de presentación (`letterhead`, `logo_fondo`,
      * `ocultar_marca`) en los datos de cualquier vista PDF.
      *
@@ -634,7 +751,18 @@ class PdfService
      * re-renderiza, el sello sobrevive al download()/stream()/output() posterior.
      * Coordenadas del canvas: se adaptan solas a vertical u horizontal.
      */
-    public function sellarPaginado(\Barryvdh\DomPDF\PDF $pdf): \Barryvdh\DomPDF\PDF
+    /** Margen derecho de la Planilla de Control (7 mm) en puntos: 7 * 72 / 25.4. */
+    public const MARGEN_DERECHO_PLANILLA_PT = 19.84;
+
+    /** Margen derecho de la base estándar (10 mm) en puntos: 10 * 72 / 25.4. */
+    public const MARGEN_DERECHO_ESTANDAR_PT = 28.35;
+
+    /**
+     * @param  float|null  $margenDerechoPt  Margen derecho real del documento en puntos. Con él, la
+     *                                       leyenda queda centrada en la franja entre el contenido y
+     *                                       el borde de la hoja; sin él se conserva el offset histórico.
+     */
+    public function sellarPaginado(\Barryvdh\DomPDF\PDF $pdf, ?float $margenDerechoPt = null): \Barryvdh\DomPDF\PDF
     {
         // Parte de cero: los avisos que haya dejado otro PDF del proceso no
         // deben tumbar este sellado (el global de DomPDF es acumulativo).
@@ -652,7 +780,12 @@ class PdfService
             $anchoTexto = $metricas->getTextWidth($texto, $fuente, $tamano);
 
             // Vertical: el texto arranca abajo del centro y sube por el borde derecho.
-            $x = $canvas->get_width() - 14;
+            // Girado -90°, la línea base queda en x y los glifos crecen hacia la izquierda
+            // (ascendente ≈ 0,72·tamaño) con un descendente ≈ 0,22·tamaño a la derecha:
+            // para centrar la caja visible en la franja se desplaza la base 0,25·tamaño.
+            $x = $margenDerechoPt !== null
+                ? $canvas->get_width() - ($margenDerechoPt / 2) + ($tamano * 0.25)
+                : $canvas->get_width() - 14;
             $y = ($canvas->get_height() + $anchoTexto) / 2;
 
             $canvas->page_text($x, $y, $texto, $fuente, $tamano, [0.47, 0.47, 0.47], 0.0, 0.0, -90);
@@ -863,58 +996,43 @@ class PdfService
         try {
             $vehicle = $this->vehicleService->getTechnicalSheetData($vehicleUuid);
 
-            // ✅ Cargar imágenes estáticas locales
-            $superPath = public_path('img/super2.png');
-            $transporPath = public_path('img/transporte.png');
-
-            $superBase64 = file_exists($superPath) ? base64_encode(file_get_contents($superPath)) : null;
-            $transporBase64 = file_exists($transporPath) ? base64_encode(file_get_contents($transporPath)) : null;
-
-            // ✅ Intentar obtener el logo y firma de la empresa y la página web
             $webPage = 'falcon-fuec.com';
+            $company = null;
             $logoModel = null;
-            $signatureModel = null;
 
             if ($vehicle->company_uuid) {
                 $company = $this->companyService->getCompanyByUuid($vehicle->company_uuid);
                 if ($company) {
                     $webPage = $company->web_page ?? 'falcon-fuec.com';
                     $logoModel = self::logoParaMarca($company);
-                    $signatureModel = $company->getFirstMedia('signatures') ?? $company->signature ?? null;
                 }
             }
 
-            $base64Images = $this->getBase64Parallel([
-                'logo' => $logoModel,
-                'firma' => $signatureModel,
-            ]);
-
-            // ✅ Generar Código QR usando BaconQrCode (disponible nativamente)
+            $identidad = $this->identidadEmpresa($company, $logoModel);
             $qrUrl = $this->buildWebBaseUrl($webPage) . '/validar-vehiculo/' . $vehicle->uuid;
 
-            $renderer = new ImageRenderer(
-                new RendererStyle(150),
-                new SvgImageBackEnd
-            );
-            $writer = new Writer($renderer);
-            $qrCodeSvg = $writer->writeString($qrUrl);
-            $qrCodeBase64 = base64_encode($qrCodeSvg);
-
             $data = [
-                'super' => $superBase64,
-                'transpor' => $transporBase64,
-                'logo' => $base64Images['logo'],
-                'firma' => $base64Images['firma'],
-                'qrcode' => $qrCodeBase64,
+                'logo' => null,
+                'qrcode' => QrDian::pngBase64($qrUrl, 160),
+                'qrcode_mime' => 'image/png',
             ];
 
-            $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $this->conMarca([
+            $payload = $this->conMarca([
                 'title' => 'Ficha Técnica Vehículo',
                 'vehicle' => $vehicle,
                 'data' => $data,
-            ], $company ?? null, 'ficha_tecnica_vehiculo', $logoModel));
+                'logo_data_url' => $identidad['logo_data_url'],
+                'empresa_siglas' => $identidad['empresa_siglas'],
+            ], $company, 'ficha_tecnica_vehiculo', $logoModel);
+
+            $pdf = Pdf::loadView('pdf.fleet.technical-sheet-vehicles', $payload);
             $pdf->setPaper('letter', 'portrait');
-            $this->sellarPaginado($pdf);
+            $pdf->setOption([
+                'dpi' => 120,
+                'isFontSubsettingEnabled' => true,
+                'isRemoteEnabled' => false,
+            ]);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_ESTANDAR_PT);
 
             $fileName = self::nombreArchivo('Ficha Técnica Vehículo', $vehicle->vehicle_license_plate ?? $vehicleUuid);
 
@@ -1099,17 +1217,13 @@ class PdfService
                 'logo' => $logoModel,
             ]);
 
-            $marca = $this->marcaPdfPara($vehicle->company, 'mantenimiento', $logoModel);
-
-            $data = [
+            $data = $this->conMarca([
                 'title' => 'Hoja de Vida – Mantenimiento',
-                'letterhead' => $marca['letterhead'],
                 'vehicle' => $vehicle,
                 'company' => $vehicle->company,
                 'maintenances' => $vehicle->maintenance ?? collect(),
                 'company_logo_base64' => $base64Images['logo'],
-                'company_logo_fondo_base64' => $marca['logo_fondo'] ?? $base64Images['logo'],
-            ];
+            ], $vehicle->company, 'mantenimiento', $logoModel);
 
             $pdf = Pdf::loadView('pdf.maintenance.maintenance', $data);
             $pdf->setPaper('letter', 'portrait');
@@ -1375,6 +1489,7 @@ class PdfService
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
+                'empresa_siglas' => self::siglasEmpresa((string) ($empresaTransportadora ?? '')),
                 'periodo' => $periodo,
                 'es_historial' => false,
                 'placa' => $placa,
@@ -1409,7 +1524,7 @@ class PdfService
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
             $pdf->setPaper('letter', 'landscape');
-            $this->sellarPaginado($pdf);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_PLANILLA_PT);
 
             $fileName = self::nombreArchivo('Planilla de Control Diaria', $placa ?? 'Vehículo', $date->format('d-m-Y'));
 
@@ -1498,7 +1613,7 @@ class PdfService
             $placa = $vehicle->vehicle_license_plate;
             $numeroInterno = $vehicle->internal_number;
             $area = $lastSheet ? $lastSheet->official_name_and_surname : 'N/A';
-            $clase = $vehicle->vehicleClass?->name ?? 'N/A';
+            $clase = $vehicle->vehicleClass?->description ?? 'N/A';
 
             $empresa = 'N/A';
             $nit = 'N/A';
@@ -1741,6 +1856,7 @@ class PdfService
                 'logo' => $logoDataMensual['logo'],
                 'logo_mime' => $logoDataMensual['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
+                'empresa_siglas' => self::siglasEmpresa((string) ($empresaTransportadora ?? '')),
                 'periodo' => $periodo . ($soloFinalizados ? ' — SOLO DÍAS FINALIZADOS' : ''),
                 'es_historial' => $esHistorial,
                 'solo_finalizados' => $soloFinalizados,
@@ -1763,7 +1879,7 @@ class PdfService
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
             $pdf->setPaper('letter', 'landscape');
-            $this->sellarPaginado($pdf);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_PLANILLA_PT);
 
             $fileName = self::nombreArchivo(
                 ($esHistorial ? 'Historial de Planilla de Control Mensual' : 'Planilla de Control Mensual'),
@@ -1782,6 +1898,149 @@ class PdfService
     }
 
     /**
+     * Consulta base de los reportes de Control de Servicio (compartida por el PDF
+     * filtrado y el ZIP por proyecto).
+     *
+     * @return Builder<ServiceDeliveryControlSheet>
+     */
+    private function consultaPlanillasReporte(array $filtros)
+    {
+        $soloCerradas = empty($filtros['incluir_abiertos']);
+
+        $query = ServiceDeliveryControlSheet::query()
+            ->when($soloCerradas, fn ($q) => $q->where('is_active', false))
+            // Con días abiertos, el padre multidía repetiría su primer día.
+            ->when(! $soloCerradas, fn ($q) => $q->whereDoesntHave('children'))
+            ->with([
+                'project',
+                'routes',
+                'internalControl.vehicle.vehicleClass',
+                'internalControl.thirdParty',
+                'subcontractedControl.vehicleClass',
+            ])
+            ->orderBy('service_date', 'asc');
+
+        if (! empty($filtros['company_uuid'])) {
+            $query->where('company_uuid', $filtros['company_uuid']);
+        }
+        if (! empty($filtros['fecha_desde'])) {
+            $query->whereDate('service_date', '>=', $filtros['fecha_desde']);
+        }
+        if (! empty($filtros['fecha_hasta'])) {
+            $query->whereDate('service_date', '<=', $filtros['fecha_hasta']);
+        }
+        if (! empty($filtros['fecha'])) {
+            $query->whereDate('service_date', $filtros['fecha']);
+        }
+        if (! empty($filtros['year'])) {
+            $query->whereYear('service_date', (int) $filtros['year']);
+        }
+        if (! empty($filtros['month'])) {
+            $query->whereMonth('service_date', (int) $filtros['month']);
+        }
+        if (! empty($filtros['vehicle_uuid'])) {
+            $vehicleUuid = $filtros['vehicle_uuid'];
+            $placaFiltro = Vehicle::where('uuid', $vehicleUuid)->value('vehicle_license_plate');
+            $query->where(function ($q) use ($vehicleUuid, $placaFiltro) {
+                $q->whereHas('internalControl', fn ($qq) => $qq->where('vehicle_uuid', $vehicleUuid));
+                if ($placaFiltro) {
+                    $q->orWhereHas('subcontractedControl', fn ($qq) => $qq->where('vehicle_license_plate', $placaFiltro));
+                }
+            });
+        }
+        if (! empty($filtros['placa'])) {
+            $query->whereHas('subcontractedControl', fn ($q) => $q->where('vehicle_license_plate', $filtros['placa']));
+        }
+        if (! empty($filtros['third_party_uuid'])) {
+            $driverUuid = $filtros['third_party_uuid'];
+            $query->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $driverUuid));
+        }
+        if (! empty($filtros['project_uuid'])) {
+            $query->where('project_uuid', $filtros['project_uuid']);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Genera un ZIP con las planillas del proyecto (días abiertos incluidos).
+     * Con un vehículo elegido: una planilla por día. Sin vehículo: una por vehículo.
+     *
+     * @return array{path: string, file_name: string, total: int}
+     */
+    public function generateProjectControlSheetZip(array $filtros): array
+    {
+        $hojas = $this->consultaPlanillasReporte($filtros)->get();
+        if ($hojas->isEmpty()) {
+            throw new ModelNotFoundException('Sin planillas para los filtros indicados.');
+        }
+
+        // Un vehículo concreto se entrega día por día; el proyecto completo, por
+        // vehículo (un PDF por día por cada coche serían cientos de planillas).
+        $porDia = ! empty($filtros['vehicle_uuid']) || ! empty($filtros['placa']);
+
+        // Las subcontratadas solo aportan su placa.
+        $grupos = $hojas->groupBy(function ($hoja) use ($porDia) {
+            $vehiculo = $hoja->internalControl?->vehicle_uuid
+                ? 'uuid:'.$hoja->internalControl->vehicle_uuid
+                : 'placa:'.($hoja->vehicle_license_plate ?? '');
+            $dia = $hoja->service_date?->format('Y-m-d') ?? '';
+
+            return $porDia ? $vehiculo.'|'.$dia : $vehiculo;
+        });
+
+        $zipPath = tempnam(sys_get_temp_dir(), 'pcp_reporte_').'.zip';
+        $zip = new \ZipArchive;
+        if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+            throw new \RuntimeException('No se pudo crear el archivo ZIP del reporte.');
+        }
+
+        $nombres = [];
+        try {
+            foreach ($grupos as $clave => $grupo) {
+                // La clave es "<vehiculo>|<fecha>" cuando va por día.
+                [$vehiculoClave, $dia] = array_pad(explode('|', $clave, 2), 2, '');
+                $filtrosVehiculo = $filtros;
+                $filtrosVehiculo['vehicle_uuid'] = null;
+                $filtrosVehiculo['placa'] = null;
+                if (str_starts_with($vehiculoClave, 'uuid:')) {
+                    $filtrosVehiculo['vehicle_uuid'] = substr($vehiculoClave, 5);
+                } elseif (($placa = substr($vehiculoClave, 6)) !== '') {
+                    $filtrosVehiculo['placa'] = $placa;
+                }
+                if ($porDia && $dia !== '') {
+                    $filtrosVehiculo['fecha'] = $dia;
+                }
+
+                $resultado = $this->generateFilteredServiceControlSheetPdf($filtrosVehiculo);
+                $nombre = self::nombreArchivo(
+                    'Planilla '.($grupo->first()->vehicle_license_plate ?: 'SIN PLACA'),
+                    $porDia && $dia !== ''
+                        ? $dia
+                        : ($filtros['fecha_desde'] ?? '').' al '.($filtros['fecha_hasta'] ?? '')
+                );
+                // ZipArchive no distingue rutas repetidas: evita pisar nombres iguales.
+                $base = substr($nombre, 0, -4);
+                $final = $nombre;
+                for ($i = 2; isset($nombres[$final]); $i++) {
+                    $final = $base.' ('.$i.').pdf';
+                }
+                $nombres[$final] = true;
+
+                $zip->addFromString($final, $resultado['pdf']->output());
+            }
+        } finally {
+            $zip->close();
+        }
+
+        return [
+            'path' => $zipPath,
+            'file_name' => 'Planillas_Proyecto_'.now()->format('Ymd_His').'.zip',
+            'total' => $grupos->count(),
+        ];
+    }
+
+    /**
      * Genera el PDF de Control de Servicio por filtros (rango, vehículo, conductor, día, mensual).
      * Solo días cerrados (is_active=false). Una fila por recorrido en la vista OPE-F-006.
      *
@@ -1792,55 +2051,12 @@ class PdfService
     public function generateFilteredServiceControlSheetPdf(array $filtros): array
     {
         try {
-            $companyUuid = $filtros['company_uuid'] ?? null;
             $tipo = $filtros['tipo'] ?? 'rango';
+            // Los reportes por proyecto pueden incluir días abiertos (planilla
+            // del día en curso); el resto sigue limitado a días finalizados.
+            $soloCerradas = empty($filtros['incluir_abiertos']);
 
-            $query = ServiceDeliveryControlSheet::query()
-                ->where('is_active', false)
-                ->with([
-                    'project',
-                    'routes',
-                    'internalControl.vehicle.vehicleClass',
-                    'internalControl.thirdParty',
-                    'subcontractedControl.vehicleClass',
-                ])
-                ->orderBy('service_date', 'asc');
-
-            if ($companyUuid) {
-                $query->where('company_uuid', $companyUuid);
-            }
-            if (! empty($filtros['fecha_desde'])) {
-                $query->whereDate('service_date', '>=', $filtros['fecha_desde']);
-            }
-            if (! empty($filtros['fecha_hasta'])) {
-                $query->whereDate('service_date', '<=', $filtros['fecha_hasta']);
-            }
-            if (! empty($filtros['fecha'])) {
-                $query->whereDate('service_date', $filtros['fecha']);
-            }
-            if (! empty($filtros['year'])) {
-                $query->whereYear('service_date', (int) $filtros['year']);
-            }
-            if (! empty($filtros['month'])) {
-                $query->whereMonth('service_date', (int) $filtros['month']);
-            }
-            if (! empty($filtros['vehicle_uuid'])) {
-                $vehicleUuid = $filtros['vehicle_uuid'];
-                $placaFiltro = Vehicle::where('uuid', $vehicleUuid)->value('vehicle_license_plate');
-                $query->where(function ($q) use ($vehicleUuid, $placaFiltro) {
-                    $q->whereHas('internalControl', fn($qq) => $qq->where('vehicle_uuid', $vehicleUuid));
-                    if ($placaFiltro) {
-                        $q->orWhereHas('subcontractedControl', fn($qq) => $qq->where('vehicle_license_plate', $placaFiltro));
-                    }
-                });
-            }
-            if (! empty($filtros['third_party_uuid'])) {
-                $driverUuid = $filtros['third_party_uuid'];
-                $query->whereHas('internalControl', fn($q) => $q->where('third_party_uuid', $driverUuid));
-            }
-            if (! empty($filtros['project_uuid'])) {
-                $query->where('project_uuid', $filtros['project_uuid']);
-            }
+            $query = $this->consultaPlanillasReporte($filtros);
 
             $sheets = $query->limit(500)->get();
             if ($sheets->isEmpty()) {
@@ -1960,9 +2176,10 @@ class PdfService
                 'logo' => $logoData['logo'],
                 'logo_mime' => $logoData['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
-                'periodo' => ($etiquetas[$tipo] ?? 'REPORTE') . ' — SOLO DÍAS FINALIZADOS',
+                'empresa_siglas' => self::siglasEmpresa((string) ($empresaTransportadora ?? '')),
+                'periodo' => ($etiquetas[$tipo] ?? 'REPORTE') . ($soloCerradas ? ' — SOLO DÍAS FINALIZADOS' : ' — ABIERTAS Y FINALIZADAS'),
                 'es_historial' => false,
-                'solo_finalizados' => true,
+                'solo_finalizados' => $soloCerradas,
                 'placa' => $valorDeCabecera($placasDistintas),
                 'numero_interno' => $valorDeCabecera($internosDistintos),
                 'area' => $sheets->last()->official_name_and_surname ?? 'N/A',
@@ -1971,7 +2188,7 @@ class PdfService
                 'empresa' => $empresaTransportadora,
                 'dias' => $dias,
                 'totales' => $resultadoFilas['totales'],
-                'observaciones' => 'Reporte ' . strtoupper($tipo) . ' | Días cerrados: ' . $sheets->count() . ' | Filas: ' . count($dias) . ($truncado ? ' | MOSTRANDO 500 DE ' . $totalPlanillas : ''),
+                'observaciones' => 'Reporte ' . strtoupper($tipo) . ' | Días ' . ($soloCerradas ? 'cerrados' : 'incluidos') . ': ' . $sheets->count() . ' | Filas: ' . count($dias) . ($truncado ? ' | MOSTRANDO 500 DE ' . $totalPlanillas : ''),
                 'firma_conductor' => $firmaCond,
                 'firma_recibido' => $firmaRec,
                 'proyecto' => $proyectoCabecera,
@@ -1982,7 +2199,7 @@ class PdfService
 
             $pdf = Pdf::loadView('pdf.maintenance.service-control-sheet', $data);
             $pdf->setPaper('letter', 'landscape');
-            $this->sellarPaginado($pdf);
+            $this->sellarPaginado($pdf, self::MARGEN_DERECHO_PLANILLA_PT);
 
             return [
                 'pdf' => $pdf,
@@ -2020,11 +2237,15 @@ class PdfService
         // solo se usa la empresa si ya viene cargada en los filtros, nunca se consulta aquí.
         $reportCompany = ($filtros['company'] ?? null) instanceof object ? $filtros['company'] : null;
         $reportLogoModel = self::logoParaMarca($reportCompany);
+        $identidad = $reportCompany ? $this->identidadEmpresa($reportCompany, $reportLogoModel) : ['logo_data_url' => null, 'empresa_siglas' => null];
 
         $pdf = Pdf::loadView('pdf.fleet.vehicle-report', $this->conMarca([
             'filas' => $filas,
             'filtros' => $filtros,
             'filtroDescripcion' => $etiquetas[$tipo] ?? strtoupper((string) $tipo),
+            'company' => $reportCompany,
+            'logo_data_url' => $identidad['logo_data_url'],
+            'empresa_siglas' => $identidad['empresa_siglas'],
         ], $reportCompany, 'reporte_vehiculos', $reportLogoModel));
         $pdf->setPaper('letter', 'portrait');
         $this->sellarPaginado($pdf);
@@ -2046,10 +2267,14 @@ class PdfService
     {
         $reportCompany = ($filtros['company'] ?? null) instanceof object ? $filtros['company'] : null;
         $reportLogoModel = self::logoParaMarca($reportCompany);
+        $identidad = $reportCompany ? $this->identidadEmpresa($reportCompany, $reportLogoModel) : ['logo_data_url' => null, 'empresa_siglas' => null];
 
         $pdf = Pdf::loadView('pdf.fleet.vehicle-activity-report', $this->conMarca([
             'filas' => $filas,
             'filtros' => $filtros,
+            'company' => $reportCompany,
+            'logo_data_url' => $identidad['logo_data_url'],
+            'empresa_siglas' => $identidad['empresa_siglas'],
         ], $reportCompany, 'reporte_actividad_vehicular', $reportLogoModel));
         $pdf->setPaper('letter', 'portrait');
         $this->sellarPaginado($pdf);
@@ -2061,8 +2286,9 @@ class PdfService
     }
 
     /**
-     * Resuelve el logo de la empresa con respaldo en disco cuando MediaLibrary no tiene imagen.
-     * Retorna el base64 ya codificado y el mime para usar en el data-uri del PDF.
+     * Resuelve el logo y MIME únicamente desde el modelo de la empresa activa.
+     * Si la empresa no tiene logotipo configurado, devuelve null para mostrar el
+     * monograma con sus siglas sin filtrar imágenes de disco o de otra empresa.
      *
      * @param  mixed  $logoModel  Modelo de MediaLibrary, ruta o nulo.
      * @param  string|null  $logoBase64  Base64 ya cargado (puede ser nulo).
@@ -2079,63 +2305,6 @@ class PdfService
             }
 
             return ['logo' => $logoBase64, 'mime' => $mime];
-        }
-
-        $candidatos = [
-            public_path('img/logo.png'),
-            public_path('img/logo.jpg'),
-            public_path('img/logo.jpeg'),
-            public_path('images/logo.png'),
-            public_path('images/logo.jpg'),
-        ];
-
-        foreach ($candidatos as $ruta) {
-            if (is_string($ruta) && file_exists($ruta)) {
-                $codificado = $this->optimizeAndEncodeImage($ruta);
-                if (! empty($codificado)) {
-                    $porExtension = strtolower(pathinfo($ruta, PATHINFO_EXTENSION));
-                    if ($porExtension === 'jpg' || $porExtension === 'jpeg') {
-                        $mime = 'image/jpeg';
-                    }
-
-                    return ['logo' => $codificado, 'mime' => $mime];
-                }
-            }
-        }
-
-        // Respaldo: logo guardado en disco por empresa (storage/app/public/companies/*/LOGO/*)
-        // aunque la tabla media esté vacía. Se toma la primera imagen válida encontrada.
-        try {
-            $base = storage_path('app/public/companies');
-            if (is_dir($base)) {
-                $archivos = [];
-                $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS));
-                foreach ($it as $archivo) {
-                    if (! $archivo->isFile()) {
-                        continue;
-                    }
-                    $rutaLogo = $archivo->getPathname();
-                    if (! str_contains(str_replace('\\', '/', $rutaLogo), '/LOGO/')) {
-                        continue;
-                    }
-                    $ext = strtolower($archivo->getExtension());
-                    if (in_array($ext, ['png', 'jpg', 'jpeg'], true) && $archivo->getSize() > 1024) {
-                        $archivos[] = $rutaLogo;
-                    }
-                }
-                sort($archivos);
-                foreach ($archivos as $rutaLogo) {
-                    $codificado = $this->optimizeAndEncodeImage($rutaLogo);
-                    if (! empty($codificado)) {
-                        $ext = strtolower(pathinfo($rutaLogo, PATHINFO_EXTENSION));
-                        $mime = ($ext === 'jpg' || $ext === 'jpeg') ? 'image/jpeg' : 'image/png';
-
-                        return ['logo' => $codificado, 'mime' => $mime];
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-            Logger::warning('No se pudo cargar logo en disco por empresa: ' . $e->getMessage());
         }
 
         return ['logo' => null, 'mime' => $mime];
@@ -2317,5 +2486,43 @@ class PdfService
             'paper' => 'letter',
             'orientation' => 'portrait',
         ]);
+    }
+
+    /**
+     * Genera el contrato de alquiler de vehículo en PDF bajo el estándar neutro.
+     *
+     * @return array{pdf: \Barryvdh\DomPDF\PDF, file_name: string}
+     */
+    public function generateRentalContractPdf(\App\Models\RentalContract $contract): array
+    {
+        $company = $contract->company;
+        $logoModel = self::logoParaMarca($company);
+        $identidad = $this->identidadEmpresa($company, $logoModel);
+
+        $data = $this->conMarca([
+            'contract' => $contract,
+            'company' => $company,
+            'totalCuotas' => $contract->installments->count(),
+            'canonTotal' => (float) $contract->monthly_fee * (int) $contract->monthly_term,
+            'fechaEmision' => now()->format('d/m/Y'),
+            'logo_data_url' => $identidad['logo_data_url'],
+            'empresa_siglas' => $identidad['empresa_siglas'],
+        ], $company, 'contrato_alquiler', $logoModel);
+
+        $pdf = Pdf::loadView('pdf.rental-contract', $data);
+        $pdf->setPaper('letter', 'portrait');
+        $pdf->setOption([
+            'dpi' => 120,
+            'isFontSubsettingEnabled' => true,
+            'isRemoteEnabled' => false,
+        ]);
+        $this->sellarPaginado($pdf, self::MARGEN_DERECHO_ESTANDAR_PT);
+
+        $numero = $contract->contract_number ?: $contract->uuid;
+
+        return [
+            'pdf' => $pdf,
+            'file_name' => self::nombreArchivo('Contrato de Alquiler', $numero),
+        ];
     }
 }

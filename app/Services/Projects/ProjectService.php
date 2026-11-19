@@ -9,6 +9,7 @@ use App\Models\ProjectDriverVehicle;
 use App\Models\ServiceDeliveryControlSheet;
 use App\Services\BaseService;
 use App\Services\ServiceDeliveryControlSheet\ServiceDeliveryControlSheetService;
+use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -205,7 +206,39 @@ class ProjectService extends BaseService
             ],
         ];
 
-        $record->setAttribute('assignments', $assignments->map($assignedValuer)->values());
+        // Planilla abierta de hoy por vehículo (una consulta, sin N+1): alimenta
+        // la acción de relevo y el resumen del detalle del proyecto.
+        $relevoPorVehiculo = [];
+        $vehicleUuids = $assignments->pluck('vehicle_uuid')->filter()->unique()->values();
+        if ($vehicleUuids->isNotEmpty()) {
+            $turnosAbiertos = ServiceDeliveryControlSheet::query()
+                ->where('company_uuid', $record->company_uuid)
+                ->where('project_uuid', $record->uuid)
+                ->whereDate('service_date', Carbon::today()->toDateString())
+                ->where('is_active', true)
+                ->whereDoesntHave('children')
+                ->whereHas('internalControl', fn ($q) => $q->whereIn('vehicle_uuid', $vehicleUuids))
+                ->with(['internalControl.thirdParty:id,uuid,first_name,last_name'])
+                ->get();
+
+            foreach ($turnosAbiertos as $hoja) {
+                $vehicleUuid = $hoja->internalControl?->vehicle_uuid;
+                if ($vehicleUuid) {
+                    $relevoPorVehiculo[$vehicleUuid] = [
+                        'planilla_uuid' => $hoja->uuid,
+                        'service_date' => $hoja->service_date?->toDateString(),
+                        'turno' => $hoja->turno ?? 1,
+                        'start_time' => $hoja->start_time?->format('H:i:s'),
+                        'starting_kilometer' => $hoja->starting_kilometer,
+                        'driver_name' => $hoja->driver_name,
+                    ];
+                }
+            }
+        }
+
+        $record->setAttribute('assignments', $assignments->map(fn (ProjectDriverVehicle $assignment) => $assignedValuer($assignment) + [
+            'relevo' => $relevoPorVehiculo[$assignment->vehicle_uuid] ?? null,
+        ])->values());
         $record->setAttribute('assignments_count', $assignments->where('is_active', true)->count());
 
         return $record;

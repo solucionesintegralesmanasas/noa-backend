@@ -32,6 +32,15 @@ class MaintenancePdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('id="letterhead-banner"', $html);
         $this->assertStringContainsString('with-letterhead', $html);
         $this->assertStringNotContainsString('id="watermark"', $html);
+
+        // Modo limpio: sin membrete, sin watermark y sin celda de logo.
+        $htmlLimpio = view('pdf.maintenance.maintenance', array_merge($datos, [
+            'letterhead' => null,
+            'ocultar_marca' => true,
+        ]))->render();
+        $this->assertStringNotContainsString('id="watermark"', $htmlLimpio);
+        $this->assertStringNotContainsString('id="letterhead-banner"', $htmlLimpio);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $htmlLimpio);
         // Sin fila de Controlado.
         $this->assertStringNotContainsString('Controlado', $html);
         // Datos del vehículo y mantenimientos con X en su tipo.
@@ -64,8 +73,12 @@ class MaintenancePdfLayoutSmokeTest extends TestCase
         preg_match_all('/stream\r?\n(.*?)endstream/s', $contenido, $m);
         $texto = null;
         foreach ($m[1] as $raw) {
-            $data = @gzuncompress(trim($raw, "\r\n"));
-            if ($data && str_contains($data, 'Generado por NOA Transportes')) {
+            $descomprimido = @gzuncompress(trim($raw, "\r\n"));
+            if (! $descomprimido) {
+                continue;
+            }
+            $data = str_replace("\0", '', $descomprimido);
+            if (str_contains($data, 'Generado por NOA Transportes')) {
                 $texto = $data;
                 break;
             }

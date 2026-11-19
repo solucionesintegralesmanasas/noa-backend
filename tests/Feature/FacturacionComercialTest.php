@@ -393,6 +393,40 @@ class FacturacionComercialTest extends TestCase
         $this->assertEquals($total - 100000, (float) $factura->fresh()->invoice_total);
     }
 
+    public function test_pdf_nota_credito_y_nota_debito_descargan_correctamente(): void
+    {
+        $servicio = $this->servicio();
+        $datos = $this->datosCotizacion();
+        $datos['billing_resolution_uuid'] = $this->resolucion;
+        $factura = $servicio->crearFactura($datos);
+
+        $notaCredito = app(CreditNoteService::class)->crearNota([
+            'invoice_uuid' => $factura->uuid,
+            'correction_concept_code' => '01',
+            'observation' => 'Descuento comercial por ajuste',
+            'issue_date' => '2026-10-12',
+            'items' => [['description' => 'Ajuste crédito', 'quantity' => 1, 'unit_price' => 100000]],
+        ]);
+
+        $notaDebito = app(\App\Services\Billing\DebitNoteService::class)->crearNota([
+            'invoice_uuid' => $factura->uuid,
+            'correction_concept_code' => '03',
+            'observation' => 'Cargo adicional por servicio',
+            'issue_date' => '2026-10-13',
+            'items' => [['description' => 'Ajuste débito', 'quantity' => 1, 'unit_price' => 50000]],
+        ]);
+
+        Sanctum::actingAs($this->superadmin(), ['*']);
+
+        $pdfCredito = $this->getJson("/api/v1/billing/credit-notes/{$notaCredito->uuid}/pdf", ['X-Company-UUID' => $this->empresa]);
+        $pdfCredito->assertOk();
+        $this->assertStringContainsString($notaCredito->note_number, $pdfCredito->headers->get('Content-Disposition'));
+
+        $pdfDebito = $this->getJson("/api/v1/billing/debit-notes/{$notaDebito->uuid}/pdf", ['X-Company-UUID' => $this->empresa]);
+        $pdfDebito->assertOk();
+        $this->assertStringContainsString($notaDebito->note_number, $pdfDebito->headers->get('Content-Disposition'));
+    }
+
     public function test_afiliado_solo_ve_sus_documentos(): void
     {
         $otro = $this->insertar('third_parties', [

@@ -42,6 +42,11 @@ class DebitNoteItem extends Model
         return $this->belongsTo(DebitNote::class, 'note_uuid', 'uuid');
     }
 
+    public function measurementUnit(): BelongsTo
+    {
+        return $this->belongsTo(MeasurementUnit::class, 'measurement_unit_uuid', 'uuid');
+    }
+
     public function withholdings(): HasMany
     {
         return $this->hasMany(DebitNoteItemWithholding::class, 'note_item_uuid', 'uuid');
