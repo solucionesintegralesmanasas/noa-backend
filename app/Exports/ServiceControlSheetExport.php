@@ -12,7 +12,8 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 
 /**
- * Exportación Excel de Control de Servicio, solo días cerrados.
+ * Exportación Excel de Control de Servicio (días cerrados por defecto;
+ * `incluir_abiertos` añade las planillas del día en curso).
  */
 class ServiceControlSheetExport implements FromCollection, WithHeadings
 {
@@ -30,8 +31,10 @@ class ServiceControlSheetExport implements FromCollection, WithHeadings
     public function collection(): Collection
     {
         $f = $this->filtros;
+        $soloCerradas = empty($f['incluir_abiertos']);
         $query = ServiceDeliveryControlSheet::query()
-            ->where('is_active', false)
+            ->when($soloCerradas, fn ($q) => $q->where('is_active', false))
+            ->when(! $soloCerradas, fn ($q) => $q->whereDoesntHave('children'))
             ->conRelacionesCompletas()
             ->orderBy('service_date', 'asc');
 
@@ -81,7 +84,7 @@ class ServiceControlSheetExport implements FromCollection, WithHeadings
                     $sheet->end_time?->format('H:i'), $sheet->total_hours?->format('H:i'),
                     $sheet->starting_kilometer, $sheet->ending_kilometer, '',
                     $sheet->driver_name, $sheet->vehicle_license_plate,
-                    $sheet->project?->project_name, 'FINALIZADA', '',
+                    $sheet->project?->project_name, $sheet->is_active ? 'ABIERTA' : 'FINALIZADA', '',
                 ];
                 continue;
             }
@@ -93,7 +96,7 @@ class ServiceControlSheetExport implements FromCollection, WithHeadings
                     $sheet->total_hours?->format('H:i'),
                     $sheet->starting_kilometer, $route->ending_kilometer ?? $sheet->ending_kilometer, '',
                     $sheet->driver_name, $sheet->vehicle_license_plate,
-                    $sheet->project?->project_name, 'FINALIZADA',
+                    $sheet->project?->project_name, $sheet->is_active ? 'ABIERTA' : 'FINALIZADA',
                     trim(($route->funcionario_cc ?? '').' '.($route->funcionario_nombre ?? '')),
                 ];
             }

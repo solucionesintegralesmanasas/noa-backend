@@ -15,9 +15,11 @@ use Illuminate\Http\Exceptions\HttpResponseException;
  * cada coche del proyecto marcado en `vehicle_uuids`.
  *
  * La fuente de verdad es el proyecto: el backend resuelve las asignaciones
- * activas y NO confía en los pares conductor↔vehículo que envíe el cliente.
- * `official_name_and_surname`, `vehicle_uuid`, `third_party_uuid` y
- * `fuec_uuid` se aceptan (compatibilidad de payload) pero se IGNORAN.
+ * activas y NO confía en los nombres ni en los pares conductor↔vehículo que
+ * envíe el cliente. `assignments` solo selecciona QUÉ turnos activos crear
+ * (un vehículo puede tener varios por relevo); un par sin asignación activa
+ * responde 422. `official_name_and_surname`, `vehicle_uuid`, `third_party_uuid`
+ * y `fuec_uuid` de la raíz se aceptan (compatibilidad de payload) pero se IGNORAN.
  */
 class BulkStoreServiceDeliveryControlSheetRequest extends FormRequest
 {
@@ -43,6 +45,11 @@ class BulkStoreServiceDeliveryControlSheetRequest extends FormRequest
             'project_uuid' => ['required', 'uuid', $this->reglaProyectoDelContexto()],
             'vehicle_uuids' => ['required', 'array', 'min:1', $this->reglaVehiculosArrayDelContexto()],
             'vehicle_uuids.*' => ['required', 'uuid', 'distinct'],
+            // Turnos explícitos (un vehículo puede tener varios conductores por
+            // relevo): cada par conductor+vehículo debe tener asignación activa.
+            'assignments' => ['nullable', 'array'],
+            'assignments.*.vehicle_uuid' => ['required', 'uuid'],
+            'assignments.*.third_party_uuid' => ['required', 'uuid'],
             // El bulk es solo para control directo: los tipos externos siguen
             // su flujo individual de una sola hoja.
             'type_of_control_sheet' => ['nullable', 'in:DIRECTO_CON_LA_EMPRESA'],
@@ -119,6 +126,9 @@ class BulkStoreServiceDeliveryControlSheetRequest extends FormRequest
             'project_uuid' => 'proyecto',
             'vehicle_uuids' => 'coches del proyecto',
             'vehicle_uuids.*' => 'coche del proyecto',
+            'assignments' => 'turnos a crear',
+            'assignments.*.vehicle_uuid' => 'coche del turno',
+            'assignments.*.third_party_uuid' => 'conductor del turno',
             'official_name_and_surname' => 'nombre y apellido del funcionario',
             'service_date' => 'fecha del servicio',
             'start_date' => 'fecha de inicio',
