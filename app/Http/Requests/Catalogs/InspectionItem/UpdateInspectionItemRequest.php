@@ -28,7 +28,7 @@ class UpdateInspectionItemRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'category' => ['nullable', 'in:DOCUMENTOS,DOTACION,VIDRIOS_ESPEJOS,OTROS,EMERGENCIAS,EXTINTOR,HERRAMIENTAS,LUCES,FLUIDOS,NEUMATICOS,PRESION'],
+            'category' => ['nullable', 'string', 'max:100'],
             'item_name' => ['nullable', 'string', 'max:150'],
             'description' => ['nullable', 'string'],
         ];
@@ -37,7 +37,8 @@ class UpdateInspectionItemRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'category.in' => 'La categoría seleccionada no es válida.',
+            'category.max' => 'La categoría no debe superar los 100 caracteres.',
+            'item_name.max' => 'El nombre del ítem no debe superar los 150 caracteres.',
         ];
     }
 

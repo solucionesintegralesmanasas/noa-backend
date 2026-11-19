@@ -268,4 +268,43 @@ class ProyectosAsignacionesTest extends TestCase
         $orden = collect($respuesta->json('data.assignments'))->pluck('third_party_uuid')->all();
         $this->assertSame([$d1, $d2, $d3], $orden);
     }
+
+    public function test_el_detalle_expone_relevo_solo_con_turno_abierto(): void
+    {
+        $d = $this->conductor('900000044');
+        $v = $this->vehiculo('EEE004');
+        $this->asignar($d, $v);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson("/api/v1/projects/{$this->proyecto}")->assertOk();
+        $asignacion = collect($respuesta->json('data.assignments'))->firstWhere('vehicle_uuid', $v);
+        $this->assertNull($asignacion['relevo']);
+
+        $hoy = now()->toDateString();
+        $hoja = $this->insertar('service_delivery_control_sheet', [
+            'company_uuid' => $this->empresa,
+            'project_uuid' => $this->proyecto,
+            'service_date' => $hoy,
+            'start_date' => $hoy,
+            'end_date' => $hoy,
+            'type_of_control_sheet' => 'DIRECTO_CON_LA_EMPRESA',
+            'is_active' => 1,
+            'start_time' => '07:12:00',
+            'starting_kilometer' => '45100',
+            'turno' => 1,
+        ]);
+        $this->insertar('service_internal_controls', [
+            'company_uuid' => $this->empresa,
+            'vehicle_uuid' => $v,
+            'third_party_uuid' => $d,
+            'service_delivery_control_sheet_uuid' => $hoja,
+            'is_active' => 1,
+        ]);
+
+        $respuesta = $this->withHeader('X-Company-UUID', $this->empresa)
+            ->getJson("/api/v1/projects/{$this->proyecto}")->assertOk();
+        $asignacion = collect($respuesta->json('data.assignments'))->firstWhere('vehicle_uuid', $v);
+        $this->assertSame($hoja, $asignacion['relevo']['planilla_uuid']);
+        $this->assertSame(1, $asignacion['relevo']['turno']);
+    }
 }

@@ -28,7 +28,7 @@ class StoreInspectionItemRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'category' => ['required', 'in:DOCUMENTOS,DOTACION,VIDRIOS_ESPEJOS,OTROS,EMERGENCIAS,EXTINTOR,HERRAMIENTAS,LUCES,FLUIDOS,NEUMATICOS,PRESION'],
+            'category' => ['required', 'string', 'max:100'],
             'item_name' => ['required', 'string', 'max:150'],
             'description' => ['nullable', 'string'],
         ];
@@ -38,8 +38,9 @@ class StoreInspectionItemRequest extends FormRequest
     {
         return [
             'category.required' => 'La categoría del ítem es obligatoria.',
-            'category.in' => 'La categoría seleccionada no es válida.',
+            'category.max' => 'La categoría no debe superar los 100 caracteres.',
             'item_name.required' => 'El nombre del ítem es obligatorio.',
+            'item_name.max' => 'El nombre del ítem no debe superar los 150 caracteres.',
         ];
     }
 

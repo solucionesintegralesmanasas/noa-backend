@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Models\AffiliateAdminCharge;
 use App\Models\BusinessCollaborationAgreement;
 use App\Models\DriverLicense;
 use App\Models\Notification;
@@ -327,6 +328,46 @@ class AlcanceDelActorTest extends TestCase
         // El usuario combinado no tiene vehículos asignados como afiliado todavía -> ve lista vacía
         $this->assertNotContains($this->vehiculoAfiliado, $uuids);
         $this->assertNotContains($this->vehiculoConductor, $uuids, 'No debe ver flota global por la rama de conductor.');
+    }
+
+    public function test_notificaciones_de_afiliado_filtran_cobros_por_vehiculo_sin_error(): void
+    {
+        $cargoPropio = $this->insertar('affiliate_admin_charges', [
+            'company_uuid' => $this->empresaA,
+            'vehicle_uuid' => $this->vehiculoAfiliado,
+        ]);
+        $cargoAjeno = $this->insertar('affiliate_admin_charges', [
+            'company_uuid' => $this->empresaA,
+            'vehicle_uuid' => $this->vehiculoConductor,
+        ]);
+
+        $notificacionPropia = $this->insertar('notifications', [
+            'company_uuid' => $this->empresaA,
+            'type' => 'cobro_administracion',
+            'title' => 'Cobro propio',
+            'message' => 'Cobro del vehículo del afiliado',
+            'entity_type' => AffiliateAdminCharge::class,
+            'entity_uuid' => $cargoPropio,
+        ]);
+        $notificacionAjena = $this->insertar('notifications', [
+            'company_uuid' => $this->empresaA,
+            'type' => 'cobro_administracion',
+            'title' => 'Cobro ajeno',
+            'message' => 'Cobro de un vehículo que no es del afiliado',
+            'entity_type' => AffiliateAdminCharge::class,
+            'entity_uuid' => $cargoAjeno,
+        ]);
+
+        Sanctum::actingAs($this->userAfiliado, ['*']);
+        $actorScope = app(AlcanceDelActor::class);
+        $actorScope->resolverContexto($this->userAfiliado, $this->empresaA);
+
+        $query = Notification::withoutGlobalScopes();
+        $actorScope->aplicarANotificaciones($query);
+        $uuids = $query->pluck('uuid')->all();
+
+        $this->assertContains($notificacionPropia, $uuids, 'El afiliado debe ver el cobro de su vehículo.');
+        $this->assertNotContains($notificacionAjena, $uuids, 'No debe ver cobros de vehículos ajenos.');
     }
 
     public function test_falla_cerrada_ante_contexto_invalido_o_sin_usuario(): void

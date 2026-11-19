@@ -58,6 +58,8 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         'exception_approved_at',
         'is_active',
         'retirada_de_proyecto',
+        'turno',
+        'relevo_de_uuid',
     ];
 
     protected $casts = [
@@ -71,6 +73,7 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
         'total_toll_value' => 'decimal:2',
         'is_active' => 'boolean',
         'retirada_de_proyecto' => 'boolean',
+        'turno' => 'integer',
         'exception_approved_at' => 'datetime',
     ];
 
@@ -239,6 +242,12 @@ class ServiceDeliveryControlSheet extends Model implements HasMedia
     public function children(): HasMany
     {
         return $this->hasMany(ServiceDeliveryControlSheet::class, 'parent_uuid', 'uuid');
+    }
+
+    /** Tramo anterior cuando la planilla nació de un relevo de turno. */
+    public function relevoDe(): BelongsTo
+    {
+        return $this->belongsTo(ServiceDeliveryControlSheet::class, 'relevo_de_uuid', 'uuid');
     }
 
     public function routes(): HasMany

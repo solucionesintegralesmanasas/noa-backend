@@ -34,6 +34,8 @@ class ContratoLaboralConsultasTest extends TestCase
         $this->contrato = $this->insertar('employment_contracts', [
             'company_uuid' => $this->empresa, 'third_party_uuid' => $this->tercero,
         ]);
+
+        request()->attributes->set('current_company_uuid', $this->empresa);
     }
 
     private function medir(): array
@@ -66,5 +68,19 @@ class ContratoLaboralConsultasTest extends TestCase
 
         $this->assertMedicionConDatos(count($datos['doc'] ?? []), 'cargarContratoLaboral');
         $this->assertNotEmpty($datos['doc']);
+    }
+
+    public function test_genera_pdf_de_contrato_laboral_con_firmas(): void
+    {
+        $service = app(PdfService::class);
+        $datos = $service->cargarContratoLaboral($this->contrato);
+
+        $this->assertArrayHasKey('employer', $datos['doc']['signatures']);
+        $this->assertArrayHasKey('employee', $datos['doc']['signatures']);
+
+        $response = $service->generateEmploymentContractPdf($this->contrato);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertStringStartsWith('%PDF-', (string) $response->getContent());
     }
 }

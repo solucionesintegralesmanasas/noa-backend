@@ -181,6 +181,13 @@ class RoleSeeder extends Seeder
             'business_collaboration_agreements.update',
             'business_collaboration_agreements.delete',
 
+            'rental_contracts.index',
+            'rental_contracts.create',
+            'rental_contracts.update',
+            'rental_contracts.delete',
+            'rental_contracts.show',
+            'rental_installments.update',
+
             'maintenance.index',
             'maintenance.create',
             'maintenance.update',
@@ -373,6 +380,9 @@ class RoleSeeder extends Seeder
 
             'business_collaboration_agreements.index',
 
+            'rental_contracts.index',
+            'rental_contracts.show',
+
             'maintenance.index',
             'maintenance.create',
             'maintenance.update',
@@ -486,6 +496,13 @@ class RoleSeeder extends Seeder
             'business_collaboration_agreements.create',
             'business_collaboration_agreements.update',
             'business_collaboration_agreements.delete',
+
+            'rental_contracts.index',
+            'rental_contracts.create',
+            'rental_contracts.update',
+            'rental_contracts.delete',
+            'rental_contracts.show',
+            'rental_installments.update',
 
             'maintenance.index',
             'maintenance.create',

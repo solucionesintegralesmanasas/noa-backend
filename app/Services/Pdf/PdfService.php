@@ -22,6 +22,7 @@ use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Writer;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
@@ -556,6 +557,7 @@ class PdfService
         'reporte_actividad_vehicular',
         'ficha_tecnica_tercero',
         'inspeccion_preoperacional',
+        'contrato_laboral',
     ];
 
     /**
@@ -1895,6 +1897,149 @@ class PdfService
     }
 
     /**
+     * Consulta base de los reportes de Control de Servicio (compartida por el PDF
+     * filtrado y el ZIP por proyecto).
+     *
+     * @return Builder<ServiceDeliveryControlSheet>
+     */
+    private function consultaPlanillasReporte(array $filtros)
+    {
+        $soloCerradas = empty($filtros['incluir_abiertos']);
+
+        $query = ServiceDeliveryControlSheet::query()
+            ->when($soloCerradas, fn ($q) => $q->where('is_active', false))
+            // Con días abiertos, el padre multidía repetiría su primer día.
+            ->when(! $soloCerradas, fn ($q) => $q->whereDoesntHave('children'))
+            ->with([
+                'project',
+                'routes',
+                'internalControl.vehicle.vehicleClass',
+                'internalControl.thirdParty',
+                'subcontractedControl.vehicleClass',
+            ])
+            ->orderBy('service_date', 'asc');
+
+        if (! empty($filtros['company_uuid'])) {
+            $query->where('company_uuid', $filtros['company_uuid']);
+        }
+        if (! empty($filtros['fecha_desde'])) {
+            $query->whereDate('service_date', '>=', $filtros['fecha_desde']);
+        }
+        if (! empty($filtros['fecha_hasta'])) {
+            $query->whereDate('service_date', '<=', $filtros['fecha_hasta']);
+        }
+        if (! empty($filtros['fecha'])) {
+            $query->whereDate('service_date', $filtros['fecha']);
+        }
+        if (! empty($filtros['year'])) {
+            $query->whereYear('service_date', (int) $filtros['year']);
+        }
+        if (! empty($filtros['month'])) {
+            $query->whereMonth('service_date', (int) $filtros['month']);
+        }
+        if (! empty($filtros['vehicle_uuid'])) {
+            $vehicleUuid = $filtros['vehicle_uuid'];
+            $placaFiltro = Vehicle::where('uuid', $vehicleUuid)->value('vehicle_license_plate');
+            $query->where(function ($q) use ($vehicleUuid, $placaFiltro) {
+                $q->whereHas('internalControl', fn ($qq) => $qq->where('vehicle_uuid', $vehicleUuid));
+                if ($placaFiltro) {
+                    $q->orWhereHas('subcontractedControl', fn ($qq) => $qq->where('vehicle_license_plate', $placaFiltro));
+                }
+            });
+        }
+        if (! empty($filtros['placa'])) {
+            $query->whereHas('subcontractedControl', fn ($q) => $q->where('vehicle_license_plate', $filtros['placa']));
+        }
+        if (! empty($filtros['third_party_uuid'])) {
+            $driverUuid = $filtros['third_party_uuid'];
+            $query->whereHas('internalControl', fn ($q) => $q->where('third_party_uuid', $driverUuid));
+        }
+        if (! empty($filtros['project_uuid'])) {
+            $query->where('project_uuid', $filtros['project_uuid']);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Genera un ZIP con las planillas del proyecto (días abiertos incluidos).
+     * Con un vehículo elegido: una planilla por día. Sin vehículo: una por vehículo.
+     *
+     * @return array{path: string, file_name: string, total: int}
+     */
+    public function generateProjectControlSheetZip(array $filtros): array
+    {
+        $hojas = $this->consultaPlanillasReporte($filtros)->get();
+        if ($hojas->isEmpty()) {
+            throw new ModelNotFoundException('Sin planillas para los filtros indicados.');
+        }
+
+        // Un vehículo concreto se entrega día por día; el proyecto completo, por
+        // vehículo (un PDF por día por cada coche serían cientos de planillas).
+        $porDia = ! empty($filtros['vehicle_uuid']) || ! empty($filtros['placa']);
+
+        // Las subcontratadas solo aportan su placa.
+        $grupos = $hojas->groupBy(function ($hoja) use ($porDia) {
+            $vehiculo = $hoja->internalControl?->vehicle_uuid
+                ? 'uuid:'.$hoja->internalControl->vehicle_uuid
+                : 'placa:'.($hoja->vehicle_license_plate ?? '');
+            $dia = $hoja->service_date?->format('Y-m-d') ?? '';
+
+            return $porDia ? $vehiculo.'|'.$dia : $vehiculo;
+        });
+
+        $zipPath = tempnam(sys_get_temp_dir(), 'pcp_reporte_').'.zip';
+        $zip = new \ZipArchive;
+        if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+            throw new \RuntimeException('No se pudo crear el archivo ZIP del reporte.');
+        }
+
+        $nombres = [];
+        try {
+            foreach ($grupos as $clave => $grupo) {
+                // La clave es "<vehiculo>|<fecha>" cuando va por día.
+                [$vehiculoClave, $dia] = array_pad(explode('|', $clave, 2), 2, '');
+                $filtrosVehiculo = $filtros;
+                $filtrosVehiculo['vehicle_uuid'] = null;
+                $filtrosVehiculo['placa'] = null;
+                if (str_starts_with($vehiculoClave, 'uuid:')) {
+                    $filtrosVehiculo['vehicle_uuid'] = substr($vehiculoClave, 5);
+                } elseif (($placa = substr($vehiculoClave, 6)) !== '') {
+                    $filtrosVehiculo['placa'] = $placa;
+                }
+                if ($porDia && $dia !== '') {
+                    $filtrosVehiculo['fecha'] = $dia;
+                }
+
+                $resultado = $this->generateFilteredServiceControlSheetPdf($filtrosVehiculo);
+                $nombre = self::nombreArchivo(
+                    'Planilla '.($grupo->first()->vehicle_license_plate ?: 'SIN PLACA'),
+                    $porDia && $dia !== ''
+                        ? $dia
+                        : ($filtros['fecha_desde'] ?? '').' al '.($filtros['fecha_hasta'] ?? '')
+                );
+                // ZipArchive no distingue rutas repetidas: evita pisar nombres iguales.
+                $base = substr($nombre, 0, -4);
+                $final = $nombre;
+                for ($i = 2; isset($nombres[$final]); $i++) {
+                    $final = $base.' ('.$i.').pdf';
+                }
+                $nombres[$final] = true;
+
+                $zip->addFromString($final, $resultado['pdf']->output());
+            }
+        } finally {
+            $zip->close();
+        }
+
+        return [
+            'path' => $zipPath,
+            'file_name' => 'Planillas_Proyecto_'.now()->format('Ymd_His').'.zip',
+            'total' => $grupos->count(),
+        ];
+    }
+
+    /**
      * Genera el PDF de Control de Servicio por filtros (rango, vehículo, conductor, día, mensual).
      * Solo días cerrados (is_active=false). Una fila por recorrido en la vista OPE-F-006.
      *
@@ -1905,55 +2050,12 @@ class PdfService
     public function generateFilteredServiceControlSheetPdf(array $filtros): array
     {
         try {
-            $companyUuid = $filtros['company_uuid'] ?? null;
             $tipo = $filtros['tipo'] ?? 'rango';
+            // Los reportes por proyecto pueden incluir días abiertos (planilla
+            // del día en curso); el resto sigue limitado a días finalizados.
+            $soloCerradas = empty($filtros['incluir_abiertos']);
 
-            $query = ServiceDeliveryControlSheet::query()
-                ->where('is_active', false)
-                ->with([
-                    'project',
-                    'routes',
-                    'internalControl.vehicle.vehicleClass',
-                    'internalControl.thirdParty',
-                    'subcontractedControl.vehicleClass',
-                ])
-                ->orderBy('service_date', 'asc');
-
-            if ($companyUuid) {
-                $query->where('company_uuid', $companyUuid);
-            }
-            if (! empty($filtros['fecha_desde'])) {
-                $query->whereDate('service_date', '>=', $filtros['fecha_desde']);
-            }
-            if (! empty($filtros['fecha_hasta'])) {
-                $query->whereDate('service_date', '<=', $filtros['fecha_hasta']);
-            }
-            if (! empty($filtros['fecha'])) {
-                $query->whereDate('service_date', $filtros['fecha']);
-            }
-            if (! empty($filtros['year'])) {
-                $query->whereYear('service_date', (int) $filtros['year']);
-            }
-            if (! empty($filtros['month'])) {
-                $query->whereMonth('service_date', (int) $filtros['month']);
-            }
-            if (! empty($filtros['vehicle_uuid'])) {
-                $vehicleUuid = $filtros['vehicle_uuid'];
-                $placaFiltro = Vehicle::where('uuid', $vehicleUuid)->value('vehicle_license_plate');
-                $query->where(function ($q) use ($vehicleUuid, $placaFiltro) {
-                    $q->whereHas('internalControl', fn($qq) => $qq->where('vehicle_uuid', $vehicleUuid));
-                    if ($placaFiltro) {
-                        $q->orWhereHas('subcontractedControl', fn($qq) => $qq->where('vehicle_license_plate', $placaFiltro));
-                    }
-                });
-            }
-            if (! empty($filtros['third_party_uuid'])) {
-                $driverUuid = $filtros['third_party_uuid'];
-                $query->whereHas('internalControl', fn($q) => $q->where('third_party_uuid', $driverUuid));
-            }
-            if (! empty($filtros['project_uuid'])) {
-                $query->where('project_uuid', $filtros['project_uuid']);
-            }
+            $query = $this->consultaPlanillasReporte($filtros);
 
             $sheets = $query->limit(500)->get();
             if ($sheets->isEmpty()) {
@@ -2074,9 +2176,9 @@ class PdfService
                 'logo_mime' => $logoData['mime'],
                 'empresa_transportadora' => $empresaTransportadora,
                 'empresa_siglas' => self::siglasEmpresa((string) ($empresaTransportadora ?? '')),
-                'periodo' => ($etiquetas[$tipo] ?? 'REPORTE') . ' — SOLO DÍAS FINALIZADOS',
+                'periodo' => ($etiquetas[$tipo] ?? 'REPORTE') . ($soloCerradas ? ' — SOLO DÍAS FINALIZADOS' : ' — ABIERTAS Y FINALIZADAS'),
                 'es_historial' => false,
-                'solo_finalizados' => true,
+                'solo_finalizados' => $soloCerradas,
                 'placa' => $valorDeCabecera($placasDistintas),
                 'numero_interno' => $valorDeCabecera($internosDistintos),
                 'area' => $sheets->last()->official_name_and_surname ?? 'N/A',
@@ -2085,7 +2187,7 @@ class PdfService
                 'empresa' => $empresaTransportadora,
                 'dias' => $dias,
                 'totales' => $resultadoFilas['totales'],
-                'observaciones' => 'Reporte ' . strtoupper($tipo) . ' | Días cerrados: ' . $sheets->count() . ' | Filas: ' . count($dias) . ($truncado ? ' | MOSTRANDO 500 DE ' . $totalPlanillas : ''),
+                'observaciones' => 'Reporte ' . strtoupper($tipo) . ' | Días ' . ($soloCerradas ? 'cerrados' : 'incluidos') . ': ' . $sheets->count() . ' | Filas: ' . count($dias) . ($truncado ? ' | MOSTRANDO 500 DE ' . $totalPlanillas : ''),
                 'firma_conductor' => $firmaCond,
                 'firma_recibido' => $firmaRec,
                 'proyecto' => $proyectoCabecera,

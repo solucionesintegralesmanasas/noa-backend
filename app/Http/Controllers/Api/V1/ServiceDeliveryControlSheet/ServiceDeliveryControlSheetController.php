@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api\V1\ServiceDeliveryControlSheet;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ServiceDeliveryControlSheet\BulkStoreServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\BulkUpdateServiceDeliveryControlSheetRequest;
+use App\Http\Requests\ServiceDeliveryControlSheet\RelevoServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\StoreServiceDeliveryControlSheetRequest;
 use App\Http\Requests\ServiceDeliveryControlSheet\UpdateServiceDeliveryControlSheetRequest;
 use App\Models\Vehicle;
@@ -273,6 +274,40 @@ class ServiceDeliveryControlSheetController extends Controller
             $resultado = $this->serviceDeliveryControlSheetService->createBulkForProject($request->validated());
 
             return $this->successResponse($resultado, 'Hojas de control creadas por proyecto con éxito.', 201);
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Post(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/relay',
+        summary: 'Relevo de conductor en un vehículo del proyecto',
+        description: 'Relevo de conductor: suma al entrante al vehículo del proyecto como un turno más y conserva vigente al conductor anterior. No crea ni cierra planillas; estas se cierran por fecha o cuando el conductor cierra su servicio.',
+        operationId: 'relayServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                required: ['company_uuid', 'project_uuid', 'vehicle_uuid', 'third_party_uuid'],
+                properties: [
+                    new OA\Property(property: 'company_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'project_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'vehicle_uuid', type: 'string', format: 'uuid'),
+                    new OA\Property(property: 'third_party_uuid', type: 'string', format: 'uuid', description: 'Conductor entrante'),
+                ]
+            )
+        ),
+        responses: [
+            new OA\Response(response: 201, description: 'Relevo aplicado. Devuelve project_uuid, vehicle_uuid, third_party_uuid y saliente_uuid.'),
+            new OA\Response(response: 422, description: 'Conductor ya asignado al vehículo, activo en otro vehículo del proyecto, o vínculo de otra empresa.'),
+        ]
+    )]
+    public function relay(RelevoServiceDeliveryControlSheetRequest $request): JsonResponse
+    {
+        try {
+            $resultado = $this->serviceDeliveryControlSheetService->relay($request->validated());
+
+            return $this->successResponse($resultado, 'Relevo de conductor aplicado con éxito.', 201);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }
@@ -713,6 +748,7 @@ class ServiceDeliveryControlSheetController extends Controller
             new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'year', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
             new OA\Parameter(name: 'month', in: 'query', required: false, schema: new OA\Schema(type: 'integer')),
+            new OA\Parameter(name: 'incluir_abiertos', in: 'query', required: false, description: 'Incluye días abiertos (solo reporte por proyecto).', schema: new OA\Schema(type: 'boolean')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Reporte PDF generado.'),
@@ -735,6 +771,7 @@ class ServiceDeliveryControlSheetController extends Controller
                 'project_uuid' => 'nullable|string',
                 'year' => 'nullable|integer|min:2020|max:2100',
                 'month' => 'nullable|integer|between:1,12',
+                'incluir_abiertos' => 'nullable|boolean',
             ]);
             if ($tipo === 'rango' && (! $request->query('fecha_desde') || ! $request->query('fecha_hasta'))) {
                 return $this->errorResponse('El rango requiere fecha_desde y fecha_hasta.', 422);
@@ -794,6 +831,7 @@ class ServiceDeliveryControlSheetController extends Controller
         parameters: [
             new OA\Parameter(name: 'tipo', in: 'path', required: true, schema: new OA\Schema(type: 'string', enum: ['rango', 'vehiculo', 'conductor', 'dia', 'mensual', 'proyecto'])),
             new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'incluir_abiertos', in: 'query', required: false, schema: new OA\Schema(type: 'boolean')),
         ],
         responses: [
             new OA\Response(response: 200, description: 'Reporte Excel generado.'),
@@ -818,6 +856,47 @@ class ServiceDeliveryControlSheetController extends Controller
                 new \App\Exports\ServiceControlSheetExport($filtros),
                 'Reporte_Control_'.ucfirst($tipo).'_'.now()->format('Ymd_His').'.xlsx'
             );
+        } catch (\Throwable $e) {
+            return $this->handleException($e);
+        }
+    }
+
+    #[OA\Get(
+        path: '/api/v1/control-sheets/service-delivery-control-sheets/reports/proyecto/zip',
+        summary: 'Descargar en ZIP las planillas de Control de Servicio de un proyecto (una por vehículo)',
+        operationId: 'downloadProjectZipServiceDeliveryControlSheet',
+        tags: ['ServiceDeliveryControlSheet'],
+        parameters: [
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: true, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'fecha_desde', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
+            new OA\Parameter(name: 'fecha_hasta', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'date')),
+            new OA\Parameter(name: 'incluir_abiertos', in: 'query', required: false, description: 'Incluye días abiertos (planilla del día en curso).', schema: new OA\Schema(type: 'boolean')),
+        ],
+        responses: [
+            new OA\Response(response: 200, description: 'ZIP con una planilla PDF por vehículo.'),
+            new OA\Response(response: 404, description: 'Sin planillas para los filtros.'),
+            new OA\Response(response: 422, description: 'Faltan filtros obligatorios.'),
+        ]
+    )]
+    public function downloadProjectZip(Request $request)
+    {
+        try {
+            $request->validate([
+                'project_uuid' => 'required|string',
+                'fecha_desde' => 'nullable|date',
+                'fecha_hasta' => 'nullable|date|after_or_equal:fecha_desde',
+                'incluir_abiertos' => 'nullable|boolean',
+            ]);
+
+            $filtros = array_merge($request->query(), [
+                'tipo' => 'proyecto',
+                'company_uuid' => $request->attributes->get('current_company_uuid'),
+            ]);
+            $result = app(PdfService::class)->generateProjectControlSheetZip($filtros);
+
+            return response()->download($result['path'], $result['file_name'], [
+                'Content-Type' => 'application/zip',
+            ])->deleteFileAfterSend(true);
         } catch (\Throwable $e) {
             return $this->handleException($e);
         }

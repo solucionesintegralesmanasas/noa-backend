@@ -45,7 +45,7 @@ class EmploymentContractTemplates
 
     /**
      * @param  array<string, mixed>  $d  Datos ya normalizados (ver EmploymentContractPdfService).
-     * @return array{title: string, intro: string, clauses: array<int, array{title: string, text: string}>, closing: string, signatures: array{0: string, 1: string}, notes: array<int, string>}
+     * @return array{title: string, intro: string, clauses: array<int, array{title: string, text: string}>, closing: string, signatures: array<int|string, mixed>, notes: array<int, string>}
      */
     public static function build(string $type, array $d): array
     {
@@ -61,8 +61,28 @@ class EmploymentContractTemplates
             default => throw new \InvalidArgumentException("Tipo de contrato no soportado: {$type}"),
         };
 
+        $employerName = trim((string) ($d['employer_name'] ?? ''));
+        $employerNit = trim((string) ($d['employer_nit'] ?? ''));
+        $employerRep = trim((string) ($d['employer_rep'] ?? ''));
+        $workerName = trim((string) ($d['worker_name'] ?? ''));
+        $workerDoc = trim((string) ($d['worker_doc'] ?? ''));
+
         $doc['title'] = mb_strtoupper(self::TYPES[$type]);
-        $doc['signatures'] = [$empleador, $trabajador];
+        $doc['signatures'] = [
+            0 => $empleador,
+            1 => $trabajador,
+            'employer' => [
+                'label' => $empleador,
+                'name' => $employerName,
+                'id' => $employerNit !== '' ? 'NIT '.$employerNit : '',
+                'role' => $employerRep !== '' ? 'Rep. Legal: '.$employerRep : '',
+            ],
+            'employee' => [
+                'label' => $trabajador,
+                'name' => $workerName,
+                'id' => $workerDoc !== '' ? 'C.C. '.$workerDoc : '',
+            ],
+        ];
         $doc['closing'] = self::cierre($d);
 
         return $doc;
