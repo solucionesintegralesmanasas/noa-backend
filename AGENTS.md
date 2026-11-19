@@ -70,8 +70,9 @@ Lectura obligatoria antes de tocar el backend: resume el estado real del sistema
 | Dashboard | `--filter=DashboardConsultasTest` |
 | Reporte de vehículos / propiedad | `--filter="ReporteVehiculos\|OwnCompany"` |
 | Reporte de actividad vehicular | `--filter=ReporteActividadVehicular` |
-| Planillas de control (PCP) | `--filter="CreacionMasivaHojasTest\|EdicionHojaControlTest\|PcpAislamientoTest\|RelevoPlanillaTest\|ServiceControlSheet"` |
+| Planillas de control (PCP) | `--filter="CreacionMasivaHojasTest\|EdicionHojaControlTest\|PcpAislamientoTest\|RelevoPlanillaTest\|ReporteControlServicioProyectoTest\|ServiceControlSheet"` |
 | Plantillas y base estándar PDF | `--filter="PdfBaseEstandarTest\|PdfBrandingTest\|TechSheetVehiclesPdfLayoutSmokeTest\|ServiceControlSheetPdfLayoutSmokeTest\|EvidenceStatusPdfTest\|FleetPdfLayoutSmokeTest\|InspectionPdfLayoutSmokeTest\|MaintenancePdfLayoutSmokeTest\|ContractsAndHrPdfLayoutSmokeTest\|CommercialPdfLayoutSmokeTest\|RadicacionPdfLayoutSmokeTest\|FichaTecnicaConductorPdfLayoutSmokeTest"` |
+| Flota, contratos de alquiler e ítems de inspección | `--filter="RentalContractTest\|InspectionItemBulkAndImportTest"` |
 | Notificaciones y cron | `--filter="SincronizacionIncrementalNotificacionesTest\|NotificacionesConsultasTest\|DigestVencimientosTest"` |
 | Mapas y GPS | `--filter="CacheMapasRutaTest\|ResumenDiarioMapaTest\|MonitorFlotaTest\|IngestaGpsTest"` |
 | Facturación | `--filter="ApidianFacturacionTest\|Factus\|FacturacionComercialTest\|ProveedoresBillingHttpTest\|AutorizacionModulosFacturacionTest"` |

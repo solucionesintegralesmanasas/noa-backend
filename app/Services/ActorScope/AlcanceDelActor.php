@@ -44,6 +44,7 @@ class AlcanceDelActor
         'contractors',
         'fuec',
         'procedures',
+        'rental_contracts',
         'commercial_invoices',
         'credit_notes',
         'debit_notes',

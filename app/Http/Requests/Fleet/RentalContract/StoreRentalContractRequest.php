@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests\Fleet\RentalContract;
 
 use App\Models\Owner;
+use App\Models\ThirdParty;
 use App\Models\Vehicle;
 use App\Traits\HandlesApiResponse;
 use Closure;
@@ -25,7 +26,7 @@ class StoreRentalContractRequest extends FormRequest
     {
         return [
             'vehicle_uuid' => ['required', 'uuid', $this->reglaVehiculoDelContexto()],
-            'owner_uuid' => ['nullable', 'uuid', 'exists:owners,uuid'],
+            'owner_uuid' => ['nullable', 'uuid', 'exists:owners,uuid', $this->reglaPropietarioDelContexto()],
             'start_date' => ['required', 'date'],
             'monthly_term' => ['nullable', 'integer', 'min:1', 'max:60'],
             'monthly_fee' => ['required', 'numeric', 'gt:0'],
@@ -65,6 +66,34 @@ class StoreRentalContractRequest extends FormRequest
                 && empty($vehiculo->third_party_uuid)
             ) {
                 $fail('El vehículo seleccionado no tiene un propietario registrado.');
+            }
+        };
+    }
+
+    /**
+     * Si el propietario está asociado a un vehículo o tercero, debe pertenecer
+     * a la empresa activa de la petición.
+     */
+    private function reglaPropietarioDelContexto(): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail): void {
+            if ($value === null || $value === '' || ! $this->hayContextoDeEmpresa()) {
+                return;
+            }
+
+            $owner = Owner::query()->where('uuid', $value)->first(['uuid', 'vehicle_uuid', 'third_party_uuid']);
+            if (! $owner) {
+                return;
+            }
+
+            if ($owner->vehicle_uuid && ! Vehicle::query()->where('uuid', $owner->vehicle_uuid)->exists()) {
+                $fail('El propietario seleccionado no pertenece a la empresa activa.');
+
+                return;
+            }
+
+            if ($owner->third_party_uuid && ! ThirdParty::query()->where('uuid', $owner->third_party_uuid)->exists()) {
+                $fail('El propietario seleccionado no pertenece a la empresa activa.');
             }
         };
     }

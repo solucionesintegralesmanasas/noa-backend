@@ -7,7 +7,7 @@ namespace App\Http\Controllers\Api\V1\Fleet;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Fleet\RentalContract\StoreRentalContractRequest;
 use App\Services\Fleet\RentalContractService;
-use App\Traits\PdfGeneratable;
+use App\Services\Pdf\PdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OpenApi\Attributes as OA;
@@ -26,8 +26,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class RentalContractController extends Controller
 {
-    use PdfGeneratable;
-
     /**
      * Inyección de dependencias.
      */
@@ -239,27 +237,20 @@ class RentalContractController extends Controller
             new OA\Response(response: 404, description: 'Contrato no encontrado.'),
         ]
     )]
-    public function downloadPdf(string $uuid): Response
+    public function downloadPdf(string $uuid, PdfService $pdfService): Response|JsonResponse
     {
         try {
             $contract = $this->rentalContractService->getDetail($uuid);
 
-            if (!$contract) {
-                abort(404, 'Contrato no encontrado.');
+            if (! $contract) {
+                return $this->errorResponse('Contrato no encontrado.', 404);
             }
 
-            $data = [
-                'contract' => $contract,
-                'totalCuotas' => $contract->installments->count(),
-                'canonTotal' => $contract->monthly_fee * $contract->monthly_term,
-                'fechaEmision' => now()->format('d/m/Y'),
-            ];
+            $resultado = $pdfService->generateRentalContractPdf($contract);
 
-            $numeroArchivo = $contract->contract_number ?: $uuid;
-
-            return $this->generatePdf('pdf.rental-contract', $data, "contrato_alquiler_{$numeroArchivo}.pdf", true);
+            return $resultado['pdf']->download($resultado['file_name']);
         } catch (\Throwable $e) {
-            return response()->json(['message' => $e->getMessage()], 500);
+            return $this->handleException($e);
         }
     }
 

@@ -237,6 +237,92 @@ class ContractsAndHrPdfLayoutSmokeTest extends TestCase
         $this->renderizarSinAvisos($html);
     }
 
+    public function test_contrato_alquiler_usa_estandar_neutro_identidad_de_empresa_y_tres_modos(): void
+    {
+        $pngTiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $company = (object) [
+            'business_name' => 'TRANSPORTES DEL SINÚ S.A.S.',
+            'document_number' => '900888777',
+            'verification_digit' => '1',
+        ];
+        $contract = (object) [
+            'uuid' => '11111111-1111-1111-1111-111111111111',
+            'contract_number' => '0007',
+            'status' => 'active',
+            'monthly_term' => 2,
+            'monthly_fee' => 3500000,
+            'start_date' => Carbon::parse('2026-11-01'),
+            'end_date' => Carbon::parse('2026-12-31'),
+            'company' => $company,
+            'owner' => (object) ['owner_name' => 'PROPIETARIO EJEMPLO', 'document_number' => '79123456'],
+            'vehicle' => (object) [
+                'vehicle_license_plate' => 'GUX649',
+                'model' => '2025',
+                'passenger_capacity' => 24,
+                'type_of_service' => 'ESPECIAL',
+                'brand' => (object) ['description' => 'CHEVROLET'],
+                'vehicleClass' => (object) ['description' => 'BUSETA'],
+            ],
+            'installments' => collect([
+                (object) [
+                    'installment_number' => 1,
+                    'due_date' => Carbon::parse('2026-11-30'),
+                    'gross_amount' => 3500000,
+                    'previous_balance' => 0,
+                    'discount_amount' => 0,
+                    'net_amount' => 3500000,
+                    'paid_amount' => 3500000,
+                    'pending_balance' => 0,
+                    'status' => 'paid',
+                ],
+                (object) [
+                    'installment_number' => 2,
+                    'due_date' => Carbon::parse('2026-12-31'),
+                    'gross_amount' => 3500000,
+                    'previous_balance' => 0,
+                    'discount_amount' => 0,
+                    'net_amount' => 3500000,
+                    'paid_amount' => 0,
+                    'pending_balance' => 3500000,
+                    'status' => 'pending',
+                ],
+            ]),
+            'discounts' => collect(),
+        ];
+
+        $base = [
+            'contract' => $contract,
+            'company' => $company,
+            'totalCuotas' => 2,
+            'canonTotal' => 7000000,
+            'fechaEmision' => '19/11/2026',
+            'logo_data_url' => 'data:image/png;base64,' . $pngTiny,
+            'empresa_siglas' => 'TDS',
+        ];
+
+        $htmlFondo = view('pdf.rental-contract', $base + ['letterhead' => null, 'logo_fondo' => $pngTiny, 'ocultar_marca' => false])->render();
+        $this->assertStringContainsString('Inter-Regular.ttf', $htmlFondo);
+        $this->assertStringContainsString('--pdf-banda: #d8d8d8', $htmlFondo);
+        $this->assertStringContainsString('id="watermark"', $htmlFondo);
+        $this->assertStringContainsString('class="header-logo-cell"', $htmlFondo);
+        $this->assertStringContainsString('TRANSPORTES DEL SINÚ S.A.S.', $htmlFondo);
+        $this->assertStringNotContainsString('Noa Solutions', $htmlFondo);
+        $this->assertStringNotContainsString('NOA SOLUTIONS', $htmlFondo);
+        $this->assertStringNotContainsString('#2c3e50', $htmlFondo);
+        $this->assertStringNotContainsString('#34495e', $htmlFondo);
+
+        $htmlMembrete = view('pdf.rental-contract', $base + ['letterhead' => $this->hojaVerticalDataUrl(), 'logo_fondo' => null, 'ocultar_marca' => false])->render();
+        $this->assertStringContainsString('id="letterhead-page-bg"', $htmlMembrete);
+        $this->assertStringNotContainsString('id="watermark"', $htmlMembrete);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $htmlMembrete);
+
+        $htmlLimpio = view('pdf.rental-contract', $base + ['letterhead' => null, 'logo_fondo' => $pngTiny, 'ocultar_marca' => true])->render();
+        $this->assertStringNotContainsString('id="watermark"', $htmlLimpio);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $htmlLimpio);
+
+        $this->renderizarSinAvisos($htmlFondo);
+    }
+
     private function hojaVerticalDataUrl(): string
     {
         $img = imagecreatetruecolor(100, 140);

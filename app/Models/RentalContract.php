@@ -71,6 +71,14 @@ class RentalContract extends Model
     ];
 
     /**
+     * Relación con la empresa.
+     */
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class, 'company_uuid', 'uuid');
+    }
+
+    /**
      * Relación con el vehículo.
      */
     public function vehicle(): BelongsTo

@@ -516,6 +516,103 @@ class RentalContractTest extends TestCase
         $this->assertSame('finished', DB::table('rental_contracts')->where('uuid', $contractUuid)->value('status'));
     }
 
+    public function test_rechaza_pago_sobre_cuota_de_otra_empresa(): void
+    {
+        $ownerB = $this->insertar('owners', ['owner_name' => 'Dueño B', 'document_number' => '9000099']);
+        $contractB = $this->insertar('rental_contracts', [
+            'company_uuid' => $this->empresaB,
+            'vehicle_uuid' => $this->vehiculoB,
+            'owner_uuid' => $ownerB,
+            'contract_number' => '0001',
+            'start_date' => '2026-12-01',
+            'end_date' => '2026-12-31',
+            'monthly_term' => 1,
+            'monthly_fee' => 1000,
+            'status' => 'active',
+        ]);
+        $cuotaB = $this->insertar('rental_installments', [
+            'rental_contract_uuid' => $contractB,
+            'installment_number' => 1,
+            'due_date' => '2026-12-31',
+            'gross_amount' => 1000,
+            'previous_balance' => 0,
+            'discount_amount' => 0,
+            'net_amount' => 1000,
+            'paid_amount' => 0,
+            'pending_balance' => 1000,
+            'status' => 'pending',
+        ]);
+
+        $this->como($this->adminA, $this->empresaA)
+            ->putJson("/api/v1/fleet-management/rental-installments/{$cuotaB}", [
+                'payment_amount' => 500,
+            ])
+            ->assertStatus(404);
+
+        $this->assertSame(0.0, (float) DB::table('rental_installments')->where('uuid', $cuotaB)->value('paid_amount'));
+    }
+
+    public function test_afiliado_solo_ve_contratos_de_sus_vehiculos(): void
+    {
+        $terceroAfiliado = $this->insertar('third_parties', [
+            'company_uuid' => $this->empresaA,
+            'first_name' => 'Afiliado',
+            'last_name' => 'Uno',
+            'document_number' => '800001',
+            'is_affiliate' => true,
+        ]);
+        $vehiculoMio = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaA,
+            'third_party_uuid' => $terceroAfiliado,
+            'vehicle_license_plate' => 'MIO001',
+            'is_active' => 1,
+        ]);
+        $vehiculoOtro = $this->vehiculoA;
+        $ownerOtro = $this->insertar('owners', ['owner_name' => 'Dueño Otro', 'document_number' => '9000088']);
+        $ownerMio = $this->insertar('owners', ['owner_name' => 'Dueño Mio', 'document_number' => '9000077']);
+
+        $contratoMio = $this->insertar('rental_contracts', [
+            'company_uuid' => $this->empresaA,
+            'vehicle_uuid' => $vehiculoMio,
+            'owner_uuid' => $ownerMio,
+            'contract_number' => '0001',
+            'start_date' => '2026-12-01',
+            'end_date' => '2026-12-31',
+            'monthly_term' => 1,
+            'monthly_fee' => 1000,
+            'status' => 'active',
+        ]);
+        $contratoOtro = $this->insertar('rental_contracts', [
+            'company_uuid' => $this->empresaA,
+            'vehicle_uuid' => $vehiculoOtro,
+            'owner_uuid' => $ownerOtro,
+            'contract_number' => '0002',
+            'start_date' => '2026-12-01',
+            'end_date' => '2026-12-31',
+            'monthly_term' => 1,
+            'monthly_fee' => 1000,
+            'status' => 'active',
+        ]);
+
+        $afiliado = $this->crearUsuario($this->empresaA, 'AFILIADO', 'afiliado.alquiler@test.local');
+        DB::table('company_user')
+            ->where('user_id', $afiliado->id)
+            ->where('company_uuid', $this->empresaA)
+            ->update(['third_party_uuid' => $terceroAfiliado]);
+
+        $respuesta = $this->como($afiliado, $this->empresaA)
+            ->getJson('/api/v1/fleet-management/rental-contracts')
+            ->assertStatus(200);
+
+        $uuids = collect($respuesta->json('data.data'))->pluck('uuid')->all();
+        $this->assertContains($contratoMio, $uuids);
+        $this->assertNotContains($contratoOtro, $uuids);
+
+        $this->como($afiliado, $this->empresaA)
+            ->getJson("/api/v1/fleet-management/rental-contracts/{$contratoOtro}")
+            ->assertStatus(404);
+    }
+
     private function como(User $usuario, string $empresa)
     {
         Sanctum::actingAs($usuario, ['*']);

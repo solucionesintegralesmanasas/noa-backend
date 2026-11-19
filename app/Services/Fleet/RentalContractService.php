@@ -14,7 +14,9 @@ use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 /**
  * Servicio para gestión de contratos de alquiler.
@@ -96,6 +98,7 @@ class RentalContractService extends BaseService
         ?string $sortOrder = null
     ): LengthAwarePaginator {
         $query = $this->query();
+        $this->aislarPorAfiliado($query);
 
         if ($vehicleUuid) {
             $query->where('vehicle_uuid', $vehicleUuid);
@@ -127,7 +130,15 @@ class RentalContractService extends BaseService
      */
     public function getDetail(string $uuid): ?RentalContract
     {
-        return $this->findByUuid($uuid, ['*'], ['vehicle.brand', 'vehicle.vehicleClass', 'owner', 'installments', 'discounts.installment']);
+        return $this->findByUuid($uuid, ['*'], [
+            'vehicle.brand',
+            'vehicle.vehicleClass',
+            'owner',
+            'company.media',
+            'company.systemConfiguration.media',
+            'installments',
+            'discounts.installment',
+        ]);
     }
 
     /**
@@ -239,20 +250,24 @@ class RentalContractService extends BaseService
     }
 
     /**
-     * Generar todas las cuotas mensuales independientes.
+     * Generar todas las cuotas mensuales independientes en bloque.
      */
     private function generateInstallments(RentalContract $contract): void
     {
         $startDate = Carbon::parse($contract->start_date);
         $monthlyFee = (float) $contract->monthly_fee;
+        $now = now();
+        $rows = [];
 
         for ($i = 1; $i <= $contract->monthly_term; $i++) {
             $dueDate = $startDate->copy()->addMonths($i - 1)->endOfMonth();
 
-            RentalInstallment::create([
+            $rows[] = [
+                'uuid' => (string) Str::uuid(),
+                'company_uuid' => $contract->company_uuid,
                 'rental_contract_uuid' => $contract->uuid,
                 'installment_number' => $i,
-                'due_date' => $dueDate,
+                'due_date' => $dueDate->toDateString(),
                 'gross_amount' => $monthlyFee,
                 'previous_balance' => 0,
                 'discount_amount' => 0,
@@ -260,7 +275,13 @@ class RentalContractService extends BaseService
                 'paid_amount' => 0,
                 'pending_balance' => $monthlyFee,
                 'status' => $this->calculateStatus($dueDate, 0.0, $monthlyFee),
-            ]);
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        if ($rows !== []) {
+            DB::table('rental_installments')->insert($rows);
         }
     }
 
@@ -276,7 +297,11 @@ class RentalContractService extends BaseService
         return DB::transaction(function () use ($uuid, $data) {
             $installment = RentalInstallment::with('contract')->where('uuid', $uuid)->firstOrFail();
 
-            if ($installment->contract?->status === 'cancelled') {
+            if (! $installment->contract) {
+                throw new ModelNotFoundException('La cuota solicitada no pertenece a la empresa activa.');
+            }
+
+            if ($installment->contract->status === 'cancelled') {
                 throw new \InvalidArgumentException('No se pueden registrar pagos en un contrato cancelado.');
             }
 

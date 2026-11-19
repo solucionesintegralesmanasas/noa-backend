@@ -558,6 +558,7 @@ class PdfService
         'ficha_tecnica_tercero',
         'inspeccion_preoperacional',
         'contrato_laboral',
+        'contrato_alquiler',
     ];
 
     /**
@@ -2485,5 +2486,43 @@ class PdfService
             'paper' => 'letter',
             'orientation' => 'portrait',
         ]);
+    }
+
+    /**
+     * Genera el contrato de alquiler de vehículo en PDF bajo el estándar neutro.
+     *
+     * @return array{pdf: \Barryvdh\DomPDF\PDF, file_name: string}
+     */
+    public function generateRentalContractPdf(\App\Models\RentalContract $contract): array
+    {
+        $company = $contract->company;
+        $logoModel = self::logoParaMarca($company);
+        $identidad = $this->identidadEmpresa($company, $logoModel);
+
+        $data = $this->conMarca([
+            'contract' => $contract,
+            'company' => $company,
+            'totalCuotas' => $contract->installments->count(),
+            'canonTotal' => (float) $contract->monthly_fee * (int) $contract->monthly_term,
+            'fechaEmision' => now()->format('d/m/Y'),
+            'logo_data_url' => $identidad['logo_data_url'],
+            'empresa_siglas' => $identidad['empresa_siglas'],
+        ], $company, 'contrato_alquiler', $logoModel);
+
+        $pdf = Pdf::loadView('pdf.rental-contract', $data);
+        $pdf->setPaper('letter', 'portrait');
+        $pdf->setOption([
+            'dpi' => 120,
+            'isFontSubsettingEnabled' => true,
+            'isRemoteEnabled' => false,
+        ]);
+        $this->sellarPaginado($pdf, self::MARGEN_DERECHO_ESTANDAR_PT);
+
+        $numero = $contract->contract_number ?: $contract->uuid;
+
+        return [
+            'pdf' => $pdf,
+            'file_name' => self::nombreArchivo('Contrato de Alquiler', $numero),
+        ];
     }
 }
