@@ -2,6 +2,8 @@
 
 @section('title', $doc['title'] ?? 'Contrato Laboral')
 
+@section('header')@endsection
+
 @section('content')
 <style>
     .contract-container {
@@ -81,12 +83,12 @@
         @if(isset($doc['signatures']['employer']))
             <div class="signature-block">
                 <div class="signature-line"></div>
-                <div class="signature-name">EL EMPLEADOR</div>
+                <div class="signature-name">{{ $doc['signatures']['employer']['label'] ?? 'EL EMPLEADOR' }}</div>
                 <div class="signature-name">{{ $doc['signatures']['employer']['name'] ?? '' }}</div>
-                @if(isset($doc['signatures']['employer']['id']))
+                @if(!empty($doc['signatures']['employer']['id']))
                     <div>{{ $doc['signatures']['employer']['id'] }}</div>
                 @endif
-                @if(isset($doc['signatures']['employer']['role']))
+                @if(!empty($doc['signatures']['employer']['role']))
                     <div class="signature-role">{{ $doc['signatures']['employer']['role'] }}</div>
                 @endif
             </div>
@@ -95,9 +97,9 @@
         @if(isset($doc['signatures']['employee']))
             <div class="signature-block">
                 <div class="signature-line"></div>
-                <div class="signature-name">EL TRABAJADOR</div>
+                <div class="signature-name">{{ $doc['signatures']['employee']['label'] ?? 'EL TRABAJADOR' }}</div>
                 <div class="signature-name">{{ $doc['signatures']['employee']['name'] ?? '' }}</div>
-                @if(isset($doc['signatures']['employee']['id']))
+                @if(!empty($doc['signatures']['employee']['id']))
                     <div>{{ $doc['signatures']['employee']['id'] }}</div>
                 @endif
             </div>
