@@ -25,11 +25,20 @@ class DebitNoteController extends Controller
     {
         try {
             $filtros = array_filter([
-                'company_uuid' => $request->query('company_uuid'),
+                'company_uuid' => $request->attributes->get('current_company_uuid') ?? $request->query('company_uuid'),
                 'status' => $request->query('status'),
+                'electronic_status' => $request->query('electronic_status'),
+                'invoice_uuid' => $request->query('invoice_uuid'),
+                'third_party_uuid' => $request->query('third_party_uuid'),
             ]);
 
-            $pagina = $this->notas->search($filtros, ['*'], (int) $request->query('per_page', 15), ['invoice']);
+            $pagina = $this->notas->listar(
+                $filtros,
+                (int) $request->query('per_page', 15),
+                $request->query('search'),
+                $request->query('sort_by'),
+                $request->query('sort_order', 'desc')
+            );
 
             return $this->successResponse($pagina, 'Notas débito recuperadas con éxito.');
         } catch (\Throwable $e) {

@@ -44,6 +44,9 @@ class AlcanceDelActor
         'contractors',
         'fuec',
         'procedures',
+        'commercial_invoices',
+        'credit_notes',
+        'debit_notes',
     ];
 
     private bool $contextoResuelto = false;
