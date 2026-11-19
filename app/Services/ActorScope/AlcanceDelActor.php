@@ -784,7 +784,7 @@ class AlcanceDelActor
             $conductores = array_unique(array_merge([$affiliateUuid], $this->obtenerConductoresDeAfiliado()));
             $licenciasPropias = $this->obtenerLicenciasDeOwnersDrivers($affiliateUuid);
 
-            $query->where(function (Builder $q) use ($vehiculos, $conductores, $licenciasPropias, $affiliateUuid) {
+            $query->where(function (Builder $q) use ($vehiculos, $conductores, $licenciasPropias) {
                 // 1. Vehículos
                 $q->orWhere(function (Builder $sub) use ($vehiculos) {
                     $sub->where('entity_type', Vehicle::class)
@@ -820,15 +820,11 @@ class AlcanceDelActor
                                 $sq->select('uuid')->from('business_collaboration_agreements')->whereIn('vehicle_uuid', $vehiculos);
                             });
                     })
-                    // 6. Cobros de administración de afiliado
-                    ->orWhere(function (Builder $sub) use ($affiliateUuid, $vehiculos) {
+                    // 6. Cobros de administración de afiliado (el afiliado se deriva del vehículo)
+                    ->orWhere(function (Builder $sub) use ($vehiculos) {
                         $sub->where('entity_type', AffiliateAdminCharge::class)
-                            ->where(function (Builder $cq) use ($affiliateUuid, $vehiculos) {
-                                $cq->whereIn('entity_uuid', function ($sq) use ($affiliateUuid) {
-                                    $sq->select('uuid')->from('affiliate_admin_charges')->where('third_party_uuid', $affiliateUuid);
-                                })->orWhereIn('entity_uuid', function ($sq) use ($vehiculos) {
-                                    $sq->select('uuid')->from('affiliate_admin_charges')->whereIn('vehicle_uuid', $vehiculos);
-                                });
+                            ->whereIn('entity_uuid', function ($sq) use ($vehiculos) {
+                                $sq->select('uuid')->from('affiliate_admin_charges')->whereIn('vehicle_uuid', $vehiculos);
                             });
                     });
             });
