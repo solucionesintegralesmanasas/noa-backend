@@ -246,7 +246,12 @@ class RadicacionDocumentoService
             'imagenes' => $this->datosImagenes($config, $empresa['logo']['imagen'] ?? null),
         ];
 
-        return $datos;
+        return app(\App\Services\Pdf\PdfService::class)->conMarca(
+            $datos,
+            $padre->company,
+            'radicacion_'.strtolower($clave),
+            $padre->company?->logo
+        );
     }
 
     /**
