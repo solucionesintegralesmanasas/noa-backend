@@ -358,9 +358,10 @@
         </div>
     @endif
 
-    @if (empty($ocultar_marca ?? false) && empty($letterhead ?? null) && !empty($data['logo_fondo'] ?? null))
+    @php($__logoFondoRecibo = $logo_fondo ?? ($data['logo_fondo'] ?? null))
+    @if (empty($ocultar_marca ?? false) && empty($letterhead ?? null) && !empty($__logoFondoRecibo))
         <div id="watermark">
-            <img src="data:image/png;base64,{{ $data['logo_fondo'] }}" alt="Marca de agua" />
+            <img src="data:image/png;base64,{{ $__logoFondoRecibo }}" alt="Marca de agua" />
         </div>
     @endif
 
@@ -489,7 +490,7 @@
             </tr>
             <tr class="total-row">
                 <td class="total-lbl">Recargo mora ({{ number_format($lateFee, 2, ',', '.') }}%):</td>
-                <td class="num" style="padding-right: 8px; color: {{ $recargo > 0 ? '#991b1b' : '#166534' }};">
+                <td class="num" style="padding-right: 8px; color: #000000;">
                     {{ $money($recargo) }}
                 </td>
             </tr>
@@ -509,7 +510,7 @@
                 </div>
                 <div style="font-size: 8.4pt; font-weight: 700; color: #000000; margin-top: 1px;">
                     {{ $isPagado ? 'Fecha límite de pago:' : 'Pague oportunamente hasta:' }}
-                    <span style="color: {{ $isPagado ? '#166534' : '#991b1b' }};">{{ $date($charge->due_date) }}</span>
+                    <span style="color: #000000; text-decoration: {{ $isPagado ? 'none' : 'underline' }};">{{ $date($charge->due_date) }}</span>
                 </div>
                 <div style="font-size: 6.5pt; color: #262626; margin-top: 2px; line-height: 1.25;">
                     @if ($isPagado)
@@ -526,7 +527,7 @@
                 <div style="font-size: 12pt; font-weight: 700; color: #000000; margin-top: 1px;">
                     {{ $money($total) }}
                 </div>
-                <div style="font-size: 6.5pt; color: {{ $isPagado ? '#166534' : ($aplicaMora ? '#991b1b' : '#92400e') }}; font-weight: 700;">
+                <div style="font-size: 6.5pt; color: #000000; font-weight: 700;">
                     @if ($isPagado)
                         TRANSACCIÓN EXITOSA
                     @elseif ($status === 'ANULADO')

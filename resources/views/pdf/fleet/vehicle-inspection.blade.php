@@ -17,6 +17,8 @@
     $empresaSiglas = $empresa_siglas ?? \App\Services\Pdf\PdfService::siglasEmpresa((string) $nombreEmpresa);
     $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null, $orientation);
     $sinMarcaVisual = ! empty($letterhead ?? null) || ! empty($ocultar_marca ?? false);
+    // Modo «fondo»: el controlador entrega el logo en alta dentro de `data`; conMarca() lo entrega arriba.
+    $marcaFondo = $logo_fondo ?? ($data['logo_fondo'] ?? null);
     $marcaLinea = collect([$vehiculo->brand->description ?? null, $vehiculo->line ?? null])->filter()->implode(' · ');
     if (! empty($vehiculo->model)) {
         $marcaLinea = trim($marcaLinea . ' (' . $vehiculo->model . ')');
@@ -287,7 +289,7 @@
             font-size: 7.2pt;
             font-weight: bold;
             font-family: 'DejaVu Sans', sans-serif;
-            color: #166534;
+            color: #000000;
             background-color: #ffffff;
         }
 
@@ -324,6 +326,10 @@
     @elseif (! empty($letterhead ?? null))
         <div id="letterhead-banner">
             <img src="{{ $letterhead }}" alt="Membrete" />
+        </div>
+    @elseif (empty($ocultar_marca ?? false) && ! empty($marcaFondo))
+        <div id="watermark">
+            <img src="data:image/png;base64,{{ $marcaFondo }}" alt="Marca de agua" />
         </div>
     @endif
 

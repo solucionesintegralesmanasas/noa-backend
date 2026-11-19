@@ -10,8 +10,13 @@
         <img src="{{ $letterhead }}" alt="Membrete">
     </div>
 @elseif (! $__sinMarcaVisual && ! empty($logo_fondo))
+    @php
+        $__logoFondoSrc = str_starts_with((string) $logo_fondo, 'data:')
+            ? $logo_fondo
+            : 'data:image/png;base64,' . $logo_fondo;
+    @endphp
     <div id="watermark">
-        <img src="{{ $logo_fondo }}" alt="Marca de agua">
+        <img src="{{ $__logoFondoSrc }}" alt="Marca de agua">
     </div>
 @endif
 

@@ -461,14 +461,39 @@ class PdfService
      */
     public function letterheadDataUrl(?object $company = null): ?string
     {
-        try {
-            $media = null;
+        return $this->letterheadDesdeConfiguracion($company, $this->configuracionPdfDe($company));
+    }
 
-            $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
-            if ($companyUuid) {
-                $config = SystemConfiguration::withoutGlobalScopes()->where('company_uuid', $companyUuid)->first();
-                $media = $config?->getFirstMedia('LETTERHEAD');
+    /**
+     * Configuración del sistema de la empresa, resuelta UNA sola vez por documento.
+     *
+     * Si la empresa llega con la relación `systemConfiguration` precargada (reportes,
+     * con presupuesto de consultas) no se consulta la base: el render cuesta 0 consultas.
+     */
+    private function configuracionPdfDe(?object $company): ?SystemConfiguration
+    {
+        $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
+        if (! $companyUuid) {
+            return null;
+        }
+
+        try {
+            if ($company instanceof \Illuminate\Database\Eloquent\Model && $company->relationLoaded('systemConfiguration')) {
+                return $company->getRelation('systemConfiguration');
             }
+
+            return SystemConfiguration::withoutGlobalScopes()->where('company_uuid', $companyUuid)->first();
+        } catch (\Throwable $e) {
+            Logger::warning('No se pudo leer la configuración de PDF: ' . $e->getMessage());
+
+            return null;
+        }
+    }
+
+    private function letterheadDesdeConfiguracion(?object $company, ?SystemConfiguration $config): ?string
+    {
+        try {
+            $media = $config?->getFirstMedia('LETTERHEAD');
 
             if (! $media) {
                 $media = self::logoParaMarca($company);
@@ -541,12 +566,8 @@ class PdfService
         try {
             if ($companyUuid) {
                 $config = SystemConfiguration::withoutGlobalScopes()->where('company_uuid', $companyUuid)->first();
-                $modo = is_array($config?->pdf_branding ?? null)
-                    ? ($config->pdf_branding[$clave] ?? null)
-                    : null;
-                if (in_array($modo, [self::PDF_MODO_MEMBRETE, self::PDF_MODO_FONDO, self::PDF_MODO_LIMPIO], true)) {
-                    return $modo;
-                }
+
+                return $this->modoDesdeConfiguracion($config, $clave);
             }
         } catch (\Throwable $e) {
             Logger::warning('No se pudo leer pdf_branding: ' . $e->getMessage());
@@ -555,21 +576,36 @@ class PdfService
         return self::PDF_MODO_DEFECTO;
     }
 
+    private function modoDesdeConfiguracion(?SystemConfiguration $config, string $clave): string
+    {
+        $modo = is_array($config?->pdf_branding ?? null)
+            ? ($config->pdf_branding[$clave] ?? null)
+            : null;
+
+        return in_array($modo, [self::PDF_MODO_MEMBRETE, self::PDF_MODO_FONDO, self::PDF_MODO_LIMPIO], true)
+            ? $modo
+            : self::PDF_MODO_DEFECTO;
+    }
+
     /**
      * Resuelve membrete y logo de fondo según el modo configurado.
+     *
+     * La configuración de la empresa se resuelve una sola vez (o 0 veces si llega
+     * precargada en `$company->systemConfiguration`) y se reutiliza para el modo y
+     * para el membrete.
      *
      * @param  mixed  $logoModel  Modelo de MediaLibrary, ruta o nulo.
      * @return array{modo: string, letterhead: string|null, logo_fondo: string|null}
      */
     public function marcaPdfPara(?object $company, string $clave, mixed $logoModel): array
     {
-        $companyUuid = is_object($company) ? ($company->uuid ?? null) : null;
-        $modo = $this->modoPdfPara($companyUuid, $clave);
+        $config = $this->configuracionPdfDe($company);
+        $modo = $this->modoDesdeConfiguracion($config, $clave);
 
         if ($modo === self::PDF_MODO_MEMBRETE) {
             return [
                 'modo' => $modo,
-                'letterhead' => $this->letterheadDataUrl($company),
+                'letterhead' => $this->letterheadDesdeConfiguracion($company, $config),
                 'logo_fondo' => null,
             ];
         }
@@ -1178,17 +1214,13 @@ class PdfService
                 'logo' => $logoModel,
             ]);
 
-            $marca = $this->marcaPdfPara($vehicle->company, 'mantenimiento', $logoModel);
-
-            $data = [
+            $data = $this->conMarca([
                 'title' => 'Hoja de Vida – Mantenimiento',
-                'letterhead' => $marca['letterhead'],
                 'vehicle' => $vehicle,
                 'company' => $vehicle->company,
                 'maintenances' => $vehicle->maintenance ?? collect(),
                 'company_logo_base64' => $base64Images['logo'],
-                'company_logo_fondo_base64' => $marca['logo_fondo'] ?? $base64Images['logo'],
-            ];
+            ], $vehicle->company, 'mantenimiento', $logoModel);
 
             $pdf = Pdf::loadView('pdf.maintenance.maintenance', $data);
             $pdf->setPaper('letter', 'portrait');

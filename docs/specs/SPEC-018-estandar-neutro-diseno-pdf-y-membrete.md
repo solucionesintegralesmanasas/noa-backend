@@ -30,7 +30,8 @@ Las plantillas PDF previas combinaban herencia de `@extends('pdf.layouts.base')`
 
 ### Parciales estándar (`resources/views/pdf/standard/`)
 
-- **`styles.blade.php`:** recibe `$orientation` (`'portrait'|'landscape'`) y `$pdfMargen` (`'denso'` `8mm 10mm 8mm 8mm` | `'cartas'` `18mm 20mm 18mm 20mm`), declara las `@font-face` locales de `Inter`, define `:root` y provee `.header-table`, `.meta-table`, `.section-banner`, `.info-table`, `.main-table` y `.placa-inline-tbl`. *(Nota técnica: `styles.blade.php` conserva `.tag-warn` en `<head>` con `#fcd34d`; las pruebas smoke que validan ausencia de colores legados deben inspeccionar el cuerpo `Str::after($html, '<body')`.)*
+- **`fonts.blade.php`:** fuente única de las 5 reglas `@font-face` locales de `Inter v4.1` (pesos 400/500/600/700 e itálica), incluida por `styles.blade.php` y por las plantillas de maquetación específica (`service-control-sheet` y `third-parties/technical-sheet`).
+- **`styles.blade.php`:** recibe `$orientation` (`'portrait'|'landscape'`) y `$pdfMargen` (`'denso'` `8mm 10mm 8mm 8mm` | `'cartas'` `18mm 20mm 18mm 20mm`), incluye `pdf.standard.fonts`, define `:root` (paleta estrictamente neutra sin badges de color) y provee `#watermark`, `.header-table`, `.meta-table`, `.section-banner`, `.info-table`, `.main-table` y `.placa-inline-tbl`.
 - **`header.blade.php`:** cabecera cerrada de 3 celdas (o 2 cuando `$ocultar_celda_logo` es verdadero) con parámetros `$logo_data_url`, `$ocultar_celda_logo`, `$ancho_logo` (defecto `19`), `$ancho_meta` (defecto `26`), `$empresa_siglas`, `$empresa_transportadora`, `$empresa_detalle`, `$titulo_documento`, `$subtitulo_documento` y `$meta_sgc`. El ancho de la celda central se calcula dinámicamente como `100 - $__anchoMeta - $__anchoLogo`.
 - **`vehicle-line.blade.php`:** micro-tabla alineada para `$placa` y `$numero_interno` opcional separados por `&middot;`.
 
@@ -47,9 +48,9 @@ Las plantillas PDF previas combinaban herencia de `@extends('pdf.layouts.base')`
 - `PdfService::conMarca(array $data, ?object $company, string $clave, mixed $logoModel): array` inyecta `letterhead`, `logo_fondo` y `ocultar_marca`.
 - Reglas de los 3 modos:
   - **`membrete`:** `PdfService::esHojaMembretadaCompleta(?string $letterhead, string $orientation = 'portrait'): bool` detecta si la imagen corresponde a una hoja membretada de página completa (en vertical `alto > ancho`; en apaisada `ancho > alto && alto / ancho >= 0.55`). Cuando aplica, se fija `#letterhead-page-bg` cubriendo `215.9mm × 279.4mm` (o `279.4mm × 215.9mm` en apaisada) con márgenes de resguardo para evitar choques con cabecera y curva inferior (`31–32mm` arriba y `33–34mm` abajo en vertical), **se oculta la celda/imagen del logo de empresa** y **se omite `#watermark`**.
-  - **`fondo` (defecto):** muestra logo de la empresa (o monograma con siglas) en cabecera y marca de agua `#watermark` (`opacity: 0.08`) centrada, sin `#letterhead-page-bg`.
+  - **`fondo` (defecto):** muestra logo de la empresa (o monograma con siglas) en cabecera y marca de agua `#watermark` (`opacity: 0.08`) centrada, sin `#letterhead-page-bg` *(excepción documentada: `service-control-sheet` omite `#watermark` porque la tabla horizontal ocupa todo el ancho y el logo de fondo restaría legibilidad en DomPDF)*.
   - **`limpio` (`ocultar_marca = true`):** oculta la celda/imagen del logo de la empresa, sin `#letterhead-page-bg` ni `#watermark`.
-- **Presupuesto de consultas en reportes PDF:** `VehicleReportController::pdf` y `VehicleActivityReportController::pdf` precargan `Company::with('media')` antes de invocar `PdfService` para conservar 0 consultas extra durante el render del PDF.
+- **Presupuesto de consultas en reportes PDF:** `VehicleReportController::pdf` y `VehicleActivityReportController::pdf` precargan `Company::with(['media', 'systemConfiguration.media'])` antes de invocar `PdfService`; `PdfService::conMarca()` reutiliza esa relación precargada para mantener 0 consultas extra durante el render del PDF.
 - **Sellado de paginado lateral:** `PdfService::sellarPaginado($pdf, ?float $margenDerechoPt)` usa `MARGEN_DERECHO_ESTANDAR_PT` (`28.35`, equivalente a 10 mm) o `MARGEN_DERECHO_PLANILLA_PT` (`19.84`, equivalente a 7 mm).
 
 ## Inventario de las 4 rondas completadas y exclusiones
@@ -71,7 +72,7 @@ Las plantillas PDF previas combinaban herencia de `@extends('pdf.layouts.base')`
 2. Incluir `@include('pdf.standard.styles', ...)` (o `pdf.radicacion.partials.styles` en trámites de radicación) usando tipografía `Inter` local y tablas en lugar de `flexbox`, `grid`, `box-shadow` o `* { margin }`.
 3. Usar exclusivamente la paleta neutra oficial (`#d8d8d8`, `#f0f0f0`, `#f7f7f7`, `#1f2937`, `#9ca3af`, `#000000`, `#111827`) sin badges/pastillas de colores ni `Courier New` o `Helvetica`.
 4. Soportar los 3 modos de marca (`membrete`, `fondo`, `limpio`) mediante `PdfService::conMarca()` y `esHojaMembretadaCompleta()`, ocultando el logo de empresa cuando hay hoja membretada completa o modo `limpio` y respetando las zonas de logotipo y pie del membrete.
-5. En endpoints con presupuesto de consultas estricto (como reportes), precargar `Company::with('media')` antes del render para mantener 0 consultas extra en el PDF.
+5. En endpoints con presupuesto de consultas estricto (como reportes), precargar `Company::with(['media', 'systemConfiguration.media'])` antes del render para mantener 0 consultas extra en el PDF.
 6. Agregar o actualizar una prueba smoke en `tests/Feature/` que verifique la ausencia de colores/fuentes legados sobre el cuerpo (`Str::after($html, '<body')`), los 3 modos de marca y cero avisos en `$_dompdf_warnings`.
 7. Generar una muestra visual con hoja membretada real e inspeccionar que no haya solapes, cortes de tablas o páginas sobrantes.
 8. Nunca modificar `resources/views/pdf/fuec.blade.php` ni el flujo de `getFuecPdf`.

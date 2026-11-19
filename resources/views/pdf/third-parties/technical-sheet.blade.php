@@ -1,6 +1,5 @@
 @php
     $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null);
-    $__fontDir = str_replace('\\', '/', resource_path('fonts/inter'));
 @endphp
 <!DOCTYPE html>
 <html lang="es">
@@ -9,32 +8,8 @@
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>Ficha Técnica del Conductor - PDF NOA</title>
+    @include('pdf.standard.fonts')
     <style>
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 400;
-            src: url('{{ $__fontDir }}/Inter-Regular.ttf') format('truetype');
-        }
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 500;
-            src: url('{{ $__fontDir }}/Inter-Medium.ttf') format('truetype');
-        }
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 600;
-            src: url('{{ $__fontDir }}/Inter-SemiBold.ttf') format('truetype');
-        }
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 700;
-            src: url('{{ $__fontDir }}/Inter-Bold.ttf') format('truetype');
-        }
-
         /* Configuración de página Carta (Letter Portrait: 8.5in x 11in).
            La hoja completa es la página: el padding del "sheet" hace de margen. */
         @page {
@@ -69,6 +44,21 @@
             width: 100%;
             height: 100%;
             display: block;
+        }
+
+        /* Modo «fondo»: logo de la empresa como marca de agua tenue. */
+        #watermark {
+            position: fixed;
+            top: 26%;
+            left: 15%;
+            width: 70%;
+            z-index: -1000;
+        }
+
+        #watermark img {
+            width: 100%;
+            height: auto;
+            opacity: 0.08;
         }
 
         #letterhead-banner {
@@ -325,26 +315,26 @@
             text-align: center;
         }
 
-        /* Badges de Estado */
+        /* Estados sin color: activo = recuadro gris lleno; inactivo = recuadro blanco punteado. */
         .badge-active {
-            background-color: #dcfce7;
+            background-color: #d8d8d8;
             color: #000000;
             font-weight: bold;
             padding: 1px 5px;
             display: inline-block;
             font-size: 6.8pt;
-            border: 1px solid #86efac;
+            border: 1px solid #1f2937;
             text-transform: uppercase;
         }
 
         .badge-inactive {
-            background-color: #fee2e2;
+            background-color: #ffffff;
             color: #000000;
             font-weight: bold;
             padding: 1px 5px;
             display: inline-block;
             font-size: 6.8pt;
-            border: 1px solid #fca5a5;
+            border: 1px dashed #1f2937;
             text-transform: uppercase;
         }
 
@@ -471,6 +461,10 @@
     @if (!empty($letterhead ?? null) && $esHojaMembretadaCompleta)
         <div id="letterhead-page-bg">
             <img src="{{ $letterhead }}" alt="Membrete" />
+        </div>
+    @elseif (empty($letterhead ?? null) && empty($ocultar_marca ?? false) && !empty($logo_fondo ?? null))
+        <div id="watermark">
+            <img src="data:image/png;base64,{{ $logo_fondo }}" alt="Marca de agua" />
         </div>
     @endif
 

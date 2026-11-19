@@ -53,6 +53,16 @@ class ContractsAndHrPdfLayoutSmokeTest extends TestCase
         $this->assertStringNotContainsString('id="watermark"', $htmlLimpio);
         $this->assertStringNotContainsString('id="letterhead-banner"', $htmlLimpio);
 
+        $htmlMembrete = view('pdf.hr.employment-contract', [
+            'doc' => $doc,
+            'letterhead' => $this->hojaVerticalDataUrl(),
+            'logo_fondo' => null,
+            'ocultar_marca' => false,
+        ])->render();
+
+        $this->assertStringContainsString('id="letterhead-page-bg"', $htmlMembrete);
+        $this->assertStringNotContainsString('id="watermark"', $htmlMembrete);
+
         $this->renderizarSinAvisos($htmlLimpio);
     }
 
@@ -127,8 +137,36 @@ class ContractsAndHrPdfLayoutSmokeTest extends TestCase
         $this->assertStringNotContainsString('Courier New', $html);
         $this->assertStringNotContainsString('class="placa-badge"', $body);
         $this->assertStringNotContainsString('background-color: #dcfce7', $body);
+        $this->assertStringNotContainsString('#166534', $body);
+        $this->assertStringNotContainsString('#991b1b', $body);
+        $this->assertStringNotContainsString('#92400e', $body);
         $this->assertStringNotContainsString('footer-bar', $html);
         $this->assertDoesNotMatchRegularExpression('/\*\s*\{[^}]*margin\s*:/i', $html);
+
+        $pngTiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $baseRecibo = [
+            'charge' => $charge,
+            'data' => [
+                'charge_internal_id' => 'RC-2026-0001',
+                'legal_representative_name' => 'REP LEGAL',
+                'document_number' => '79000001',
+                'logo' => $pngTiny,
+                'firma' => null,
+                'qr_code' => null,
+            ],
+        ];
+        $reciboFondo = view('pdf.contracts.admin-charge', $baseRecibo + ['letterhead' => null, 'logo_fondo' => $pngTiny, 'ocultar_marca' => false])->render();
+        $this->assertStringContainsString('id="watermark"', $reciboFondo);
+        $this->assertStringContainsString('class="header-logo-cell"', $reciboFondo);
+
+        $reciboMembrete = view('pdf.contracts.admin-charge', $baseRecibo + ['letterhead' => $this->hojaVerticalDataUrl(), 'logo_fondo' => null, 'ocultar_marca' => false])->render();
+        $this->assertStringContainsString('id="letterhead-page-bg"', $reciboMembrete);
+        $this->assertStringNotContainsString('id="watermark"', $reciboMembrete);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $reciboMembrete);
+
+        $reciboLimpio = view('pdf.contracts.admin-charge', $baseRecibo + ['letterhead' => null, 'logo_fondo' => $pngTiny, 'ocultar_marca' => true])->render();
+        $this->assertStringNotContainsString('id="watermark"', $reciboLimpio);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $reciboLimpio);
 
         $this->renderizarSinAvisos($html);
     }
@@ -167,7 +205,47 @@ class ContractsAndHrPdfLayoutSmokeTest extends TestCase
         $this->assertStringNotContainsString('display: flex', $html);
         $this->assertStringNotContainsString('Arial, sans-serif', $html);
 
+        $pngTiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $baseConv = [
+            'data' => [
+                'agreement_internal_id' => 'CONV-001',
+                'legal_representative_name' => 'JUAN PÉREZ',
+                'document_number' => '79111222',
+                'document_number_expedition_place' => 'Bogotá D.C.',
+                'company_name' => 'TRANSPORTES A S.A.S.',
+                'nit' => '900111222',
+                'rep_name' => 'MARÍA GÓMEZ',
+                'rep_document_id' => '52333444',
+                'contracting_entity_name' => 'TRANSPORTES B S.A.S.',
+                'contracting_entity_nit' => '900555666',
+                'signing_city' => 'Bogotá D.C.',
+                'signing_date' => '2026-11-18',
+                'logo' => $pngTiny,
+                'vehicle' => ['vehicle_license_plate' => 'GUX649', 'vehicle_model' => '2024', 'vehicle_brand' => 'CHEVROLET', 'vehicle_line' => 'NPR', 'vehicle_capacity' => '28', 'operational_card_number' => 'TO-12345', 'expiration_date' => '2027-06-30'],
+            ],
+        ];
+        $convFondo = view('pdf.contracts.business-agreement', $baseConv + ['letterhead' => null, 'logo_fondo' => $pngTiny, 'ocultar_marca' => false])->render();
+        $this->assertStringContainsString('id="watermark"', $convFondo);
+
+        $convMembrete = view('pdf.contracts.business-agreement', $baseConv + ['letterhead' => $this->hojaVerticalDataUrl(), 'logo_fondo' => null, 'ocultar_marca' => false])->render();
+        $this->assertStringContainsString('id="letterhead-page-bg"', $convMembrete);
+        $this->assertStringNotContainsString('id="watermark"', $convMembrete);
+
+        $convLimpio = view('pdf.contracts.business-agreement', $baseConv + ['letterhead' => null, 'logo_fondo' => $pngTiny, 'ocultar_marca' => true])->render();
+        $this->assertStringNotContainsString('id="watermark"', $convLimpio);
+
         $this->renderizarSinAvisos($html);
+    }
+
+    private function hojaVerticalDataUrl(): string
+    {
+        $img = imagecreatetruecolor(100, 140);
+        ob_start();
+        imagepng($img);
+        $base64 = base64_encode((string) ob_get_clean());
+        imagedestroy($img);
+
+        return 'data:image/png;base64,' . $base64;
     }
 
     private function renderizarSinAvisos(string $html): void

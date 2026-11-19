@@ -627,7 +627,7 @@
                 <table cellpadding="0" cellspacing="0" style="margin-bottom: 2px;">
                     <tr>
                         <td class="cufe-title" style="width: 58%;">Código Único de Factura Electrónica (CUFE):</td>
-                        <td class="txt-right bold" style="width: 42%; white-space: nowrap; font-size: 6.4pt; color: {{ $documento->cufe ? '#166534' : '#374151' }};">
+                        <td class="txt-right bold" style="width: 42%; white-space: nowrap; font-size: 6.4pt; color: {{ $documento->cufe ? '#000000' : '#374151' }};">
                             {{ $documento->cufe ? 'Firma Digital Validada SHA-384' : 'Sin firma electrónica' }}
                         </td>
                     </tr>

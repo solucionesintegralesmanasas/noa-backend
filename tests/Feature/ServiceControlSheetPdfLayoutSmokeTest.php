@@ -223,6 +223,9 @@ class ServiceControlSheetPdfLayoutSmokeTest extends TestCase
         $conLogo = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['ocultar_marca' => false]))->render();
         $this->assertStringContainsString('class="header-logo-cell"', $conLogo);
         $this->assertStringContainsString('alt="Logo empresa"', $conLogo);
+        foreach (['#dcfce7', '#fef3c7', '#fef08a', '#fffbeb', '#fef2f2', '#f0f9ff'] as $colorLegado) {
+            $this->assertStringNotContainsString($colorLegado, $conLogo);
+        }
 
         $limpio = view('pdf.maintenance.service-control-sheet', array_merge($datos, ['ocultar_marca' => true]))->render();
         $this->assertStringNotContainsString('class="header-logo-cell"', $limpio);

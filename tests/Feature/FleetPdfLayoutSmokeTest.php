@@ -209,7 +209,18 @@ class FleetPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('id="letterhead-page-bg"', $mantMembrete);
         $this->assertStringNotContainsString('class="header-logo-cell"', $mantMembrete);
 
-        // Inspección preoperacional
+        // Inspección preoperacional (membrete, fondo y limpio)
+        $inspFondo = view('pdf.fleet.vehicle-inspection', [
+            'record' => (object) ['company' => $vehiculo->company, 'vehicle' => $vehiculo],
+            'groupedResults' => collect(),
+            'data' => ['logo' => $pngTiny],
+            'logo_fondo' => $pngTiny,
+            'letterhead' => null,
+            'ocultar_marca' => false,
+        ])->render();
+        $this->assertStringContainsString('id="watermark"', $inspFondo);
+        $this->assertStringContainsString('class="header-logo-img"', $inspFondo);
+
         $inspMembrete = view('pdf.fleet.vehicle-inspection', [
             'record' => (object) ['company' => $vehiculo->company, 'vehicle' => $vehiculo],
             'groupedResults' => collect(),
@@ -218,7 +229,19 @@ class FleetPdfLayoutSmokeTest extends TestCase
             'ocultar_marca' => false,
         ])->render();
         $this->assertStringContainsString('id="letterhead-page-bg"', $inspMembrete);
+        $this->assertStringNotContainsString('id="watermark"', $inspMembrete);
         $this->assertStringNotContainsString('class="header-logo-cell"', $inspMembrete);
+
+        $inspLimpio = view('pdf.fleet.vehicle-inspection', [
+            'record' => (object) ['company' => $vehiculo->company, 'vehicle' => $vehiculo],
+            'groupedResults' => collect(),
+            'data' => ['logo' => $pngTiny],
+            'logo_fondo' => $pngTiny,
+            'letterhead' => null,
+            'ocultar_marca' => true,
+        ])->render();
+        $this->assertStringNotContainsString('id="watermark"', $inspLimpio);
+        $this->assertStringNotContainsString('class="header-logo-cell"', $inspLimpio);
 
         // Acta de entrega
         $actaMembrete = view('pdf.fleet.handover-record', [
@@ -234,35 +257,62 @@ class FleetPdfLayoutSmokeTest extends TestCase
         $this->assertStringNotContainsString('class="logo-cell"', $actaMembrete);
         $this->assertStringNotContainsString('class="header-logo-cell"', $actaMembrete);
 
-        // Reportes (con logo sin membrete y con membrete completo sin duplicar logo)
+        // Reportes (con logo, con monograma de respaldo, con membrete completo y en modo limpio)
         $repLogo = view('pdf.fleet.vehicle-report', [
             'filas' => collect(),
             'filtros' => ['filter_type' => 'document'],
             'logo_data_url' => 'data:image/png;base64,' . $pngTiny,
+            'logo_fondo' => $pngTiny,
             'letterhead' => null,
             'ocultar_marca' => false,
         ])->render();
         $this->assertStringContainsString('alt="Logo"', $repLogo);
+        $this->assertStringContainsString('id="watermark"', $repLogo);
+        $this->assertStringNotContainsString('#991b1b', $repLogo);
+
+        $repMonograma = view('pdf.fleet.vehicle-report', [
+            'filas' => collect(),
+            'filtros' => ['filter_type' => 'document'],
+            'logo_data_url' => null,
+            'empresa_siglas' => 'TDS',
+            'letterhead' => null,
+            'ocultar_marca' => false,
+        ])->render();
+        $this->assertStringContainsString('class="logo-monogram">TDS</div>', $repMonograma);
 
         $repMembrete = view('pdf.fleet.vehicle-report', [
             'filas' => collect(),
             'filtros' => ['filter_type' => 'document'],
             'logo_data_url' => 'data:image/png;base64,' . $pngTiny,
+            'empresa_siglas' => 'TDS',
             'letterhead' => $hojaVertical,
             'ocultar_marca' => false,
         ])->render();
         $this->assertStringContainsString('id="letterhead-page-bg"', $repMembrete);
         $this->assertStringNotContainsString('alt="Logo"', $repMembrete);
+        $this->assertStringNotContainsString('class="logo-monogram"', $repMembrete);
+
+        $actMonograma = view('pdf.fleet.vehicle-activity-report', [
+            'filas' => collect(),
+            'filtros' => [],
+            'logo_data_url' => null,
+            'empresa_siglas' => 'TDS',
+            'letterhead' => null,
+            'ocultar_marca' => false,
+        ])->render();
+        $this->assertStringContainsString('class="logo-monogram">TDS</div>', $actMonograma);
 
         $actMembrete = view('pdf.fleet.vehicle-activity-report', [
             'filas' => collect(),
             'filtros' => [],
             'logo_data_url' => 'data:image/png;base64,' . $pngTiny,
+            'empresa_siglas' => 'TDS',
             'letterhead' => $hojaVertical,
             'ocultar_marca' => false,
         ])->render();
         $this->assertStringContainsString('id="letterhead-page-bg"', $actMembrete);
         $this->assertStringNotContainsString('alt="Logo"', $actMembrete);
+        $this->assertStringNotContainsString('class="logo-monogram"', $actMembrete);
 
         $this->renderizarSinAvisos($fichaMembrete);
         $this->renderizarSinAvisos($mantMembrete);

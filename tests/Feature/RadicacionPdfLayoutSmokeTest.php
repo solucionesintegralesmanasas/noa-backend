@@ -11,7 +11,9 @@ use Tests\TestCase;
 
 class RadicacionPdfLayoutSmokeTest extends TestCase
 {
-    private const PNG_1X1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    private const PNG_1X1_RAW = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    private const PNG_1X1 = 'data:image/png;base64,' . self::PNG_1X1_RAW;
 
     private const PNG_HOJA_VERTICAL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAACMCAIAAAAFl5vsAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAQElEQVR4nO3BMQEAAADCoPVPbQo/oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAhwGknAABAZ3bTQAAAABJRU5ErkJggg==';
 
@@ -37,10 +39,10 @@ class RadicacionPdfLayoutSmokeTest extends TestCase
     {
         $datos = $this->datosBase();
 
-        // 1. Modo fondo: logo en cabecera y marca de agua
+        // 1. Modo fondo: logo en cabecera y marca de agua (base64 crudo, contrato real de PdfService::conMarca)
         $htmlFondo = view($vista, array_merge($datos, [
             'letterhead' => null,
-            'logo_fondo' => self::PNG_1X1,
+            'logo_fondo' => self::PNG_1X1_RAW,
             'ocultar_marca' => false,
             'es_hoja_membretada' => false,
         ]))->render();
@@ -49,6 +51,7 @@ class RadicacionPdfLayoutSmokeTest extends TestCase
         $this->assertStringContainsString('--pdf-banda: #d8d8d8', $htmlFondo);
         $this->assertStringContainsString('--pdf-encabezado: #f0f0f0', $htmlFondo);
         $this->assertStringContainsString('id="watermark"', $htmlFondo);
+        $this->assertStringContainsString('src="data:image/png;base64,' . self::PNG_1X1_RAW . '"', $htmlFondo);
         $this->assertStringContainsString('alt="Logo de la empresa"', $htmlFondo);
         $this->assertStringNotContainsString('id="letterhead-page-bg"', $htmlFondo);
 

@@ -1,5 +1,4 @@
 @php
-    $__fontDir = str_replace('\\', '/', resource_path('fonts/inter'));
     $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null, 'landscape');
     $sinMarcaVisual = !empty($letterhead ?? null) || !empty($ocultar_marca ?? false);
 @endphp
@@ -9,6 +8,7 @@
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     <title>OPE-F-006 Planilla de Control de Prestación de Servicios</title>
+    @include('pdf.standard.fonts')
     <style>
         /* ============================================================
        DOMPDF COMPATIBLE - Planilla Oficial NOA Transportes
@@ -16,42 +16,8 @@
        Normativa: PESV / Decreto 1079 de 2015 / SGC ISO 9001
        Formato: Carta Horizontal (Letter Landscape: 11in x 8.5in)
        CSS 100% Nativo para Laravel DomPDF (Tablas estrictas)
+       Tipografía: pdf.standard.fonts (Inter local, única fuente de las @font-face).
        ============================================================ */
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 400;
-            src: url('{{ $__fontDir }}/Inter-Regular.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 500;
-            src: url('{{ $__fontDir }}/Inter-Medium.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 600;
-            src: url('{{ $__fontDir }}/Inter-SemiBold.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 700;
-            src: url('{{ $__fontDir }}/Inter-Bold.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: italic;
-            font-weight: 400;
-            src: url('{{ $__fontDir }}/Inter-Italic.ttf') format('truetype');
-        }
 
         @page {
             size: letter landscape;
@@ -265,9 +231,9 @@
         }
 
         .placa-inline-tbl td.placa-badge {
-            background-color: #fef08a;
-            color: #854d0e;
-            border: 0.6pt solid #ca8a04;
+            background-color: #f0f0f0;
+            color: #000000;
+            border: 0.6pt solid #1f2937;
             font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
             font-size: 7.3pt;
@@ -450,14 +416,14 @@
             white-space: nowrap;
         }
 
+        /* Estado del día sin color: cerrada = recuadro lleno gris; en ruta = recuadro blanco. */
         .tag-finalizada {
             display: inline-block;
             font-size: 5.3pt;
             font-weight: bold;
-            background-color: #dcfce7;
-            color: #15803d;
-            border: 0.5px solid #86efac;
-            border-radius: 1.5px;
+            background-color: #d8d8d8;
+            color: #000000;
+            border: 0.5px solid #1f2937;
             padding: 0 2px;
             text-transform: uppercase;
             margin-top: 1px;
@@ -467,10 +433,9 @@
             display: inline-block;
             font-size: 5.3pt;
             font-weight: bold;
-            background-color: #fef3c7;
-            color: #b45309;
-            border: 0.5px solid #fde68a;
-            border-radius: 1.5px;
+            background-color: #ffffff;
+            color: #000000;
+            border: 0.5px solid #9ca3af;
             padding: 0 2px;
             text-transform: uppercase;
             margin-top: 1px;
@@ -524,10 +489,12 @@
         }
 
         /* ── 4. BANDAS DE EVIDENCIA (SPEC-002) ── */
+        /* Bandas sin color: se distinguen por el grosor y trazo del marco, no por el tono. */
         .banda-evidencia {
-            border: 0.75pt solid #b45309;
-            background: #fffbeb;
-            color: #78350f;
+            border: 0.75pt solid #9ca3af;
+            border-left: 3pt solid #1f2937;
+            background: #f7f7f7;
+            color: #000000;
             padding: 3px 7px;
             margin-bottom: 3.5px;
             font-size: 6.5pt;
@@ -536,15 +503,17 @@
         }
 
         .banda-evidencia.banda-excepcion {
-            border-color: #991b1b;
-            background: #fef2f2;
-            color: #7f1d1d;
+            border: 1.2pt solid #1f2937;
+            border-left: 3pt solid #1f2937;
+            background: #f0f0f0;
+            color: #000000;
         }
 
         .banda-evidencia.banda-certificacion {
-            border-color: #0369a1;
-            background: #f0f9ff;
-            color: #0c4a6e;
+            border: 0.75pt dashed #1f2937;
+            border-left: 3pt solid #9ca3af;
+            background: #ffffff;
+            color: #000000;
         }
 
         .banda-evidencia-detalle {
@@ -745,7 +714,7 @@
                     @if (!empty($es_historial))
                         <tr>
                             <td class="meta-label">TIPO</td>
-                            <td class="meta-val" style="color: #b45309;">HISTORIAL</td>
+                            <td class="meta-val">HISTORIAL</td>
                         </tr>
                     @endif
                 </table>

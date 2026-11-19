@@ -4,44 +4,9 @@
 @php
     $__orient = ($orientation ?? 'portrait') === 'landscape' ? 'landscape' : 'portrait';
     $__margen = ($pdfMargen ?? 'denso') === 'cartas' ? '18mm 20mm 18mm 20mm' : '8mm 10mm 8mm 8mm';
-    $__fontDir = str_replace('\\', '/', resource_path('fonts/inter'));
 @endphp
+@include('pdf.standard.fonts')
 <style>
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 400;
-            src: url('{{ $__fontDir }}/Inter-Regular.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 500;
-            src: url('{{ $__fontDir }}/Inter-Medium.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 600;
-            src: url('{{ $__fontDir }}/Inter-SemiBold.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: normal;
-            font-weight: 700;
-            src: url('{{ $__fontDir }}/Inter-Bold.ttf') format('truetype');
-        }
-
-        @font-face {
-            font-family: 'Inter';
-            font-style: italic;
-            font-weight: 400;
-            src: url('{{ $__fontDir }}/Inter-Italic.ttf') format('truetype');
-        }
-
         :root {
             --pdf-banda: #d8d8d8;
             --pdf-banda-texto: #000000;
@@ -268,9 +233,9 @@
         }
 
         .placa-inline-tbl td.placa-badge {
-            background-color: #fef08a;
-            color: #854d0e;
-            border: 0.6pt solid #ca8a04 !important;
+            background-color: var(--pdf-encabezado);
+            color: #000000;
+            border: 0.6pt solid var(--pdf-borde) !important;
             font-family: 'Inter', 'Helvetica', 'Arial', sans-serif;
             font-weight: bold;
             font-size: 7.1pt;
@@ -361,30 +326,46 @@
             border-radius: 2px;
         }
 
+        /* Estados sin color: la jerarquía sale del peso y del trazo del borde. */
         .tag-ok {
-            background-color: #dcfce7;
-            color: #166534;
-            border: 0.6px solid #86efac;
+            background-color: #ffffff;
+            color: #000000;
+            border: 0.6px solid var(--pdf-borde-interno);
         }
 
         .tag-warn {
-            background-color: #fef3c7;
-            color: #92400e;
-            border: 0.6px solid #fcd34d;
+            background-color: var(--pdf-tenue);
+            color: #000000;
+            border: 0.6px solid var(--pdf-borde);
         }
 
         .tag-alert {
-            background-color: #fee2e2;
-            color: #991b1b;
-            border: 0.6px solid #fca5a5;
+            background-color: var(--pdf-encabezado);
+            color: #000000;
+            border: 0.9px solid var(--pdf-borde);
+        }
+
+        /* Marca de agua del modo «fondo» (el logo de la empresa, centrado y tenue). */
+        #watermark {
+            position: fixed;
+            top: 26%;
+            left: 15%;
+            width: 70%;
+            z-index: -1000;
+        }
+
+        #watermark img {
+            width: 100%;
+            height: auto;
+            opacity: 0.08;
         }
 
         /* 5. Banda de alerta */
         .banda-alerta {
-            border: 0.8px solid #b45309;
-            border-left: 3.5px solid #b45309;
-            background-color: #fffbeb;
-            color: #78350f;
+            border: 0.8px solid var(--pdf-borde);
+            border-left: 3.5px solid var(--pdf-borde);
+            background-color: var(--pdf-tenue);
+            color: #000000;
             padding: 3.5px 7px;
             font-size: 6.7pt;
             margin-bottom: 4px;

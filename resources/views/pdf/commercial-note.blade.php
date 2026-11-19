@@ -567,7 +567,7 @@
                 <table cellpadding="0" cellspacing="0" style="margin-bottom: 2px;">
                     <tr>
                         <td class="cufe-title" style="width: 58%;">Código Único de Documento Electrónico (CUDE):</td>
-                        <td class="txt-right bold" style="width: 42%; white-space: nowrap; font-size: 6.4pt; color: {{ $nota->cude ? '#166534' : '#374151' }};">
+                        <td class="txt-right bold" style="width: 42%; white-space: nowrap; font-size: 6.4pt; color: {{ $nota->cude ? '#000000' : '#374151' }};">
                             {{ $nota->cude ? 'Firma Digital Validada SHA-384' : 'Sin transmisión electrónica' }}
                         </td>
                     </tr>

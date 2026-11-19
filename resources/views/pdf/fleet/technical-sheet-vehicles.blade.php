@@ -153,13 +153,14 @@
 
         .estado-activo {
             font-weight: bold;
-            color: #166534;
+            color: #000000;
             text-transform: uppercase;
         }
 
         .estado-inactivo {
             font-weight: bold;
-            color: #991b1b;
+            color: #000000;
+            text-decoration: underline;
             text-transform: uppercase;
         }
 

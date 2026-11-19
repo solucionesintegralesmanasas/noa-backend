@@ -99,7 +99,9 @@ class VehicleActivityReportController extends Controller
             // Empresa precargada para la presentación del PDF (membrete/fondo/limpio):
             // el render no consulta por su cuenta.
             if (! empty($filtros['company_uuid'])) {
-                $filtros['company'] = \App\Models\Company::with('media')->where('uuid', $filtros['company_uuid'])->first();
+                $filtros['company'] = \App\Models\Company::with(['media', 'systemConfiguration.media'])
+                    ->where('uuid', $filtros['company_uuid'])
+                    ->first();
             }
             $result = $pdfService->generateVehicleActivityReportPdf($filas, $filtros);
 

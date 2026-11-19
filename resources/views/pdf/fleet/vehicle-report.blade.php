@@ -1,6 +1,7 @@
 @php
     $esHojaMembretadaCompleta = \App\Services\Pdf\PdfService::esHojaMembretadaCompleta($letterhead ?? null);
-    $mostrarLogoCabecera = empty($letterhead ?? null) && empty($ocultar_marca ?? false) && !empty($logo_data_url ?? null);
+    $mostrarLogoCabecera = empty($letterhead ?? null) && empty($ocultar_marca ?? false)
+        && (!empty($logo_data_url ?? null) || !empty($empresa_siglas ?? null));
 @endphp
 <!DOCTYPE html>
 <html lang="es">
@@ -74,8 +75,9 @@
             background-color: var(--pdf-tenue);
         }
         .vencido {
-            color: #991b1b;
+            color: #000000;
             font-weight: 700;
+            text-decoration: underline;
         }
         #letterhead-banner {
             text-align: center;
@@ -96,17 +98,20 @@
         <div id="letterhead-banner">
             <img src="{{ $letterhead }}" alt="Membrete" />
         </div>
-    @endif
-    @if (empty($ocultar_marca ?? false) && empty($letterhead ?? null) && !empty($logo_fondo ?? null))
-        <div id="watermark" style="position:fixed;top:25%;left:15%;width:70%;z-index:-1000;">
-            <img src="data:image/png;base64,{{ $logo_fondo }}" style="width:100%;height:auto;opacity:0.15;" alt="" />
+    @elseif (empty($ocultar_marca ?? false) && !empty($logo_fondo ?? null))
+        <div id="watermark">
+            <img src="data:image/png;base64,{{ $logo_fondo }}" alt="Marca de agua" />
         </div>
     @endif
     <table class="report-header" cellpadding="0" cellspacing="0">
         <tr>
             @if ($mostrarLogoCabecera)
                 <td style="width: 15%; text-align: center; background-color: #ffffff;">
-                    <img src="{{ $logo_data_url }}" alt="Logo" style="max-height: 36px; max-width: 90px; width: auto; height: auto;" />
+                    @if (!empty($logo_data_url ?? null))
+                        <img src="{{ $logo_data_url }}" alt="Logo" style="max-height: 36px; max-width: 90px; width: auto; height: auto;" />
+                    @else
+                        <div class="logo-monogram">{{ $empresa_siglas }}</div>
+                    @endif
                 </td>
             @endif
             <td class="report-title-cell" style="width: {{ $mostrarLogoCabecera ? '43%' : '55%' }};">Reporte de Vehículos</td>
