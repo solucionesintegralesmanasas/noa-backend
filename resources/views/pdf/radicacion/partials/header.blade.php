@@ -20,6 +20,7 @@
     </div>
 @endif
 
+@if (empty($sin_encabezado))
 <table class="encabezado" cellpadding="0" cellspacing="0">
     <tr>
         <td style="width: 20%;">
@@ -43,3 +44,4 @@
         </td>
     </tr>
 </table>
+@endif

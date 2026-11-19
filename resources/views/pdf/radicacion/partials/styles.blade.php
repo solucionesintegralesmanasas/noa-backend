@@ -8,7 +8,7 @@
 <style>
     @page {
         size: letter portrait;
-        margin: {{ $__esHojaMembretada ? '31mm 16mm 34mm 16mm' : '18mm 18mm 18mm 18mm' }};
+        margin: {{ $__esHojaMembretada ? '34mm 16mm 34mm 16mm' : '18mm 18mm 18mm 18mm' }};
     }
 
     body {
@@ -22,7 +22,7 @@
 
     #letterhead-page-bg {
         position: fixed;
-        top: -31mm;
+        top: -34mm;
         left: -16mm;
         width: 215.9mm;
         height: 279.4mm;

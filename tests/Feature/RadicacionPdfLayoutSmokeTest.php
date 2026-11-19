@@ -47,12 +47,25 @@ class RadicacionPdfLayoutSmokeTest extends TestCase
             'es_hoja_membretada' => false,
         ]))->render();
 
+        $sinEncabezado = in_array($vista, [
+            'pdf.radicacion.capacity-letter',
+            'pdf.radicacion.acceptance-letter',
+            'pdf.radicacion.affiliation-contract',
+            'pdf.radicacion.promissory-note',
+        ], true);
+
         $this->assertStringContainsString('Inter-Regular.ttf', $htmlFondo);
         $this->assertStringContainsString('--pdf-banda: #d8d8d8', $htmlFondo);
         $this->assertStringContainsString('--pdf-encabezado: #f0f0f0', $htmlFondo);
         $this->assertStringContainsString('id="watermark"', $htmlFondo);
         $this->assertStringContainsString('src="data:image/png;base64,' . self::PNG_1X1_RAW . '"', $htmlFondo);
-        $this->assertStringContainsString('alt="Logo de la empresa"', $htmlFondo);
+        if ($sinEncabezado) {
+            $this->assertStringNotContainsString('<table class="encabezado"', $htmlFondo);
+            $this->assertStringNotContainsString('alt="Logo de la empresa"', $htmlFondo);
+            $this->assertStringNotContainsString('alt="Ministerio de Transporte"', $htmlFondo);
+        } else {
+            $this->assertStringContainsString('alt="Logo de la empresa"', $htmlFondo);
+        }
         $this->assertStringNotContainsString('id="letterhead-page-bg"', $htmlFondo);
 
         $bodyFondo = Str::after($htmlFondo, '<body');

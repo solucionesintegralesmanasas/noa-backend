@@ -8,7 +8,7 @@
 </head>
 
 <body>
-    @include('pdf.radicacion.partials.header')
+    @include('pdf.radicacion.partials.header', ['sin_encabezado' => true])
 
     <div class="titulo">Pagaré No. {{ $vinculacion['numero'] ?? '' }}</div>
 

@@ -277,7 +277,7 @@
 
 <body>
     <div class="cl-carta">
-        @include('pdf.radicacion.partials.header')
+        @include('pdf.radicacion.partials.header', ['sin_encabezado' => true])
 
         @php
             $dependencia = $destinatario['dependencia'] ?? null;
