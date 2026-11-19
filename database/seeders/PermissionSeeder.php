@@ -190,6 +190,14 @@ class PermissionSeeder extends Seeder
             'business_collaboration_agreements.update' => ['module' => 'Acuerdos de Colaboración', 'description' => 'Actualizar un acuerdo de colaboración'],
             'business_collaboration_agreements.delete' => ['module' => 'Acuerdos de Colaboración', 'description' => 'Eliminar un acuerdo de colaboración'],
 
+            // --- Contratos de Alquiler ---
+            'rental_contracts.index'  => ['module' => 'Contratos de Alquiler', 'description' => 'Listar todos los contratos de alquiler'],
+            'rental_contracts.create' => ['module' => 'Contratos de Alquiler', 'description' => 'Crear un nuevo contrato de alquiler'],
+            'rental_contracts.update' => ['module' => 'Contratos de Alquiler', 'description' => 'Actualizar un contrato de alquiler'],
+            'rental_contracts.delete' => ['module' => 'Contratos de Alquiler', 'description' => 'Eliminar un contrato de alquiler'],
+            'rental_contracts.show'   => ['module' => 'Contratos de Alquiler', 'description' => 'Ver detalle de un contrato de alquiler'],
+            'rental_installments.update' => ['module' => 'Contratos de Alquiler', 'description' => 'Registrar pago en cuota de alquiler'],
+
             // --- Mantenimiento ---
             'maintenance.index'  => ['module' => 'Mantenimiento', 'description' => 'Listar todos los registros de mantenimiento'],
             'maintenance.create' => ['module' => 'Mantenimiento', 'description' => 'Registrar un nuevo mantenimiento'],

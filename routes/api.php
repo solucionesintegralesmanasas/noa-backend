@@ -63,6 +63,7 @@ use App\Http\Controllers\Api\V1\Fleet\MaintenancePartController;
 use App\Http\Controllers\Api\V1\Fleet\OperationCardController;
 use App\Http\Controllers\Api\V1\Fleet\OwnerController;
 use App\Http\Controllers\Api\V1\Fleet\OwnerDriverController;
+use App\Http\Controllers\Api\V1\Fleet\RentalContractController;
 use App\Http\Controllers\Api\V1\Fleet\SocialSecurityContributionController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleBranchController;
 use App\Http\Controllers\Api\V1\Fleet\VehicleController;
@@ -338,6 +339,13 @@ Route::prefix('v1')->group(function () {
             Route::prefix('inspection-items')->group(function () {
                 Route::get('/', [InspectionItemController::class, 'index'])->name('api.v1.catalogs.inspection-items.index');
                 Route::get('/list', [InspectionItemController::class, 'list'])->name('api.v1.catalogs.inspection-items.list');
+                Route::get('/categories', [InspectionItemController::class, 'categories'])->name('api.v1.catalogs.inspection-items.categories.index');
+                Route::post('/categories', [InspectionItemController::class, 'storeCategory'])->name('api.v1.catalogs.inspection-items.categories.store');
+                Route::put('/categories/{uuid}', [InspectionItemController::class, 'updateCategory'])->name('api.v1.catalogs.inspection-items.categories.update');
+                Route::delete('/categories/{uuid}', [InspectionItemController::class, 'destroyCategory'])->name('api.v1.catalogs.inspection-items.categories.destroy');
+                Route::get('/template', [InspectionItemController::class, 'downloadTemplate'])->name('api.v1.catalogs.inspection-items.template');
+                Route::post('/bulk', [InspectionItemController::class, 'bulkStore'])->name('api.v1.catalogs.inspection-items.bulk');
+                Route::post('/import', [InspectionItemController::class, 'importExcel'])->name('api.v1.catalogs.inspection-items.import');
                 Route::get('/{uuid}', [InspectionItemController::class, 'show'])->name('api.v1.catalogs.inspection-items.show');
                 Route::post('/', [InspectionItemController::class, 'store'])->name('api.v1.catalogs.inspection-items.store');
                 Route::put('/{uuid}', [InspectionItemController::class, 'update'])->name('api.v1.catalogs.inspection-items.update');
@@ -749,6 +757,22 @@ Route::prefix('v1')->group(function () {
                 Route::delete('/{uuid}', [OwnerDriverController::class, 'destroy'])->name('api.v1.fleet.owner-drivers.destroy');
             });
 
+            // Contratos de Alquiler de Vehículos
+            Route::prefix('rental-contracts')->group(function () {
+                Route::get('/', [RentalContractController::class, 'index'])->name('api.v1.fleet.rental-contracts.index')->middleware('permission:rental_contracts.index');
+                Route::post('/', [RentalContractController::class, 'store'])->name('api.v1.fleet.rental-contracts.store')->middleware('permission:rental_contracts.create');
+                Route::get('/{uuid}', [RentalContractController::class, 'show'])->name('api.v1.fleet.rental-contracts.show')->middleware('permission:rental_contracts.show');
+                Route::patch('/{uuid}/close', [RentalContractController::class, 'close'])->name('api.v1.fleet.rental-contracts.close')->middleware('permission:rental_contracts.update');
+                Route::get('/{uuid}/pdf', [RentalContractController::class, 'downloadPdf'])->name('api.v1.fleet.rental-contracts.pdf')->middleware('permission:rental_contracts.show');
+                Route::post('/{uuid}/discounts', [RentalContractController::class, 'storeDiscount'])->name('api.v1.fleet.rental-contracts.discounts.store')->middleware('permission:rental_installments.update');
+                Route::delete('/discounts/{discountUuid}', [RentalContractController::class, 'destroyDiscount'])->name('api.v1.fleet.rental-contracts.discounts.destroy')->middleware('permission:rental_installments.update');
+            });
+
+            // Cuotas de Contratos de Alquiler
+            Route::prefix('rental-installments')->group(function () {
+                Route::put('/{uuid}', [RentalContractController::class, 'updateInstallmentPayment'])->name('api.v1.fleet.rental-installments.update')->middleware('permission:rental_installments.update');
+            });
+
             // Mantenimiento
             Route::prefix('maintenances')->group(function () {
                 Route::get('/', [MaintenanceController::class, 'index'])->name('api.v1.fleet.maintenances.index');
@@ -970,11 +994,17 @@ Route::prefix('v1')->group(function () {
                 Route::get('/assigned-without-sheets', [ServiceDeliveryControlSheetController::class, 'assignedWithoutSheets'])->name('api.v1.fleet.service-delivery-control-sheets.assigned-without-sheets');
                 Route::get('/funcionarios/buscar', [ServiceDeliveryControlSheetController::class, 'buscarFuncionario'])->name('api.v1.fleet.service-delivery-control-sheets.funcionarios.buscar');
                 Route::post('/route-map-capture', [ServiceDeliveryControlSheetController::class, 'attachRouteMap'])->name('api.v1.fleet.service-delivery-control-sheets.route-map-capture');
+                // Relevo de conductor como cambio de turno: cierra el turno
+                // abierto y abre el entrante. Mueve la asignación del proyecto.
+                Route::post('/relay', [ServiceDeliveryControlSheetController::class, 'relay'])
+                    ->middleware(['permission:service_delivery_control_sheets.update', 'permission:projects.update'])
+                    ->name('api.v1.fleet.service-delivery-control-sheets.relay');
                 // SPEC-009: creación y actualización masiva por proyecto,
                 // antes de `/{uuid}` para que el wildcard no la capture.
                 Route::post('/bulk', [ServiceDeliveryControlSheetController::class, 'storeBulk'])->middleware('permission:service_delivery_control_sheets.create')->name('api.v1.fleet.service-delivery-control-sheets.bulk');
                 Route::put('/bulk', [ServiceDeliveryControlSheetController::class, 'updateBulk'])->middleware('permission:service_delivery_control_sheets.update')->name('api.v1.fleet.service-delivery-control-sheets.bulk-update');
                 Route::get('/monthly/pdf', [ServiceDeliveryControlSheetController::class, 'downloadMonthlyPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.monthly.pdf');
+                Route::get('/reports/proyecto/zip', [ServiceDeliveryControlSheetController::class, 'downloadProjectZip'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.proyecto.zip');
                 Route::get('/reports/{tipo}/pdf', [ServiceDeliveryControlSheetController::class, 'downloadReportPdf'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.pdf');
                 Route::get('/reports/{tipo}/excel', [ServiceDeliveryControlSheetController::class, 'downloadReportExcel'])->middleware('permission:service_delivery_control_sheets.history_pdf')->name('api.v1.fleet.service-delivery-control-sheets.reports.excel');
                 Route::post('/', [ServiceDeliveryControlSheetController::class, 'store'])->name('api.v1.fleet.service-delivery-control-sheets.store');
