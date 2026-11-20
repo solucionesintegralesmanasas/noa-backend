@@ -502,12 +502,13 @@ Commits `2d17798`, `5bc61f7`, `01898de`, `8b3ad2c` y `5145bc9`: `throttle` en la
 - **Sin commits de relleno:** los ajustes de `AGENTS.md` que documentan un cambio van en el mismo commit de ese cambio (nada de commits `docs` separados para este archivo ni correcciones sucesivas de la misma prosa), y la instalación o actualización de skills va en un único commit.
 - Tipos: feat, fix, refactor, perf, style, docs, test, build, ci, chore.
 
-## Agent skills
+## Agent skills y Setup de Flujos de Trabajo (Multi-Desarrollador)
 
-### Issue tracker
+En el proyecto trabajan varios desarrolladores con entornos y agentes propios. Para no acoplar el repositorio a las rutas o preferencias de una sola máquina:
 
-Issues live in this repo's GitHub Issues. See `docs/agents/issue-tracker.md`.
-
-### Domain docs
-
-Single-context layout. See `docs/agents/domain.md`.
+- **Skills base en el repositorio (`.opencode/skills/`):**
+  - `solo-espanol`: regla absoluta de idioma español.
+  - `vue-best-practices` y `find-skills`: catálogo base.
+  - **`noa-agent-setup` (`.opencode/skills/noa-agent-setup/SKILL.md`):** setup agnóstico del proyecto. Cada desarrollador (junto con su agente) debe invocar esta skill para diagnosticar los binarios y rutas de su máquina, definir su flujo de trabajo preferido (entrevista → spec → rondas → implementación → revisión en dos ejes → propuesta de commit) y generar sus propias skills locales fuera del repositorio (p. ej. en `../.agents/skills/`) respetando las directrices de este `AGENTS.md` y las `SPEC-002` a `SPEC-018`.
+- **Skills específicas de un dispositivo** (como atajos de PowerShell/Windows, rutas locales o automatizaciones de carpetas locales/Excel) deben vivir únicamente en la carpeta local no versionada del desarrollador (`../.agents/skills/`) y nunca subirse al repositorio.
+- **Referencias de dominio y seguimiento:** ver `docs/agents/issue-tracker.md` (`docs/specs/SPEC-0xx-*.md`, sin `gh` CLI) y `docs/agents/domain.md`.
