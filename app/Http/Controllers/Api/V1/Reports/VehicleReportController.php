@@ -69,6 +69,7 @@ class VehicleReportController extends Controller
             new OA\Parameter(name: 'ownership_type', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['todos', 'propios', 'terceros'])),
             new OA\Parameter(name: 'service_type', in: 'query', required: false, schema: new OA\Schema(type: 'string', enum: ['TODOS', 'PUBLICO', 'PARTICULAR'])),
             new OA\Parameter(name: 'third_party_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
+            new OA\Parameter(name: 'project_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'branch_uuid', in: 'query', required: false, schema: new OA\Schema(type: 'string', format: 'uuid')),
             new OA\Parameter(name: 'search', in: 'query', required: false, schema: new OA\Schema(type: 'string')),
         ],

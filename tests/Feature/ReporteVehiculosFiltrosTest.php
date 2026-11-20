@@ -521,4 +521,90 @@ class ReporteVehiculosFiltrosTest extends TestCase
         $this->assertContains('DIC050', $eventPlates, 'Debe incluir eventos de los días colindantes posteriores (Diciembre)');
         $this->assertGreaterThanOrEqual(2, $res['kpis']['total_vehicles'], 'El KPI de total_vehicles no debe truncarse por la ventana');
     }
+
+    public function test_calendario_filtra_por_proyecto_y_respeta_asignacion_activa(): void
+    {
+        Sanctum::actingAs($this->user, ['*']);
+
+        $conductorUuid = $this->insertar('third_parties', [
+            'company_uuid' => $this->empresaUuid,
+            'document_number' => '10101010',
+            'first_name' => 'Carlos',
+            'last_name' => 'Conductor',
+            'person_type' => 'NATURAL',
+        ]);
+
+        $proyecto1 = $this->insertar('projects', [
+            'company_uuid' => $this->empresaUuid,
+            'project_name' => 'Proyecto Norte',
+        ]);
+
+        $proyecto2 = $this->insertar('projects', [
+            'company_uuid' => $this->empresaUuid,
+            'project_name' => 'Proyecto Sur',
+        ]);
+
+        $vP1Activo = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'PRJ101',
+            'type_of_service' => 'PUBLICO',
+            'is_active' => true,
+        ]);
+
+        $vP2Activo = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'PRJ202',
+            'type_of_service' => 'PUBLICO',
+            'is_active' => true,
+        ]);
+
+        $vP1Inactivo = $this->insertar('vehicles', [
+            'company_uuid' => $this->empresaUuid,
+            'vehicle_license_plate' => 'PRJ303',
+            'type_of_service' => 'PUBLICO',
+            'is_active' => true,
+        ]);
+
+        // Asignaciones de proyecto
+        $this->insertar('project_driver_vehicles', [
+            'project_uuid' => $proyecto1,
+            'vehicle_uuid' => $vP1Activo,
+            'third_party_uuid' => $conductorUuid,
+            'is_active' => true,
+        ]);
+        $this->insertar('project_driver_vehicles', [
+            'project_uuid' => $proyecto2,
+            'vehicle_uuid' => $vP2Activo,
+            'third_party_uuid' => $conductorUuid,
+            'is_active' => true,
+        ]);
+        $this->insertar('project_driver_vehicles', [
+            'project_uuid' => $proyecto1,
+            'vehicle_uuid' => $vP1Inactivo,
+            'third_party_uuid' => $conductorUuid,
+            'is_active' => false,
+        ]);
+
+        foreach ([$vP1Activo, $vP2Activo, $vP1Inactivo] as $idx => $vUuid) {
+            $this->insertar('vehicle_documents', [
+                'company_uuid' => $this->empresaUuid,
+                'vehicle_uuid' => $vUuid,
+                'document_type' => 'SOAT',
+                'expiry_date' => '2026-11-1'.($idx + 1),
+                'status' => 'VIGENTE',
+            ]);
+        }
+
+        $res = $this->withHeaders([
+            'X-Company-UUID' => $this->empresaUuid,
+        ])->getJson("/api/v1/reports/vehicles/calendar?month=11&year=2026&project_uuid={$proyecto1}");
+
+        $res->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.kpis.total_vehicles', 1)
+            ->assertJsonPath('data.category_counts.ALL', 1);
+
+        $placas = collect($res->json('data.events'))->pluck('vehicle_license_plate')->all();
+        $this->assertSame(['PRJ101'], $placas);
+    }
 }

@@ -100,6 +100,15 @@ class VehicleReportService extends BaseService
             });
         }
 
+        // Filtro transversal por proyecto (vehículos con asignación activa en el proyecto)
+        if (! empty($filtros['project_uuid'])) {
+            $projectUuid = $filtros['project_uuid'];
+            $query->whereHas('driverVehicleAssignments', function (Builder $q) use ($projectUuid) {
+                $q->where('project_uuid', $projectUuid)
+                    ->where('is_active', 1);
+            });
+        }
+
         // Acotación opcional por mes y año (usada en reportes y exportaciones del calendario)
         if (! empty($filtros['month']) && ! empty($filtros['year'])) {
             $m = (int) $filtros['month'];
@@ -182,10 +191,7 @@ class VehicleReportService extends BaseService
                 break;
 
             case self::FILTER_PROJECT:
-                if (! empty($filtros['project_uuid'])) {
-                    $uuid = $filtros['project_uuid'];
-                    $query->whereHas('driverVehicleAssignments', fn($q) => $q->where('project_uuid', $uuid)->where('is_active', 1));
-                }
+                // Aplicado de forma transversal y unificada en baseQuery
                 break;
 
             case self::FILTER_OPERATION_CARD:
